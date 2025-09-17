@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "TransfaApp",
+    "slug": "transfa-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "main": "index.js",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.transfaapp"
+    },
+    "android": {
+      "package": "com.transfaapp"
+    },
+    "plugins": [
+      "expo-secure-store"
+    ]
+  }
+}
