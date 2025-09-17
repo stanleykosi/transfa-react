@@ -12,6 +12,7 @@ A React Native application built with TypeScript.
 ## Installation
 
 1. Install dependencies:
+
 ```bash
 npm install
 ```
@@ -22,6 +23,7 @@ npm install
 
 1. Make sure you have an Android emulator running or a device connected
 2. Run the app:
+
 ```bash
 npm run android
 # or
@@ -31,21 +33,25 @@ npx react-native run-android
 ### iOS (macOS only)
 
 1. Navigate to the iOS directory:
+
 ```bash
 cd ios
 ```
 
 2. Install CocoaPods dependencies:
+
 ```bash
 pod install
 ```
 
 3. Go back to the root directory:
+
 ```bash
 cd ..
 ```
 
 4. Run the app:
+
 ```bash
 npm run ios
 # or
@@ -63,6 +69,7 @@ npx react-native run-ios
 ## Development
 
 The app uses:
+
 - React Native 0.74.1
 - TypeScript
 - React 19.1.1
@@ -73,13 +80,17 @@ The app uses:
 ## Troubleshooting
 
 ### WSL2 Users
+
 If you're developing on WSL2 (Windows Subsystem for Linux):
+
 - Android development works fine
 - iOS development requires macOS - you'll need to use a Mac or macOS VM for iOS development
 - The project structure is ready for iOS development when you have access to macOS
 
 ### Common Issues
+
 1. If you get Metro bundler issues, try:
+
 ```bash
 npx react-native start --reset-cache
 ```

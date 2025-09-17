@@ -6,9 +6,7 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "main": "index.js",
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.transfaapp"
@@ -16,8 +14,6 @@
     "android": {
       "package": "com.transfaapp"
     },
-    "plugins": [
-      "expo-secure-store"
-    ]
+    "plugins": ["expo-secure-store"]
   }
 }

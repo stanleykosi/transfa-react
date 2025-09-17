@@ -8,6 +8,7 @@ This directory contains the app assets. You'll need to add the following files:
 - `favicon.png` - Web favicon
 
 You can generate these using tools like:
+
 - Expo's asset generation tools
 - Online icon generators
 - Design tools like Figma, Sketch, or Canva

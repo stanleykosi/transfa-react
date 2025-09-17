@@ -38,12 +38,12 @@ function App(): React.JSX.Element {
               This is your React Native app with Expo. You can now develop for both iOS and Android
               from your WSL2 environment.
             </Text>
-            
+
             <View style={styles.buttonContainer}>
               <TouchableOpacity style={styles.button} onPress={handleButtonPress}>
                 <Text style={styles.buttonText}>Count: {count}</Text>
               </TouchableOpacity>
-              
+
               <TouchableOpacity style={[styles.button, styles.alertButton]} onPress={showAlert}>
                 <Text style={styles.buttonText}>Show Alert</Text>
               </TouchableOpacity>
