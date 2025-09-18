@@ -1,158 +1,97 @@
-import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, useColorScheme, View, Alert } from 'react-native';
-import { StatusBar } from 'expo-status-bar';
-import ScreenWrapper from '@/components/ScreenWrapper';
-import PrimaryButton from '@/components/PrimaryButton';
-import FormInput from '@/components/FormInput';
-import Card from '@/components/Card';
-import { theme } from '@/constants/theme';
+/**
+ * @description
+ * This is the root component of the Transfa application. It sets up all the
+ * essential providers that wrap the entire app.
+ *
+ * @dependencies
+ * - react: Core React library.
+ * - @clerk/clerk-expo: Provides the ClerkProvider for handling authentication state.
+ * - @tanstack/react-query: Provides QueryClient and QueryClientProvider for server state management.
+ * - @react-navigation/native: Provides the NavigationContainer to manage the app's navigation stack.
+ * - expo-secure-store: Used by Clerk for secure token storage.
+ * - RootNavigator: The main navigator component that decides which screen stack to show.
+ *
+ * @notes
+ * - The `ClerkProvider` requires the `publishableKey` from your Clerk dashboard.
+ * - The `tokenCache` is configured to use `expo-secure-store` for securely persisting
+ *   authentication tokens on the device, as per security best practices.
+ * - The `QueryClient` is instantiated here and passed to the `QueryClientProvider`,
+ *   making server state management available throughout the component tree.
+ */
 
-function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  const [count, setCount] = useState(0);
-  const [message, setMessage] = useState('Welcome to TransfaApp!');
-  const [email, setEmail] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+import React from 'react';
+import { ClerkProvider } from '@clerk/clerk-expo';
+import { Platform } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { NavigationContainer } from '@react-navigation/native';
+import RootNavigator from '@/navigation/RootNavigator';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-  const handleButtonPress = () => {
-    setCount(count + 1);
-    setMessage(`Button pressed ${count + 1} times!`);
-  };
+// Initialize the QueryClient for TanStack Query
+const queryClient = new QueryClient();
 
-  const showAlert = () => {
-    Alert.alert('Test Alert', 'This is a test alert from your React Native app!');
-  };
+// Platform-specific token cache implementation for Clerk.
+// Uses expo-secure-store for mobile platforms and localStorage for web.
+const tokenCache = {
+  async getToken(key: string) {
+    try {
+      if (Platform.OS === 'web') {
+        // Use localStorage for web platform
+        return localStorage.getItem(key);
+      } else {
+        // Use expo-secure-store for mobile platforms
+        return SecureStore.getItemAsync(key);
+      }
+    } catch (err) {
+      // Errors are logged but not thrown, allowing the app to proceed
+      // in a degraded state if secure store is unavailable.
+      console.error('Failed to get token from storage', err);
+      return null;
+    }
+  },
+  async saveToken(key: string, value: string) {
+    try {
+      if (Platform.OS === 'web') {
+        // Use localStorage for web platform
+        localStorage.setItem(key, value);
+      } else {
+        // Use expo-secure-store for mobile platforms
+        return SecureStore.setItemAsync(key, value);
+      }
+    } catch (err) {
+      // Log errors during token saving.
+      console.error('Failed to save token to storage', err);
+    }
+  },
+};
 
-  const handleSubmit = async () => {
-    setIsLoading(true);
-    // Simulate API call
-    setTimeout(() => {
-      setIsLoading(false);
-      Alert.alert('Success', 'Form submitted successfully!');
-    }, 2000);
-  };
+// Retrieve the Clerk Publishable Key from environment variables.
+// It's crucial to have this in a .env file and not hardcoded.
+const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
-  return (
-    <ScreenWrapper>
-      <StatusBar style={isDarkMode ? 'light' : 'dark'} />
-      <ScrollView contentInsetAdjustmentBehavior="automatic" style={styles.scrollView}>
-        <View style={styles.body}>
-          <View style={styles.sectionContainer}>
-            <Text style={[styles.sectionTitle, { color: isDarkMode ? '#fff' : '#000' }]}>
-              {message}
-            </Text>
-            <Text style={[styles.sectionDescription, { color: isDarkMode ? '#ccc' : '#333' }]}>
-              This is your React Native app with Expo. You can now develop for both iOS and Android
-              from your WSL2 environment.
-            </Text>
+// For development purposes, we'll use a placeholder key if none is provided
+// In production, this should always be set
+const PUBLISHABLE_KEY = CLERK_PUBLISHABLE_KEY || 'pk_test_placeholder_key_for_development';
 
-            <Card style={styles.card}>
-              <Text style={styles.cardTitle}>Design System Components</Text>
-              <Text style={styles.cardDescription}>
-                Testing our new design system components with consistent styling.
-              </Text>
-
-              <FormInput
-                label="Email Address"
-                value={email}
-                onChangeText={setEmail}
-                placeholder="Enter your email"
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-
-              <View style={styles.buttonContainer}>
-                <PrimaryButton
-                  title="Count: {count}"
-                  onPress={handleButtonPress}
-                  style={styles.button}
-                />
-
-                <PrimaryButton
-                  title="Show Alert"
-                  onPress={showAlert}
-                  style={[styles.button, styles.alertButton]}
-                />
-
-                <PrimaryButton
-                  title="Submit Form"
-                  onPress={handleSubmit}
-                  isLoading={isLoading}
-                  style={styles.submitButton}
-                />
-              </View>
-            </Card>
-
-            <Text style={[styles.sectionDescription, { color: isDarkMode ? '#ccc' : '#333' }]}>
-              ✅ Web development working
-            </Text>
-            <Text style={[styles.sectionDescription, { color: isDarkMode ? '#ccc' : '#333' }]}>
-              ✅ Mobile development ready
-            </Text>
-            <Text style={[styles.sectionDescription, { color: isDarkMode ? '#ccc' : '#333' }]}>
-              ✅ Clerk authentication ready
-            </Text>
-            <Text style={[styles.sectionDescription, { color: isDarkMode ? '#ccc' : '#333' }]}>
-              ✅ Design system implemented
-            </Text>
-          </View>
-        </View>
-      </ScrollView>
-    </ScreenWrapper>
+if (!CLERK_PUBLISHABLE_KEY) {
+  console.warn(
+    '⚠️  Missing Clerk Publishable Key. Please set EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY in your .env file for full functionality.'
   );
 }
 
-const styles = StyleSheet.create({
-  scrollView: {
-    backgroundColor: theme.colors.background,
-  },
-  body: {
-    backgroundColor: theme.colors.background,
-  },
-  sectionContainer: {
-    marginTop: theme.spacing.s32,
-  },
-  sectionTitle: {
-    fontSize: theme.fontSizes['2xl'],
-    fontWeight: theme.fontWeights.semibold,
-    marginBottom: theme.spacing.s16,
-    color: theme.colors.textPrimary,
-  },
-  sectionDescription: {
-    marginTop: theme.spacing.s8,
-    fontSize: theme.fontSizes.base,
-    fontWeight: theme.fontWeights.normal,
-    lineHeight: 24,
-    color: theme.colors.textSecondary,
-  },
-  card: {
-    marginTop: theme.spacing.s24,
-    marginBottom: theme.spacing.s24,
-  },
-  cardTitle: {
-    fontSize: theme.fontSizes.lg,
-    fontWeight: theme.fontWeights.semibold,
-    color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.s8,
-  },
-  cardDescription: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.s16,
-  },
-  buttonContainer: {
-    marginTop: theme.spacing.s16,
-    gap: theme.spacing.s12,
-  },
-  button: {
-    marginBottom: theme.spacing.s8,
-  },
-  alertButton: {
-    backgroundColor: theme.colors.error,
-  },
-  submitButton: {
-    backgroundColor: theme.colors.secondary,
-  },
-});
+function App(): React.JSX.Element {
+  return (
+    <ClerkProvider tokenCache={tokenCache} publishableKey={PUBLISHABLE_KEY}>
+      <QueryClientProvider client={queryClient}>
+        <SafeAreaProvider>
+          <NavigationContainer>
+            <RootNavigator />
+          </NavigationContainer>
+        </SafeAreaProvider>
+      </QueryClientProvider>
+    </ClerkProvider>
+  );
+}
 
 export default App;
