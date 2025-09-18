@@ -18,22 +18,13 @@
  */
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Alert, TouchableOpacity, Platform } from 'react-native';
-import { useSignIn } from '@clerk/clerk-expo';
+import { useSignIn } from '@/hooks/useSignIn';
 import { useNavigation } from '@react-navigation/native';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import FormInput from '@/components/FormInput';
 import PrimaryButton from '@/components/PrimaryButton';
+import { SignIn as ClerkSignIn } from '@/components/ClerkComponents';
 import { theme } from '@/constants/theme';
-
-// Import web-specific components
-let SignInWeb: any = null;
-if (Platform.OS === 'web') {
-  try {
-    SignInWeb = require('@clerk/clerk-expo/web').SignIn;
-  } catch (e) {
-    console.log('Web SignIn component not available');
-  }
-}
 
 const SignInScreen = () => {
   const { signIn, setActive, isLoaded } = useSignIn();
@@ -59,12 +50,12 @@ const SignInScreen = () => {
     }
   };
 
-  // Use web-specific SignIn component if available
-  if (Platform.OS === 'web' && SignInWeb) {
+  // Use platform-specific SignIn component for web
+  if (Platform.OS === 'web') {
     return (
       <ScreenWrapper>
         <View style={styles.container}>
-          <SignInWeb />
+          <ClerkSignIn />
         </View>
       </ScreenWrapper>
     );

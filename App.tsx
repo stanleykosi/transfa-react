@@ -20,51 +20,15 @@
  */
 
 import React from 'react';
-import { ClerkProvider } from '@clerk/clerk-expo';
-import { Platform } from 'react-native';
-import * as SecureStore from 'expo-secure-store';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { NavigationContainer } from '@react-navigation/native';
 import RootNavigator from '@/navigation/RootNavigator';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import ClerkProvider from '@/providers/ClerkProvider';
 
 // Initialize the QueryClient for TanStack Query
 const queryClient = new QueryClient();
 
-// Platform-specific token cache implementation for Clerk.
-// Uses expo-secure-store for mobile platforms and localStorage for web.
-const tokenCache = {
-  async getToken(key: string) {
-    try {
-      if (Platform.OS === 'web') {
-        // Use localStorage for web platform
-        return localStorage.getItem(key);
-      } else {
-        // Use expo-secure-store for mobile platforms
-        return SecureStore.getItemAsync(key);
-      }
-    } catch (err) {
-      // Errors are logged but not thrown, allowing the app to proceed
-      // in a degraded state if secure store is unavailable.
-      console.error('Failed to get token from storage', err);
-      return null;
-    }
-  },
-  async saveToken(key: string, value: string) {
-    try {
-      if (Platform.OS === 'web') {
-        // Use localStorage for web platform
-        localStorage.setItem(key, value);
-      } else {
-        // Use expo-secure-store for mobile platforms
-        return SecureStore.setItemAsync(key, value);
-      }
-    } catch (err) {
-      // Log errors during token saving.
-      console.error('Failed to save token to storage', err);
-    }
-  },
-};
 
 // Retrieve the Clerk Publishable Key from environment variables.
 // It's crucial to have this in a .env file and not hardcoded.
@@ -81,35 +45,8 @@ if (!CLERK_PUBLISHABLE_KEY) {
 }
 
 function App(): React.JSX.Element {
-  // For web, Clerk handles session management automatically (no tokenCache needed)
-  if (Platform.OS === 'web') {
-    return (
-      <ClerkProvider
-        publishableKey={PUBLISHABLE_KEY}
-        // Force web mode for Clerk
-        appearance={{
-          baseTheme: undefined,
-        }}
-        // Ensure web-specific configuration
-        {...(Platform.OS === 'web' &&
-          {
-            // Web-specific props
-          })}
-      >
-        <QueryClientProvider client={queryClient}>
-          <SafeAreaProvider>
-            <NavigationContainer>
-              <RootNavigator />
-            </NavigationContainer>
-          </SafeAreaProvider>
-        </QueryClientProvider>
-      </ClerkProvider>
-    );
-  }
-
-  // Mobile configuration with token cache (required for native platforms)
   return (
-    <ClerkProvider tokenCache={tokenCache} publishableKey={PUBLISHABLE_KEY}>
+    <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
       <QueryClientProvider client={queryClient}>
         <SafeAreaProvider>
           <NavigationContainer>

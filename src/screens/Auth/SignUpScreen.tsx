@@ -20,22 +20,13 @@
  */
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, Alert, TouchableOpacity, Platform } from 'react-native';
-import { useSignUp } from '@clerk/clerk-expo';
+import { useSignUp } from '@/hooks/useSignUp';
 import { useNavigation } from '@react-navigation/native';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import FormInput from '@/components/FormInput';
 import PrimaryButton from '@/components/PrimaryButton';
+import { SignUp as ClerkSignUp } from '@/components/ClerkComponents';
 import { theme } from '@/constants/theme';
-
-// Import web-specific components
-let SignUpWeb: any = null;
-if (Platform.OS === 'web') {
-  try {
-    SignUpWeb = require('@clerk/clerk-expo/web').SignUp;
-  } catch (e) {
-    console.log('Web SignUp component not available');
-  }
-}
 
 const SignUpScreen = () => {
   const { isLoaded, signUp, setActive } = useSignUp();
@@ -79,12 +70,12 @@ const SignUpScreen = () => {
     }
   };
 
-  // Use web-specific SignUp component if available
-  if (Platform.OS === 'web' && SignUpWeb) {
+  // Use platform-specific SignUp component for web
+  if (Platform.OS === 'web') {
     return (
       <ScreenWrapper>
         <View style={styles.container}>
-          <SignUpWeb />
+          <ClerkSignUp />
         </View>
       </ScreenWrapper>
     );

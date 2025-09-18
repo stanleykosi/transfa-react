@@ -22,7 +22,7 @@
 
 import React from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { useAuth } from '@clerk/clerk-expo';
+import { useAuth } from '@/hooks/useAuth';
 import AuthStack from './AuthStack';
 import AppStack from './AppStack';
 import { theme } from '@/constants/theme';
