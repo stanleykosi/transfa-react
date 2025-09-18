@@ -19,6 +19,9 @@ import * as SecureStore from 'expo-secure-store';
 import { ClerkProvider as ClerkExpoProvider } from '@clerk/clerk-expo';
 import { ClerkProvider as ClerkReactProvider } from '@clerk/clerk-react';
 
+// Appearance configuration
+import { getClerkAppearance } from '@/config/clerkAppearance';
+
 // Platform-specific token cache implementation for mobile
 const tokenCache = {
   async getToken(key: string) {
@@ -44,18 +47,27 @@ interface ClerkProviderProps {
 }
 
 const ClerkProvider: React.FC<ClerkProviderProps> = ({ children, publishableKey }) => {
+  const appearance = getClerkAppearance();
+
   if (Platform.OS === 'web') {
-    // Use @clerk/clerk-react for web platform
+    // Use @clerk/clerk-react for web platform with custom appearance
     return (
-      <ClerkReactProvider publishableKey={publishableKey}>
+      <ClerkReactProvider
+        publishableKey={publishableKey}
+        appearance={appearance}
+      >
         {children}
       </ClerkReactProvider>
     );
   }
 
-  // Use @clerk/clerk-expo for mobile platforms with token cache
+  // Use @clerk/clerk-expo for mobile platforms with token cache and custom appearance
   return (
-    <ClerkExpoProvider tokenCache={tokenCache} publishableKey={publishableKey}>
+    <ClerkExpoProvider
+      tokenCache={tokenCache}
+      publishableKey={publishableKey}
+      appearance={appearance}
+    >
       {children}
     </ClerkExpoProvider>
   );
