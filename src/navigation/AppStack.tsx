@@ -1,77 +1,63 @@
 /**
  * @description
- * This file defines the main application navigation stack for authenticated users.
- * It uses a bottom tab navigator to provide access to the core sections of the app.
+ * This file defines the primary navigation stack for authenticated users.
+ * It uses a Native Stack Navigator to manage screens that are accessible
+ * after a user has successfully logged in. This stack serves as a container
+ * for the main tab navigator and other full-screen flows like user onboarding.
  *
  * @dependencies
- * - @react-navigation/bottom-tabs: For creating the tab-based navigator.
- * - @expo/vector-icons: Provides the icon set (Ionicons) used in the tab bar.
- * - Screens: Imports the main screens for the application.
- * - @/constants/theme: For consistent styling of the tab bar.
+ * - @react-navigation/native-stack: For creating the stack navigator.
+ * - AppTabs: The bottom tab navigator component for the app's main sections.
+ * - OnboardingFormScreen: The screen for new users to complete their profile.
  *
  * @notes
- * - Each tab is configured with a specific icon and label.
- * - The active and inactive tab colors are set from our global theme for consistency.
+ * - The main `AppTabs` screen has its header hidden to provide a seamless
+ *   transition from the stack to the tabbed interface.
+ * - This structure allows us to push screens like `OnboardingForm` over the
+ *   entire tab bar, which is ideal for modal or sequential flows post-authentication.
  */
 
 import React from 'react';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Ionicons } from '@expo/vector-icons';
-import HomeScreen from '@/screens/Home/HomeScreen';
-import PaymentsScreen from '@/screens/Payments/PaymentsScreen';
-import AnalyticsScreen from '@/screens/Analytics/AnalyticsScreen';
-import ProfileScreen from '@/screens/Profile/ProfileScreen';
-import { theme } from '@/constants/theme';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import AppTabs, { AppTabsParamList } from './AppTabs';
+import OnboardingFormScreen from '@/screens/Onboarding/OnboardingFormScreen';
+import { NavigatorScreenParams } from '@react-navigation/native';
 
 // Define the parameter list for the AppStack routes for type safety.
+// It includes the AppTabs (as a nested navigator) and the OnboardingForm.
 export type AppStackParamList = {
-  Home: undefined;
-  Payments: undefined;
-  Analytics: undefined;
-  Profile: undefined;
+  AppTabs: NavigatorScreenParams<AppTabsParamList>; // Nested navigator
+  OnboardingForm: undefined;
 };
 
-const Tab = createBottomTabNavigator<AppStackParamList>();
-
-// Helper function to get icon name based on route and focus state
-const getIconName = (
-  routeName: string,
-  focused: boolean
-): React.ComponentProps<typeof Ionicons>['name'] => {
-  switch (routeName) {
-    case 'Home':
-      return focused ? 'home' : 'home-outline';
-    case 'Payments':
-      return focused ? 'swap-horizontal' : 'swap-horizontal-outline';
-    case 'Analytics':
-      return focused ? 'stats-chart' : 'stats-chart-outline';
-    case 'Profile':
-      return focused ? 'person' : 'person-outline';
-    default:
-      return 'ellipse'; // Default fallback icon
-  }
-};
-
-// Define the tab bar icon component outside of the AppStack component
-const TabBarIcon = React.memo(({ route, focused, color, size }: any) => (
-  <Ionicons name={getIconName(route.name, focused)} size={size} color={color} />
-));
+const Stack = createNativeStackNavigator<AppStackParamList>();
 
 const AppStack = () => {
+  // TODO: In a later step, add logic here to check if the user needs onboarding.
+  // This would involve an API call to a `/users/me` endpoint.
+  // const { data: user, isLoading } = useQuery(['currentUser']);
+  // const needsOnboarding = user && !user.onboardingCompleted;
+  // Based on `needsOnboarding`, the initialRouteName could be conditionally set,
+  // or a `useEffect` could trigger a navigation.replace action.
+  const initialRouteName = 'OnboardingForm'; // For testing the onboarding flow
+
   return (
-    <Tab.Navigator
-      screenOptions={{
-        tabBarIcon: TabBarIcon,
-        tabBarActiveTintColor: theme.colors.primary,
-        tabBarInactiveTintColor: theme.colors.textSecondary,
-        headerShown: false, // Hiding default headers to use custom ones per screen
-      }}
-    >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Payments" component={PaymentsScreen} />
-      <Tab.Screen name="Analytics" component={AnalyticsScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
-    </Tab.Navigator>
+    <Stack.Navigator initialRouteName={initialRouteName}>
+      <Stack.Screen
+        name="AppTabs"
+        component={AppTabs}
+        options={{ headerShown: false }} // The tab navigator will manage its own headers.
+      />
+      <Stack.Screen
+        name="OnboardingForm"
+        component={OnboardingFormScreen}
+        options={{
+          title: 'Complete Your Profile',
+          headerBackVisible: false, // Prevent going back from onboarding
+          gestureEnabled: false, // Disable swipe gesture
+        }}
+      />
+    </Stack.Navigator>
   );
 };
 

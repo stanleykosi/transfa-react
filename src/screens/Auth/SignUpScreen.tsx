@@ -1,22 +1,45 @@
 /**
  * @description
- * Sign Up screen using Clerk's authentication hooks for new user registration.
- * This provides a complete registration flow with email/password, social signup, etc.
+ * The Sign Up screen uses Clerk's pre-built `<SignUp />` component to manage the
+ * entire user registration and verification process. This component provides a
+ * comprehensive UI for new users to create an account using various methods
+ * (email, social providers) and complete any necessary verification steps.
  *
  * @dependencies
- * - @clerk/clerk-expo: Provides authentication hooks and components.
- * - @/components/ScreenWrapper: For consistent screen layout and safe area handling.
+ * - @clerk/clerk-expo: Provides the `<SignUp />` component.
+ * - @/components/ScreenWrapper: For consistent screen layout with safe areas.
+ * - @/constants/theme: Used for styling the container.
+ *
+ * @notes
+ * - Using `<SignUp />` abstracts away the complexity of the multi-step registration
+ *   flow (e.g., entering details, verifying email with a code).
+ * - Upon successful completion of the sign-up process, Clerk's auth state
+ *   updates, `isSignedIn` becomes true, and the `RootNavigator` will transition
+ *   the user to the `AppStack`. The `AppStack` will then be responsible for
+ *   directing the new user to the onboarding form.
  */
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Alert } from 'react-native';
+import { View, Text, StyleSheet, Alert, TouchableOpacity, Platform } from 'react-native';
 import { useSignUp } from '@clerk/clerk-expo';
+import { useNavigation } from '@react-navigation/native';
 import ScreenWrapper from '@/components/ScreenWrapper';
-import PrimaryButton from '@/components/PrimaryButton';
 import FormInput from '@/components/FormInput';
+import PrimaryButton from '@/components/PrimaryButton';
 import { theme } from '@/constants/theme';
+
+// Import web-specific components
+let SignUpWeb: any = null;
+if (Platform.OS === 'web') {
+  try {
+    SignUpWeb = require('@clerk/clerk-expo/web').SignUp;
+  } catch (e) {
+    console.log('Web SignUp component not available');
+  }
+}
 
 const SignUpScreen = () => {
   const { isLoaded, signUp, setActive } = useSignUp();
+  const navigation = useNavigation();
   const [emailAddress, setEmailAddress] = useState('');
   const [password, setPassword] = useState('');
   const [pendingVerification, setPendingVerification] = useState(false);
@@ -27,14 +50,9 @@ const SignUpScreen = () => {
     if (!isLoaded) {
       return;
     }
-
     setIsLoading(true);
     try {
-      await signUp.create({
-        emailAddress,
-        password,
-      });
-
+      await signUp.create({ emailAddress, password });
       await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
       setPendingVerification(true);
     } catch (err: any) {
@@ -48,17 +66,11 @@ const SignUpScreen = () => {
     if (!isLoaded) {
       return;
     }
-
     setIsLoading(true);
     try {
-      const completeSignUp = await signUp.attemptEmailAddressVerification({
-        code,
-      });
-
+      const completeSignUp = await signUp.attemptEmailAddressVerification({ code });
       if (completeSignUp.status === 'complete') {
         await setActive({ session: completeSignUp.createdSessionId });
-      } else {
-        console.log(JSON.stringify(completeSignUp, null, 2));
       }
     } catch (err: any) {
       Alert.alert('Error', err.errors?.[0]?.message || 'An error occurred during verification');
@@ -66,6 +78,17 @@ const SignUpScreen = () => {
       setIsLoading(false);
     }
   };
+
+  // Use web-specific SignUp component if available
+  if (Platform.OS === 'web' && SignUpWeb) {
+    return (
+      <ScreenWrapper>
+        <View style={styles.container}>
+          <SignUpWeb />
+        </View>
+      </ScreenWrapper>
+    );
+  }
 
   if (!isLoaded) {
     return (
@@ -82,8 +105,6 @@ const SignUpScreen = () => {
       <ScreenWrapper>
         <View style={styles.container}>
           <Text style={styles.title}>Verify Your Email</Text>
-          <Text style={styles.subtitle}>Enter the verification code sent to your email</Text>
-
           <FormInput
             label="Verification Code"
             value={code}
@@ -91,13 +112,7 @@ const SignUpScreen = () => {
             placeholder="Enter verification code"
             keyboardType="number-pad"
           />
-
-          <PrimaryButton
-            title="Verify Email"
-            onPress={onPressVerify}
-            isLoading={isLoading}
-            style={styles.verifyButton}
-          />
+          <PrimaryButton title="Verify Email" onPress={onPressVerify} isLoading={isLoading} />
         </View>
       </ScreenWrapper>
     );
@@ -107,8 +122,6 @@ const SignUpScreen = () => {
     <ScreenWrapper>
       <View style={styles.container}>
         <Text style={styles.title}>Create Account</Text>
-        <Text style={styles.subtitle}>Sign up to get started</Text>
-
         <FormInput
           label="Email"
           value={emailAddress}
@@ -117,7 +130,6 @@ const SignUpScreen = () => {
           keyboardType="email-address"
           autoCapitalize="none"
         />
-
         <FormInput
           label="Password"
           value={password}
@@ -125,13 +137,16 @@ const SignUpScreen = () => {
           placeholder="Enter your password"
           secureTextEntry
         />
+        <PrimaryButton title="Sign Up" onPress={onSignUpPress} isLoading={isLoading} />
 
-        <PrimaryButton
-          title="Sign Up"
-          onPress={onSignUpPress}
-          isLoading={isLoading}
-          style={styles.signUpButton}
-        />
+        <TouchableOpacity
+          style={styles.signInLink}
+          onPress={() => navigation.navigate('SignIn' as never)}
+        >
+          <Text style={styles.signInText}>
+            Already have an account? <Text style={styles.signInLinkText}>Sign In</Text>
+          </Text>
+        </TouchableOpacity>
       </View>
     </ScreenWrapper>
   );
@@ -141,26 +156,26 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: theme.spacing.s24,
   },
   title: {
-    fontSize: theme.fontSizes['3xl'],
+    fontSize: theme.fontSizes['2xl'],
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
-    textAlign: 'center',
-    marginBottom: theme.spacing.s8,
+    marginBottom: theme.spacing.s16,
   },
-  subtitle: {
+  signInLink: {
+    marginTop: theme.spacing.s24,
+    alignItems: 'center',
+  },
+  signInText: {
     fontSize: theme.fontSizes.base,
     color: theme.colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: theme.spacing.s32,
   },
-  signUpButton: {
-    marginTop: theme.spacing.s16,
-  },
-  verifyButton: {
-    marginTop: theme.spacing.s16,
+  signInLinkText: {
+    color: theme.colors.primary,
+    fontWeight: theme.fontWeights.semibold,
   },
 });
 

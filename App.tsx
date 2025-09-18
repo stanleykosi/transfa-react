@@ -81,6 +81,33 @@ if (!CLERK_PUBLISHABLE_KEY) {
 }
 
 function App(): React.JSX.Element {
+  // For web, Clerk handles session management automatically (no tokenCache needed)
+  if (Platform.OS === 'web') {
+    return (
+      <ClerkProvider
+        publishableKey={PUBLISHABLE_KEY}
+        // Force web mode for Clerk
+        appearance={{
+          baseTheme: undefined,
+        }}
+        // Ensure web-specific configuration
+        {...(Platform.OS === 'web' &&
+          {
+            // Web-specific props
+          })}
+      >
+        <QueryClientProvider client={queryClient}>
+          <SafeAreaProvider>
+            <NavigationContainer>
+              <RootNavigator />
+            </NavigationContainer>
+          </SafeAreaProvider>
+        </QueryClientProvider>
+      </ClerkProvider>
+    );
+  }
+
+  // Mobile configuration with token cache (required for native platforms)
   return (
     <ClerkProvider tokenCache={tokenCache} publishableKey={PUBLISHABLE_KEY}>
       <QueryClientProvider client={queryClient}>
