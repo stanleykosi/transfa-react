@@ -1,0 +1,143 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: transfa
+      POSTGRES_USER: transfa_user
+      POSTGRES_PASSWORD: transfa_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U transfa_user -d transfa"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # RabbitMQ Message Broker
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: transfa_user
+      RABBITMQ_DEFAULT_PASS: transfa_password
+    ports:
+      - "5672:5672"
+      - "15672:15672"  # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Auth Service
+  auth-service:
+    build:
+      context: ./transfa-backend/auth-service
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://transfa_user:transfa_password@postgres:5432/transfa?sslmode=disable
+      RABBITMQ_URL: amqp://transfa_user:transfa_password@rabbitmq:5672/
+      SERVER_PORT: 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Account Service
+  account-service:
+    build:
+      context: ./transfa-backend/account-service
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://transfa_user:transfa_password@postgres:5432/transfa?sslmode=disable
+      RABBITMQ_URL: amqp://transfa_user:transfa_password@rabbitmq:5672/
+      ANCHOR_API_BASE_URL: https://api.anchor.ng
+      ANCHOR_API_KEY: your_anchor_api_key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pgrep", "account-service"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Customer Service
+  customer-service:
+    build:
+      context: ./transfa-backend/customer-service
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://transfa_user:transfa_password@postgres:5432/transfa?sslmode=disable
+      RABBITMQ_URL: amqp://transfa_user:transfa_password@rabbitmq:5672/
+      ANCHOR_API_BASE_URL: https://api.anchor.ng
+      ANCHOR_API_KEY: your_anchor_api_key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pgrep", "customer-service"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Notification Service
+  notification-service:
+    build:
+      context: ./transfa-backend/notification-service
+      dockerfile: Dockerfile
+    environment:
+      RABBITMQ_URL: amqp://transfa_user:transfa_password@rabbitmq:5672/
+      SERVER_PORT: 8081
+      ANCHOR_WEBHOOK_SECRET: your_webhook_secret
+    ports:
+      - "8081:8081"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend (React Native Web)
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      EXPO_PUBLIC_API_GATEWAY_URL: http://localhost:8080
+      EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: your_clerk_publishable_key
+    ports:
+      - "3000:80"
+    depends_on:
+      auth-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+  rabbitmq_data:

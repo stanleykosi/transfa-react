@@ -2,31 +2,47 @@
  * @description
  * Onboarding screen for new users to provide essential details after signing up.
  * This form captures a unique username and KYC/KYB information based on the
- * selected account type ('Personal' or 'Merchant').
+ * selected account type ('Personal' or 'Merchant'). Upon submission, it calls the
+ * backend's `/onboarding` endpoint.
  *
  * @dependencies
- * - react: For state management (`useState`).
- * - react-native: For core UI components and ScrollView for long forms.
- * - @/components/*: Utilizes reusable components like ScreenWrapper, FormInput, PrimaryButton.
- * - UserTypeSelector: A dedicated component for selecting the user type.
+ * - react, @clerk/clerk-expo, @react-navigation/native: For state, auth, and navigation.
+ * - react-native: For core UI components and alerts.
+ * - @/components/*: Reusable UI components.
+ * - @/api/authApi: The `useOnboardingMutation` hook for the API call.
+ * - UserTypeSelector: Component for selecting user type.
  *
  * @notes
  * - The form state is managed locally with `useState`.
- * - A submit handler (`handleOnboardingSubmit`) is included as a placeholder. In a future
- *   step, this will be connected to a TanStack Query mutation to call the backend API.
- * - Input validation is not yet implemented but should be added for a robust user experience.
+ * - The submission logic is handled by the `useOnboardingMutation` hook.
+ * - On successful submission, the user is navigated to the main app interface.
  */
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import {
+  StyleSheet,
+  Text,
+  View,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
+} from 'react-native';
+import { useUser } from '@clerk/clerk-expo';
+import { useNavigation, StackActions } from '@react-navigation/native';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import FormInput from '@/components/FormInput';
 import PrimaryButton from '@/components/PrimaryButton';
 import { theme } from '@/constants/theme';
 import UserTypeSelector from './components/UserTypeSelector';
+import { useOnboardingMutation } from '@/api/authApi';
+import { OnboardingPayload } from '@/types/api';
 
 type UserType = 'personal' | 'merchant';
 
 const OnboardingFormScreen = () => {
+  const navigation = useNavigation();
+  const { user } = useUser();
+
   // State for the selected user type
   const [userType, setUserType] = useState<UserType>('personal');
 
@@ -38,25 +54,47 @@ const OnboardingFormScreen = () => {
   const [businessName, setBusinessName] = useState('');
   const [rcNumber, setRcNumber] = useState('');
 
-  // Loading state for the submission
-  const [isLoading, setIsLoading] = useState(false);
+  // TanStack Query mutation for handling the API call
+  const { mutate: submitOnboarding, isPending: isLoading } = useOnboardingMutation({
+    onSuccess: (data) => {
+      console.log('Onboarding successful:', data);
+      Alert.alert('Success', 'Your profile has been created. Welcome to Transfa!');
+      // Replace the entire navigation stack with the main app tabs,
+      // so the user cannot go back to the onboarding screen.
+      navigation.dispatch(StackActions.replace('AppTabs'));
+    },
+    onError: (error) => {
+      // Provide user-friendly feedback on error.
+      const errorMessage =
+        (error as any)?.response?.data?.message ||
+        'An unexpected error occurred. Please try again.';
+      Alert.alert('Onboarding Failed', errorMessage);
+      console.error('Onboarding error:', error);
+    },
+  });
 
-  // Placeholder for the form submission logic
+  // Handles the form submission by calling the mutation.
   const handleOnboardingSubmit = () => {
-    setIsLoading(true);
-    // TODO: Connect this to a TanStack Query mutation in a future step (Step 15).
-    const formData = {
-      userType,
-      username,
-      ...(userType === 'personal' ? { fullName, bvn, dateOfBirth } : { businessName, rcNumber }),
-    };
-    console.log('Submitting Onboarding Data:', formData);
+    // Basic validation
+    if (!username) {
+      Alert.alert('Validation Error', 'Please enter a unique username.');
+      return;
+    }
 
-    // Simulate an API call
-    setTimeout(() => {
-      setIsLoading(false);
-      // On success, navigate to the main app (e.g., navigation.replace('AppTabs'))
-    }, 1500);
+    const payload: OnboardingPayload = {
+      username,
+      userType,
+      email: user?.primaryEmailAddress?.emailAddress,
+      phoneNumber: user?.primaryPhoneNumber?.phoneNumber,
+      kycData: {
+        userType,
+        ...(userType === 'personal'
+          ? { fullName, bvn, dateOfBirth }
+          : { businessName, rcNumber }),
+      },
+    };
+
+    submitOnboarding(payload);
   };
 
   return (
