@@ -60,3 +60,5 @@ ios/*.xcuserdata
 
 # OS generated files
 Thumbs.db
+
+bin/
