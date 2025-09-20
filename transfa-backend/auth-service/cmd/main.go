@@ -31,7 +31,7 @@ func main() {
 		log.Fatalf("cannot load config: %v", err)
 	}
 
-	// If a platform-provided PORT is set (e.g., Railway/Render), prefer it
+	// If a platform-provided PORT is set (e.g., Railway/Render), prefer itt
 	if port := os.Getenv("PORT"); port != "" {
 		cfg.ServerPort = port
 	}
