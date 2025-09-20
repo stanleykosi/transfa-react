@@ -2,7 +2,12 @@ name: Build & Push notification-service
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: ['**']
+    paths:
+      - 'transfa-backend/notification-service/**'
+      - '.github/workflows/notification-service-ecr.yml'
+  pull_request:
+    branches: ['**']
     paths:
       - 'transfa-backend/notification-service/**'
       - '.github/workflows/notification-service-ecr.yml'
@@ -24,6 +29,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Debug context
+        run: |
+          echo "Actor: $GITHUB_ACTOR"
+          echo "Ref: $GITHUB_REF"
+          echo "Event: $GITHUB_EVENT_NAME"
+
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -40,6 +51,7 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
 
       - name: Push Docker image
+        if: github.event_name == 'push'
         run: |
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest

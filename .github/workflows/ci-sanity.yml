@@ -1,0 +1,24 @@
+name: CI Sanity Check
+on:
+  workflow_dispatch:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+jobs:
+  sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Print context
+        run: |
+          echo "Actor=$GITHUB_ACTOR"
+          echo "Ref=$GITHUB_REF"
+          echo "Event=$GITHUB_EVENT_NAME"
+      - name: List repo root
+        run: |
+          ls -la
+      - name: Success marker
+        run: echo "✅ GitHub Actions is working for this repo"
