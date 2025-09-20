@@ -34,7 +34,7 @@ import (
 )
 
 func main() {
-	// Load .env file for local development.
+	// Load .env file for local development..
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, using environment variables")
 	}
