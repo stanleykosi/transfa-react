@@ -65,7 +65,7 @@ func main() {
 	}
 	defer consumer.Close()
 
-	// Define consumer parameters.
+	// Define consumer parameterss.
 	exchangeName := "customer_events"
 	queueName := "account_service_customer_verified"
 	routingKey := "customer.verified"

@@ -71,7 +71,7 @@ func main() {
 	}
 	defer consumer.Close()
 
-	// Define consumer parameters
+	// Define consumer parameterss
 	exchangeName := "user_events"
 	queueName := "customer_service_user_created"
 	routingKey := "user.created"

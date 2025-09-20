@@ -12,7 +12,7 @@
  * @dependencies
  * - github.com/go-chi/chi/v5: A lightweight and idiomatic router for building Go HTTP services.
  * - github.com/joho/godotenv: For loading .env files during local development.
- * - The service's internal packages for config, API handling, and RabbitMQ integration.
+ * - The service's internal packages for config, API handling, and RabbitMQ -integration.
  */
 package main
 
