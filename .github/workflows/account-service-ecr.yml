@@ -1,13 +1,7 @@
 name: Build & Push account-service
 on:
-  workflow_dispatch:
   push:
-    branches: ['**']
-    paths:
-      - 'transfa-backend/account-service/**'
-      - '.github/workflows/account-service-ecr.yml'
-  pull_request:
-    branches: ['**']
+    branches: [main]
     paths:
       - 'transfa-backend/account-service/**'
       - '.github/workflows/account-service-ecr.yml'
@@ -51,7 +45,6 @@ jobs:
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
 
       - name: Push Docker image
-        if: github.event_name == 'push'
         run: |
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
