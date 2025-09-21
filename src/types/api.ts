@@ -16,6 +16,7 @@ export interface OnboardingPayload {
     fullName?: string;
     bvn?: string;
     dateOfBirth?: string;
+    gender?: 'Male' | 'Female';
     businessName?: string;
     rcNumber?: string;
   };

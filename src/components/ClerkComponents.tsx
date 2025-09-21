@@ -10,7 +10,6 @@
  * - react-native: For Platform detection
  */
 
-import React from 'react';
 import { Platform } from 'react-native';
 
 // Platform-specific imports

@@ -29,7 +29,6 @@ import ClerkProvider from '@/providers/ClerkProvider';
 // Initialize the QueryClient for TanStack Query
 const queryClient = new QueryClient();
 
-
 // Retrieve the Clerk Publishable Key from environment variables.
 // It's crucial to have this in a .env file and not hardcoded.
 const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;

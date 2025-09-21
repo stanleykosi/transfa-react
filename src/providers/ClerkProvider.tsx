@@ -52,10 +52,7 @@ const ClerkProvider: React.FC<ClerkProviderProps> = ({ children, publishableKey 
   if (Platform.OS === 'web') {
     // Use @clerk/clerk-react for web platform with custom appearance
     return (
-      <ClerkReactProvider
-        publishableKey={publishableKey}
-        appearance={appearance}
-      >
+      <ClerkReactProvider publishableKey={publishableKey} appearance={appearance}>
         {children}
       </ClerkReactProvider>
     );

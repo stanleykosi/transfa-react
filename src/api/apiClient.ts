@@ -38,6 +38,11 @@ apiClient.interceptors.request.use(
           // Add the JWT to the Authorization header.
           config.headers.Authorization = `Bearer ${token}`;
         }
+        // Also pass the Clerk user id for services that expect it.
+        const userId = (session as any).userId || (session as any).user?.id;
+        if (userId) {
+          (config.headers as any)['X-Clerk-User-Id'] = String(userId);
+        }
       }
     } catch (error) {
       // Log an error if token retrieval fails, but don't block the request.

@@ -39,6 +39,8 @@ import { OnboardingPayload } from '@/types/api';
 
 type UserType = 'personal' | 'merchant';
 
+type Gender = 'Male' | 'Female';
+
 const OnboardingFormScreen = () => {
   const navigation = useNavigation();
   const { user } = useUser();
@@ -48,9 +50,11 @@ const OnboardingFormScreen = () => {
 
   // State for all form fields
   const [username, setUsername] = useState('');
+  const [phone, setPhone] = useState<string>(user?.primaryPhoneNumber?.phoneNumber || '');
   const [fullName, setFullName] = useState('');
   const [bvn, setBvn] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
+  const [gender, setGender] = useState<Gender | ''>('');
   const [businessName, setBusinessName] = useState('');
   const [rcNumber, setRcNumber] = useState('');
 
@@ -59,12 +63,9 @@ const OnboardingFormScreen = () => {
     onSuccess: (data) => {
       console.log('Onboarding successful:', data);
       Alert.alert('Success', 'Your profile has been created. Welcome to Transfa!');
-      // Replace the entire navigation stack with the main app tabs,
-      // so the user cannot go back to the onboarding screen.
       navigation.dispatch(StackActions.replace('AppTabs'));
     },
     onError: (error) => {
-      // Provide user-friendly feedback on error.
       const errorMessage =
         (error as any)?.response?.data?.message ||
         'An unexpected error occurred. Please try again.';
@@ -73,23 +74,41 @@ const OnboardingFormScreen = () => {
     },
   });
 
-  // Handles the form submission by calling the mutation.
   const handleOnboardingSubmit = () => {
-    // Basic validation
     if (!username) {
       Alert.alert('Validation Error', 'Please enter a unique username.');
       return;
+    }
+
+    if (!phone) {
+      Alert.alert('Validation Error', 'Please provide a phone number.');
+      return;
+    }
+
+    if (userType === 'personal') {
+      if (!fullName || !bvn || !dateOfBirth || !gender) {
+        Alert.alert('Validation Error', 'Please provide full name, BVN, date of birth and gender.');
+        return;
+      }
+    } else {
+      if (!businessName || !rcNumber) {
+        Alert.alert(
+          'Validation Error',
+          'Please provide your registered business name and RC number.'
+        );
+        return;
+      }
     }
 
     const payload: OnboardingPayload = {
       username,
       userType,
       email: user?.primaryEmailAddress?.emailAddress,
-      phoneNumber: user?.primaryPhoneNumber?.phoneNumber,
+      phoneNumber: phone,
       kycData: {
         userType,
         ...(userType === 'personal'
-          ? { fullName, bvn, dateOfBirth }
+          ? { fullName, bvn, dateOfBirth, gender: gender as Gender }
           : { businessName, rcNumber }),
       },
     };
@@ -119,6 +138,14 @@ const OnboardingFormScreen = () => {
             autoCapitalize="none"
           />
 
+          <FormInput
+            label="Phone Number"
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="Enter your phone number"
+            keyboardType="phone-pad"
+          />
+
           {userType === 'personal' ? (
             <>
               <FormInput
@@ -140,6 +167,13 @@ const OnboardingFormScreen = () => {
                 value={dateOfBirth}
                 onChangeText={setDateOfBirth}
                 placeholder="YYYY-MM-DD"
+              />
+              <FormInput
+                label="Gender (Male or Female)"
+                value={gender}
+                onChangeText={(t) => setGender((t as Gender) || '')}
+                placeholder="Male or Female"
+                autoCapitalize="none"
               />
             </>
           ) : (

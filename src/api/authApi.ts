@@ -16,16 +16,38 @@
 import { useMutation } from '@tanstack/react-query';
 import apiClient from './apiClient';
 import { OnboardingPayload, OnboardingResponse } from '@/types/api';
+import { useAuth, useUser } from '@clerk/clerk-expo';
 
 /**
  * A custom hook that provides a mutation function for submitting the user's
  * onboarding data to the backend.
  *
- * @returns A TanStack Query mutation object with `mutate`, `isPending`, `isError`, etc.
+ * The backend expects snake_case keys and a Clerk user context. We attach:
+ * - Authorization: Bearer <JWT>
+ * - X-Clerk-User-Id: <user.id>
  */
 export const useOnboardingMutation = () => {
+  const { getToken } = useAuth();
+  const { user } = useUser();
+
   const onboardingMutation = async (payload: OnboardingPayload): Promise<OnboardingResponse> => {
-    const { data } = await apiClient.post<OnboardingResponse>('/onboarding', payload);
+    const token = await getToken().catch(() => undefined);
+
+    // Transform to backend's expected shape (snake_case)
+    const body = {
+      username: payload.username,
+      user_type: payload.userType,
+      email: payload.email,
+      phone_number: payload.phoneNumber,
+      kyc_data: payload.kycData,
+    } as const;
+
+    const { data } = await apiClient.post<OnboardingResponse>('/onboarding', body, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(user?.id ? { 'X-Clerk-User-Id': user.id } : {}),
+      },
+    });
     return data;
   };
 
