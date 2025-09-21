@@ -28,6 +28,7 @@ import { NavigatorScreenParams } from '@react-navigation/native';
 export type AppStackParamList = {
   AppTabs: NavigatorScreenParams<AppTabsParamList>; // Nested navigator
   OnboardingForm: undefined;
+  CreateAccount: undefined;
 };
 
 const Stack = createNativeStackNavigator<AppStackParamList>();
@@ -55,6 +56,15 @@ const AppStack = () => {
           title: 'Complete Your Profile',
           headerBackVisible: false, // Prevent going back from onboarding
           gestureEnabled: false, // Disable swipe gesture
+        }}
+      />
+      <Stack.Screen
+        name="CreateAccount"
+        component={require('@/screens/Onboarding/CreateAccountScreen').default}
+        options={{
+          title: 'Create Account',
+          headerBackVisible: false,
+          gestureEnabled: false,
         }}
       />
     </Stack.Navigator>

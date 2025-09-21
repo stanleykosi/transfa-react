@@ -104,8 +104,7 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// In a real-world scenario, you would define your exchanges and routing keys in a config.
-	err = h.producer.Publish(r.Context(), "user_events", "user.created", event)
-	if err != nil {
+	if pubErr := h.producer.Publish(r.Context(), "user_events", "user.created", event); pubErr != nil {
 		// This is a critical failure. The user is in our DB, but downstream services won't know.
 		// This requires a compensation mechanism (e.g., a retry job, manual intervention).
 		log.Printf("CRITICAL: Failed to publish user.created event for user %s. Manual intervention required.", internalUserID)

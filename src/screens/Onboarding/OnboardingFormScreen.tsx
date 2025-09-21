@@ -64,7 +64,7 @@ const OnboardingFormScreen = () => {
   const { mutate: submitOnboarding, isPending: isLoading } = useOnboardingMutation({
     onSuccess: () => {
       Alert.alert('Success', 'Profile created. Next, verify to open your account.');
-      // Proceed to Tier 1 create-account screen
+      // Proceed to Tier 1 create-account screen (guarded by backend status)
       navigation.dispatch(StackActions.replace('CreateAccount'));
     },
     onError: (error) => {
