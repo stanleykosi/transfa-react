@@ -92,6 +92,17 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 			log.Printf("ACK after validation failure for UserID %s: %v", event.UserID, err)
 			return true
 		}
+		// Non-retriable client errors from Anchor (4xx): ACK to stop requeue storm
+		if strings.Contains(err.Error(), "status 400") ||
+			strings.Contains(err.Error(), "status 401") ||
+			strings.Contains(err.Error(), "status 403") ||
+			strings.Contains(err.Error(), "status 404") ||
+			strings.Contains(err.Error(), "status 409") ||
+			strings.Contains(err.Error(), "status 422") ||
+			strings.Contains(strings.ToLower(err.Error()), "already exist") {
+			log.Printf("Non-retriable client error from Anchor (ACK). UserID %s: %v", event.UserID, err)
+			return true
+		}
 		// Rate limit from Anchor: ACK to avoid hot-looping, rely on scheduled/backoff retry later
 		if strings.Contains(err.Error(), "status 429") || strings.Contains(strings.ToLower(err.Error()), "too many requests") {
 			log.Printf("Rate limited by Anchor (ACK). UserID %s: %v", event.UserID, err)
