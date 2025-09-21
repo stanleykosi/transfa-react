@@ -90,6 +90,7 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 		// On known validation errors, acknowledge to prevent infinite requeue
 		if strings.Contains(err.Error(), "missing required fields") {
 			log.Printf("ACK after validation failure for UserID %s: %v", event.UserID, err)
+			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "failed", ptr(err.Error()))
 			return true
 		}
 		// Non-retriable client errors from Anchor (4xx): ACK to stop requeue storm
@@ -101,11 +102,13 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 			strings.Contains(err.Error(), "status 422") ||
 			strings.Contains(strings.ToLower(err.Error()), "already exist") {
 			log.Printf("Non-retriable client error from Anchor (ACK). UserID %s: %v", event.UserID, err)
+			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "failed", ptr(err.Error()))
 			return true
 		}
 		// Rate limit from Anchor: ACK to avoid hot-looping, rely on scheduled/backoff retry later
 		if strings.Contains(err.Error(), "status 429") || strings.Contains(strings.ToLower(err.Error()), "too many requests") {
 			log.Printf("Rate limited by Anchor (ACK). UserID %s: %v", event.UserID, err)
+			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "rate_limited", ptr(err.Error()))
 			return true
 		}
 		log.Printf("ERROR: Failed to create Anchor customer for UserID %s: %v", event.UserID, err)
@@ -120,6 +123,9 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 		return false
 	}
 	log.Printf("Successfully updated user record for UserID %s", event.UserID)
+
+	// Record success status for Tier 0 so frontend can surface it
+	_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "created", nil)
 
 	// Tier 1 is handled later in the account creation flow
 	return true
@@ -175,3 +181,5 @@ func getString(m map[string]interface{}, key, def string) string {
 	}
 	return def
 }
+
+func ptr(s string) *string { return &s }

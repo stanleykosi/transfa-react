@@ -64,6 +64,11 @@ func main() {
 	anchorClient := anchorclient.NewClient(cfg.AnchorAPIBaseURL, cfg.AnchorAPIKey)
 	eventHandler := app.NewUserEventHandler(userRepo, anchorClient)
 
+	// Ensure onboarding status table exists
+	if err := userRepo.EnsureOnboardingStatusTable(context.Background()); err != nil {
+		log.Fatalf("Failed ensuring onboarding_status table: %v", err)
+	}
+
 	// Set up and start RabbitMQ consumer
 	consumer, err := rabbitmq.NewConsumer(cfg.RabbitMQURL)
 	if err != nil {
