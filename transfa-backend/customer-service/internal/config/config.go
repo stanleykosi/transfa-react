@@ -44,6 +44,12 @@ func LoadConfig() (config Config, err error) {
 	// This replaces dots with underscores in env variables
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
+	// Bind env vars explicitly
+	_ = viper.BindEnv("DATABASE_URL")
+	_ = viper.BindEnv("RABBITMQ_URL")
+	_ = viper.BindEnv("ANCHOR_API_KEY")
+	_ = viper.BindEnv("ANCHOR_API_BASE_URL")
+
 	// Read the config file
 	err = viper.ReadInConfig()
 	if err != nil {

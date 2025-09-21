@@ -19,8 +19,8 @@ import (
 // Config stores all configuration for the application.
 // The values are read by viper from a config file or environment variables.
 type Config struct {
-	ServerPort        string `mapstructure:"SERVER_PORT"`
-	RabbitMQURL       string `mapstructure:"RABBITMQ_URL"`
+	ServerPort          string `mapstructure:"SERVER_PORT"`
+	RabbitMQURL         string `mapstructure:"RABBITMQ_URL"`
 	AnchorWebhookSecret string `mapstructure:"ANCHOR_WEBHOOK_SECRET"`
 }
 
@@ -32,6 +32,11 @@ func LoadConfig() (config Config, err error) {
 
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+	// Bind env vars explicitly
+	_ = viper.BindEnv("SERVER_PORT")
+	_ = viper.BindEnv("RABBITMQ_URL")
+	_ = viper.BindEnv("ANCHOR_WEBHOOK_SECRET")
 
 	// Read the config file if it exists.
 	if err = viper.ReadInConfig(); err != nil {

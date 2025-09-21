@@ -32,6 +32,12 @@ func LoadConfig() (config Config, err error) {
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
+	// Bind envs explicitly so containers pick them up reliably
+	_ = viper.BindEnv("DATABASE_URL")
+	_ = viper.BindEnv("RABBITMQ_URL")
+	_ = viper.BindEnv("ANCHOR_API_KEY")
+	_ = viper.BindEnv("ANCHOR_API_BASE_URL")
+
 	if err = viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
 			log.Fatalf("Error reading config file: %s", err)
