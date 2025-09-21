@@ -37,8 +37,9 @@ type EventProducer struct {
 func sanitizeAMQPURL(raw string) (string, error) {
 	clean := strings.TrimSpace(raw)
 	clean = strings.Trim(clean, "\"'")
-	if !strings.HasSuffix(clean, "/") {
-		clean += "/"
+	idx := strings.Index(strings.ToLower(clean), "amqp")
+	if idx > 0 {
+		clean = clean[idx:]
 	}
 	u, err := url.Parse(clean)
 	if err != nil {

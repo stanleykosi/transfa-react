@@ -18,13 +18,13 @@ type EventProducer struct {
 	channel *amqp.Channel
 }
 
-// sanitizeAMQPURL trims whitespace/quotes and ensures the URL has a valid
-// amqp/amqps scheme and a trailing slash to satisfy common brokers.
 func sanitizeAMQPURL(raw string) (string, error) {
 	clean := strings.TrimSpace(raw)
 	clean = strings.Trim(clean, "\"'")
-	if !strings.HasSuffix(clean, "/") {
-		clean += "/"
+	// If any stray characters precede the scheme, slice from first occurrence of amqp
+	idx := strings.Index(strings.ToLower(clean), "amqp")
+	if idx > 0 {
+		clean = clean[idx:]
 	}
 	u, err := url.Parse(clean)
 	if err != nil {

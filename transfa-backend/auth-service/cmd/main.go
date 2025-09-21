@@ -4,8 +4,10 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,6 +21,18 @@ import (
 	"github.com/transfa/auth-service/pkg/rabbitmq"
 )
 
+func maskAMQPURLForLog(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	u, err := url.Parse(trimmed)
+	if err != nil {
+		return "<unparseable>"
+	}
+	if u.User != nil {
+		u.User = url.UserPassword("****", "****")
+	}
+	return u.String()
+}
+
 func main() {
 	// Load .env file for local development. In production, env vars are set directly.
 	if err := godotenv.Load(); err != nil {
@@ -31,7 +45,7 @@ func main() {
 		log.Fatalf("cannot load config: %v", err)
 	}
 
-	// If a platform-provided PORT is set (e.g., Railway/Render), prefer itt
+	// If a platform-provided PORT is set (e.g., Railway/Render), prefer it
 	if port := os.Getenv("PORT"); port != "" {
 		cfg.ServerPort = port
 	}
@@ -43,6 +57,8 @@ func main() {
 	}
 	defer dbpool.Close()
 	log.Println("Database connection established")
+
+	log.Printf("RABBITMQ_URL (masked)=%s", maskAMQPURLForLog(cfg.RabbitMQURL))
 
 	// Set up RabbitMQ producer
 	producer, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL)

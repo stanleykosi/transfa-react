@@ -34,14 +34,12 @@ type Consumer struct {
 func sanitizeAMQPURL(raw string) (string, error) {
 	clean := strings.TrimSpace(raw)
 	clean = strings.Trim(clean, "\"'")
-	if !strings.HasSuffix(clean, "/") {
-		clean += "/"
+	idx := strings.Index(strings.ToLower(clean), "amqp")
+	if idx > 0 {
+		clean = clean[idx:]
 	}
-	u, err := url.Parse(clean)
+	_, err := url.Parse(clean)
 	if err != nil {
-		return "", err
-	}
-	if u.Scheme != "amqp" && u.Scheme != "amqps" {
 		return "", err
 	}
 	return clean, nil
