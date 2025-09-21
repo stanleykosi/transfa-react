@@ -86,6 +86,11 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 			log.Printf("ACK after validation failure for UserID %s: %v", event.UserID, err)
 			return true
 		}
+		// Rate limit from Anchor: ACK to avoid hot-looping, rely on scheduled/backoff retry later
+		if strings.Contains(err.Error(), "status 429") || strings.Contains(strings.ToLower(err.Error()), "too many requests") {
+			log.Printf("Rate limited by Anchor (ACK). UserID %s: %v", event.UserID, err)
+			return true
+		}
 		log.Printf("ERROR: Failed to create Anchor customer for UserID %s: %v", event.UserID, err)
 		return false // transient error → retry
 	}
@@ -99,7 +104,7 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 	}
 	log.Printf("Successfully updated user record for UserID %s", event.UserID)
 
-	// Trigger KYC verification on Anchor (Tier 1). This will be invoked later in the flow.
+	// Tier 1 is handled later in the account creation flow
 	return true
 }
 
@@ -113,18 +118,28 @@ func (h *UserEventHandler) createPersonalCustomer(ctx context.Context, event dom
 		return "", fmt.Errorf("missing required fields (fullName, email, phoneNumber) in KYCData")
 	}
 
+	// Split full name into first and last name as Anchor expects at least firstName and lastName
+	firstName := fullName
+	lastName := ""
+	parts := strings.Fields(fullName)
+	if len(parts) >= 2 {
+		firstName = strings.Join(parts[:len(parts)-1], " ")
+		lastName = parts[len(parts)-1]
+	}
+
 	req := domain.AnchorCreateIndividualCustomerRequest{
 		Data: domain.RequestData{
 			Type: "IndividualCustomer",
 			Attributes: domain.IndividualCustomerAttributes{
-				FullName: domain.FullName{ FirstName: fullName },
+				FullName: domain.FullName{ FirstName: firstName, LastName: lastName },
 				Email:       email,
 				PhoneNumber: phoneNumber,
 				Address: domain.Address{
-					AddressLine1: "123 Main Street",
-					City:         "Ikeja",
-					State:        "Lagos",
-					Country:      "NG",
+					AddressLine1: getString(event.KYCData, "addressLine1", "123 Main Street"),
+					City:         getString(event.KYCData, "city", "Ikeja"),
+					State:        getString(event.KYCData, "state", "Lagos"),
+					PostalCode:   getString(event.KYCData, "postalCode", "100001"),
+					Country:      getString(event.KYCData, "country", "NG"),
 				},
 			},
 		},
@@ -135,4 +150,11 @@ func (h *UserEventHandler) createPersonalCustomer(ctx context.Context, event dom
 		return "", err
 	}
 	return resp.Data.ID, nil
+}
+
+func getString(m map[string]interface{}, key, def string) string {
+	if v, ok := m[key].(string); ok && v != "" {
+		return v
+	}
+	return def
 }
