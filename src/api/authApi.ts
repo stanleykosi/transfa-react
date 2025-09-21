@@ -13,7 +13,7 @@
  * - @/api/apiClient: The configured Axios instance for making requests.
  * - @/types/api: For the request and response type definitions.
  */
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, type UseMutationOptions } from '@tanstack/react-query';
 import apiClient from './apiClient';
 import { OnboardingPayload, OnboardingResponse } from '@/types/api';
 import { useAuth, useUser } from '@clerk/clerk-expo';
@@ -26,7 +26,9 @@ import { useAuth, useUser } from '@clerk/clerk-expo';
  * - Authorization: Bearer <JWT>
  * - X-Clerk-User-Id: <user.id>
  */
-export const useOnboardingMutation = () => {
+export const useOnboardingMutation = (
+  options?: UseMutationOptions<OnboardingResponse, unknown, OnboardingPayload>
+) => {
   const { getToken } = useAuth();
   const { user } = useUser();
 
@@ -51,7 +53,8 @@ export const useOnboardingMutation = () => {
     return data;
   };
 
-  return useMutation({
+  return useMutation<OnboardingResponse, unknown, OnboardingPayload>({
     mutationFn: onboardingMutation,
+    ...(options || {}),
   });
 };

@@ -39,8 +39,6 @@ import { OnboardingPayload } from '@/types/api';
 
 type UserType = 'personal' | 'merchant';
 
-type Gender = 'Male' | 'Female';
-
 const OnboardingFormScreen = () => {
   const navigation = useNavigation();
   const { user } = useUser();
@@ -59,23 +57,20 @@ const OnboardingFormScreen = () => {
   const [postalCode, setPostalCode] = useState('');
   const [country, setCountry] = useState('NG');
 
-  // Personal Tier 1 (will be used on account creation step)
-  const [bvn, setBvn] = useState('');
-  const [dateOfBirth, setDateOfBirth] = useState('');
-  const [gender, setGender] = useState<Gender | ''>('');
-
   // Merchant basics
   const [businessName, setBusinessName] = useState('');
   const [rcNumber, setRcNumber] = useState('');
 
   const { mutate: submitOnboarding, isPending: isLoading } = useOnboardingMutation({
-    onSuccess: (data) => {
-      Alert.alert('Success', 'Your profile has been created. Next, verify to open your account.');
-      navigation.dispatch(StackActions.replace('AppTabs'));
+    onSuccess: () => {
+      Alert.alert('Success', 'Profile created. Next, verify to open your account.');
+      // Proceed to Tier 1 create-account screen
+      navigation.dispatch(StackActions.replace('CreateAccount'));
     },
     onError: (error) => {
       const errorMessage =
-        (error as any)?.response?.data?.message || 'An unexpected error occurred. Please try again.';
+        (error as any)?.response?.data?.message ||
+        'An unexpected error occurred. Please try again.';
       Alert.alert('Onboarding Failed', errorMessage);
       console.error('Onboarding error:', error);
     },
@@ -111,7 +106,10 @@ const OnboardingFormScreen = () => {
     } else {
       // Merchant basics only for onboarding
       if (!businessName || !rcNumber) {
-        Alert.alert('Validation Error', 'Please provide your registered business name and RC number.');
+        Alert.alert(
+          'Validation Error',
+          'Please provide your registered business name and RC number.'
+        );
         return;
       }
       kycData = { userType, businessName, rcNumber };
@@ -130,35 +128,89 @@ const OnboardingFormScreen = () => {
 
   return (
     <ScreenWrapper style={{ paddingHorizontal: 0 }}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Tell us about yourself</Text>
           <Text style={styles.subtitle}>This information is required to set up your profile.</Text>
 
           <UserTypeSelector selectedType={userType} onSelectType={setUserType} />
 
-          <FormInput label="Unique Username" value={username} onChangeText={setUsername} placeholder="@yourname" autoCapitalize="none" />
+          <FormInput
+            label="Unique Username"
+            value={username}
+            onChangeText={setUsername}
+            placeholder="@yourname"
+            autoCapitalize="none"
+          />
 
-          <FormInput label="Phone Number" value={phone} onChangeText={setPhone} placeholder="Enter your phone number" keyboardType="phone-pad" />
+          <FormInput
+            label="Phone Number"
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="Enter your phone number"
+            keyboardType="phone-pad"
+          />
 
           {userType === 'personal' ? (
             <>
-              <FormInput label="Full Name" value={fullName} onChangeText={setFullName} placeholder="Enter your full legal name" />
-              <FormInput label="Address Line 1" value={addressLine1} onChangeText={setAddressLine1} placeholder="Street address" />
+              <FormInput
+                label="Full Name"
+                value={fullName}
+                onChangeText={setFullName}
+                placeholder="Enter your full legal name"
+              />
+              <FormInput
+                label="Address Line 1"
+                value={addressLine1}
+                onChangeText={setAddressLine1}
+                placeholder="Street address"
+              />
               <FormInput label="City" value={city} onChangeText={setCity} placeholder="City" />
-              <FormInput label="State" value={stateVal} onChangeText={setStateVal} placeholder="State" />
-              <FormInput label="Postal Code" value={postalCode} onChangeText={setPostalCode} placeholder="Postal code" />
-              <FormInput label="Country" value={country} onChangeText={setCountry} placeholder="Country" />
+              <FormInput
+                label="State"
+                value={stateVal}
+                onChangeText={setStateVal}
+                placeholder="State"
+              />
+              <FormInput
+                label="Postal Code"
+                value={postalCode}
+                onChangeText={setPostalCode}
+                placeholder="Postal code"
+              />
+              <FormInput
+                label="Country"
+                value={country}
+                onChangeText={setCountry}
+                placeholder="Country"
+              />
             </>
           ) : (
             <>
-              <FormInput label="Registered Business Name" value={businessName} onChangeText={setBusinessName} placeholder="Enter your business name" />
-              <FormInput label="RC Number" value={rcNumber} onChangeText={setRcNumber} placeholder="Enter your registration number" />
+              <FormInput
+                label="Registered Business Name"
+                value={businessName}
+                onChangeText={setBusinessName}
+                placeholder="Enter your business name"
+              />
+              <FormInput
+                label="RC Number"
+                value={rcNumber}
+                onChangeText={setRcNumber}
+                placeholder="Enter your registration number"
+              />
             </>
           )}
 
           <View style={styles.buttonContainer}>
-            <PrimaryButton title="Save & Continue" onPress={handleOnboardingSubmit} isLoading={isLoading} />
+            <PrimaryButton
+              title="Save & Continue"
+              onPress={handleOnboardingSubmit}
+              isLoading={isLoading}
+            />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
