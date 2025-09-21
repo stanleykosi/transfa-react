@@ -45,30 +45,37 @@ const OnboardingFormScreen = () => {
   const navigation = useNavigation();
   const { user } = useUser();
 
-  // State for the selected user type
   const [userType, setUserType] = useState<UserType>('personal');
 
-  // State for all form fields
+  // Shared
   const [username, setUsername] = useState('');
   const [phone, setPhone] = useState<string>(user?.primaryPhoneNumber?.phoneNumber || '');
+
+  // Personal Tier 0
   const [fullName, setFullName] = useState('');
+  const [addressLine1, setAddressLine1] = useState('');
+  const [city, setCity] = useState('');
+  const [stateVal, setStateVal] = useState('');
+  const [postalCode, setPostalCode] = useState('');
+  const [country, setCountry] = useState('NG');
+
+  // Personal Tier 1 (will be used on account creation step)
   const [bvn, setBvn] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [gender, setGender] = useState<Gender | ''>('');
+
+  // Merchant basics
   const [businessName, setBusinessName] = useState('');
   const [rcNumber, setRcNumber] = useState('');
 
-  // TanStack Query mutation for handling the API call
   const { mutate: submitOnboarding, isPending: isLoading } = useOnboardingMutation({
     onSuccess: (data) => {
-      console.log('Onboarding successful:', data);
-      Alert.alert('Success', 'Your profile has been created. Welcome to Transfa!');
+      Alert.alert('Success', 'Your profile has been created. Next, verify to open your account.');
       navigation.dispatch(StackActions.replace('AppTabs'));
     },
     onError: (error) => {
       const errorMessage =
-        (error as any)?.response?.data?.message ||
-        'An unexpected error occurred. Please try again.';
+        (error as any)?.response?.data?.message || 'An unexpected error occurred. Please try again.';
       Alert.alert('Onboarding Failed', errorMessage);
       console.error('Onboarding error:', error);
     },
@@ -79,25 +86,35 @@ const OnboardingFormScreen = () => {
       Alert.alert('Validation Error', 'Please enter a unique username.');
       return;
     }
-
     if (!phone) {
       Alert.alert('Validation Error', 'Please provide a phone number.');
       return;
     }
 
+    let kycData: OnboardingPayload['kycData'];
+
     if (userType === 'personal') {
-      if (!fullName || !bvn || !dateOfBirth || !gender) {
-        Alert.alert('Validation Error', 'Please provide full name, BVN, date of birth and gender.');
+      // Tier 0 only
+      if (!fullName || !addressLine1 || !city || !stateVal || !country) {
+        Alert.alert('Validation Error', 'Please complete your address and full name.');
         return;
       }
+      kycData = {
+        userType,
+        fullName,
+        addressLine1,
+        city,
+        state: stateVal,
+        postalCode,
+        country,
+      };
     } else {
+      // Merchant basics only for onboarding
       if (!businessName || !rcNumber) {
-        Alert.alert(
-          'Validation Error',
-          'Please provide your registered business name and RC number.'
-        );
+        Alert.alert('Validation Error', 'Please provide your registered business name and RC number.');
         return;
       }
+      kycData = { userType, businessName, rcNumber };
     }
 
     const payload: OnboardingPayload = {
@@ -105,12 +122,7 @@ const OnboardingFormScreen = () => {
       userType,
       email: user?.primaryEmailAddress?.emailAddress,
       phoneNumber: phone,
-      kycData: {
-        userType,
-        ...(userType === 'personal'
-          ? { fullName, bvn, dateOfBirth, gender: gender as Gender }
-          : { businessName, rcNumber }),
-      },
+      kycData,
     };
 
     submitOnboarding(payload);
@@ -118,87 +130,35 @@ const OnboardingFormScreen = () => {
 
   return (
     <ScreenWrapper style={{ paddingHorizontal: 0 }}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
-      >
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <Text style={styles.title}>Tell us about yourself</Text>
-          <Text style={styles.subtitle}>
-            This information is required to set up your secure wallet.
-          </Text>
+          <Text style={styles.subtitle}>This information is required to set up your profile.</Text>
 
           <UserTypeSelector selectedType={userType} onSelectType={setUserType} />
 
-          <FormInput
-            label="Unique Username"
-            value={username}
-            onChangeText={setUsername}
-            placeholder="@yourname"
-            autoCapitalize="none"
-          />
+          <FormInput label="Unique Username" value={username} onChangeText={setUsername} placeholder="@yourname" autoCapitalize="none" />
 
-          <FormInput
-            label="Phone Number"
-            value={phone}
-            onChangeText={setPhone}
-            placeholder="Enter your phone number"
-            keyboardType="phone-pad"
-          />
+          <FormInput label="Phone Number" value={phone} onChangeText={setPhone} placeholder="Enter your phone number" keyboardType="phone-pad" />
 
           {userType === 'personal' ? (
             <>
-              <FormInput
-                label="Full Name"
-                value={fullName}
-                onChangeText={setFullName}
-                placeholder="Enter your full legal name"
-              />
-              <FormInput
-                label="Bank Verification Number (BVN)"
-                value={bvn}
-                onChangeText={setBvn}
-                placeholder="Enter your 11-digit BVN"
-                keyboardType="number-pad"
-                maxLength={11}
-              />
-              <FormInput
-                label="Date of Birth"
-                value={dateOfBirth}
-                onChangeText={setDateOfBirth}
-                placeholder="YYYY-MM-DD"
-              />
-              <FormInput
-                label="Gender (Male or Female)"
-                value={gender}
-                onChangeText={(t) => setGender((t as Gender) || '')}
-                placeholder="Male or Female"
-                autoCapitalize="none"
-              />
+              <FormInput label="Full Name" value={fullName} onChangeText={setFullName} placeholder="Enter your full legal name" />
+              <FormInput label="Address Line 1" value={addressLine1} onChangeText={setAddressLine1} placeholder="Street address" />
+              <FormInput label="City" value={city} onChangeText={setCity} placeholder="City" />
+              <FormInput label="State" value={stateVal} onChangeText={setStateVal} placeholder="State" />
+              <FormInput label="Postal Code" value={postalCode} onChangeText={setPostalCode} placeholder="Postal code" />
+              <FormInput label="Country" value={country} onChangeText={setCountry} placeholder="Country" />
             </>
           ) : (
             <>
-              <FormInput
-                label="Registered Business Name"
-                value={businessName}
-                onChangeText={setBusinessName}
-                placeholder="Enter your business name"
-              />
-              <FormInput
-                label="RC Number"
-                value={rcNumber}
-                onChangeText={setRcNumber}
-                placeholder="Enter your registration number"
-              />
+              <FormInput label="Registered Business Name" value={businessName} onChangeText={setBusinessName} placeholder="Enter your business name" />
+              <FormInput label="RC Number" value={rcNumber} onChangeText={setRcNumber} placeholder="Enter your registration number" />
             </>
           )}
 
           <View style={styles.buttonContainer}>
-            <PrimaryButton
-              title="Save & Continue"
-              onPress={handleOnboardingSubmit}
-              isLoading={isLoading}
-            />
+            <PrimaryButton title="Save & Continue" onPress={handleOnboardingSubmit} isLoading={isLoading} />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

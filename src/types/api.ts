@@ -13,10 +13,18 @@ export interface OnboardingPayload {
   phoneNumber: string | undefined;
   kycData: {
     userType: 'personal' | 'merchant';
+    // Tier 0 (personal)
     fullName?: string;
+    addressLine1?: string;
+    city?: string;
+    state?: string;
+    postalCode?: string;
+    country?: string;
+    // Tier 1 (personal)
     bvn?: string;
     dateOfBirth?: string;
     gender?: 'Male' | 'Female';
+    // Business basics
     businessName?: string;
     rcNumber?: string;
   };
