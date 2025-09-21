@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/transfa/customer-service/internal/domain"
@@ -72,18 +73,21 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 	case domain.PersonalUser:
 		anchorCustomerID, err = h.createPersonalCustomer(ctx, event)
 	case domain.MerchantUser:
-		// Placeholder for business customer creation
-		// anchorCustomerID, err = h.createBusinessCustomer(ctx, event)
 		log.Printf("Merchant user onboarding is not yet implemented. UserID: %s", event.UserID)
-		return true // Acknowledge for now
+		return true
 	default:
 		log.Printf("ERROR: Unknown user type '%s' for UserID: %s", userType, event.UserID)
-		return true // Acknowledge, can't be processed.
+		return true
 	}
 
 	if err != nil {
+		// On known validation errors, acknowledge to prevent infinite requeue
+		if strings.Contains(err.Error(), "missing required fields") {
+			log.Printf("ACK after validation failure for UserID %s: %v", event.UserID, err)
+			return true
+		}
 		log.Printf("ERROR: Failed to create Anchor customer for UserID %s: %v", event.UserID, err)
-		return false // Do not acknowledge, retry the message.
+		return false // transient error → retry
 	}
 
 	log.Printf("Successfully created Anchor customer %s for UserID %s", anchorCustomerID, event.UserID)
@@ -91,28 +95,16 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 	// Update our internal user record with the new Anchor Customer ID
 	if err := h.repo.UpdateAnchorCustomerID(ctx, event.UserID, anchorCustomerID); err != nil {
 		log.Printf("ERROR: Failed to update user record for UserID %s with AnchorID %s: %v", event.UserID, anchorCustomerID, err)
-		return false // Do not acknowledge, retry the message.
+		return false
 	}
 	log.Printf("Successfully updated user record for UserID %s", event.UserID)
 
-	// Trigger KYC verification on Anchor
-	if domain.UserType(userType) == domain.PersonalUser {
-		if err := h.triggerPersonalKYC(ctx, anchorCustomerID, event.KYCData); err != nil {
-			log.Printf("WARNING: Failed to trigger KYC for Anchor customer %s. This may need manual intervention. Error: %v", anchorCustomerID, err)
-			// We still acknowledge the message as the critical path (customer creation and DB update) succeeded.
-			// A separate reconciliation job could handle failed KYC triggers.
-		} else {
-			log.Printf("Successfully triggered KYC verification for Anchor customer %s", anchorCustomerID)
-		}
-	}
-
-	return true // Acknowledge the message as successfully processed.
+	// Trigger KYC verification on Anchor (Tier 1). This will be invoked later in the flow.
+	return true
 }
 
 // createPersonalCustomer handles the logic for creating an IndividualCustomer on Anchor.
 func (h *UserEventHandler) createPersonalCustomer(ctx context.Context, event domain.UserCreatedEvent) (string, error) {
-	// Extract and type-assert data from the KYCData map. Robust production code
-	// would have more sophisticated validation.
 	fullName, _ := event.KYCData["fullName"].(string)
 	email, _ := event.KYCData["email"].(string)
 	phoneNumber, _ := event.KYCData["phoneNumber"].(string)
@@ -125,12 +117,10 @@ func (h *UserEventHandler) createPersonalCustomer(ctx context.Context, event dom
 		Data: domain.RequestData{
 			Type: "IndividualCustomer",
 			Attributes: domain.IndividualCustomerAttributes{
-				FullName: domain.FullName{
-					FirstName: fullName, // Simple split, could be improved.
-				},
+				FullName: domain.FullName{ FirstName: fullName },
 				Email:       email,
 				PhoneNumber: phoneNumber,
-				Address: domain.Address{ // Dummy address data as per spec minimums.
+				Address: domain.Address{
 					AddressLine1: "123 Main Street",
 					City:         "Ikeja",
 					State:        "Lagos",
@@ -144,32 +134,5 @@ func (h *UserEventHandler) createPersonalCustomer(ctx context.Context, event dom
 	if err != nil {
 		return "", err
 	}
-
 	return resp.Data.ID, nil
-}
-
-// triggerPersonalKYC handles the logic for triggering Tier 1 KYC on Anchor.
-func (h *UserEventHandler) triggerPersonalKYC(ctx context.Context, anchorCustomerID string, kycData map[string]interface{}) error {
-	bvn, _ := kycData["bvn"].(string)
-	dob, _ := kycData["dateOfBirth"].(string) // Expects "YYYY-MM-DD"
-
-	if bvn == "" || dob == "" {
-		return fmt.Errorf("missing required fields (bvn, dateOfBirth) in KYCData for KYC trigger")
-	}
-
-	req := domain.AnchorIndividualKYCRequest{
-		Data: domain.RequestData{
-			Type: "Verification",
-			Attributes: domain.IndividualKYCAttributes{
-				Level: "TIER_1",
-				Level1: domain.KYCLevel1{
-					BVN:         bvn,
-					DateOfBirth: dob,
-					Gender:      "Male", // Placeholder, this should come from the client.
-				},
-			},
-		},
-	}
-
-	return h.anchorClient.TriggerIndividualKYC(ctx, anchorCustomerID, req)
 }

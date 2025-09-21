@@ -68,10 +68,19 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Prepare KYC data for the event (Tier 0 base fields + any provided extras)
+	eventKYC := map[string]interface{}{}
+	for k, v := range req.KYCData {
+		eventKYC[k] = v
+	}
+	// Ensure email and phoneNumber are present for Tier 0 processing downstream
+	eventKYC["email"] = req.Email
+	eventKYC["phoneNumber"] = req.PhoneNumber
+
 	// Publish user.created event to RabbitMQ
 	event := domain.UserCreatedEvent{
 		UserID:  internalUserID,
-		KYCData: req.KYCData,
+		KYCData: eventKYC,
 	}
 
 	// In a real-world scenario, you would define your exchanges and routing keys in a config.
