@@ -29,7 +29,12 @@ func LoadConfig() (config Config, err error) {
 	// This replaces dots with underscores in env variables
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
-	// Read the config file
+	// Bind environment variables explicitly to ensure they appear in Unmarshal
+	_ = viper.BindEnv("SERVER_PORT")
+	_ = viper.BindEnv("DATABASE_URL")
+	_ = viper.BindEnv("RABBITMQ_URL")
+
+	// Read the config file (optional)
 	err = viper.ReadInConfig()
 	if err != nil {
 		// If the config file is not found, it's not a fatal error,
