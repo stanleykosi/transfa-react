@@ -1,7 +1,7 @@
 {
   "build": {
     "builder": "DOCKERFILE",
-    "dockerfilePath": "Dockerfile"
+    "dockerfilePath": "transfa-backend/auth-service/Dockerfile"
   },
   "deploy": {
     "startCommand": "./auth-service",
