@@ -68,6 +68,12 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 	var anchorCustomerID string
 	var err error
 
+	// If this user already has an Anchor Customer ID, skip creating again (idempotent)
+	if anchorIDPtr, getErr := h.repo.GetAnchorCustomerIDByUserID(ctx, event.UserID); getErr == nil && anchorIDPtr != nil && *anchorIDPtr != "" {
+		log.Printf("Anchor customer already linked (%s) for UserID %s. Skipping creation.", *anchorIDPtr, event.UserID)
+		return true
+	}
+
 	// Create customer on Anchor based on user type
 	switch domain.UserType(userType) {
 	case domain.PersonalUser:

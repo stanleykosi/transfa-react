@@ -45,27 +45,47 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create user domain object
-	newUser := &domain.User{
-		ClerkUserID:  clerkUserID,
-		Username:     req.Username,
-		Email:        &req.Email,
-		PhoneNumber:  &req.PhoneNumber,
-		Type:         req.UserType,
-		AllowSending: req.UserType == domain.PersonalUser, // Merchants are receive-only by default
-	}
-
-	// Save user to the database
-	internalUserID, err := h.repo.CreateUser(r.Context(), newUser)
-	if err != nil {
-		// Check if it's a unique constraint violation
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			http.Error(w, "Conflict: Username or email already exists", http.StatusConflict)
+	// Idempotent onboarding: if user already exists by Clerk ID, update contact info; otherwise create
+	var internalUserID string
+	existing, findErr := h.repo.FindByClerkUserID(r.Context(), clerkUserID)
+	if findErr == nil && existing != nil {
+		internalUserID = existing.ID
+		_ = h.repo.UpdateContactInfo(r.Context(), existing.ID, &req.Email, &req.PhoneNumber)
+		// If Anchor customer already exists, don't re-publish create event
+		if existing.AnchorCustomerID != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]any{
+				"user_id":             existing.ID,
+				"anchor_customer_id":  existing.AnchorCustomerID,
+				"status":              "tier0_already_created",
+			})
 			return
 		}
-		http.Error(w, "Internal server error: could not create user", http.StatusInternalServerError)
-		return
+	} else {
+		// Create user domain object
+		newUser := &domain.User{
+			ClerkUserID:  clerkUserID,
+			Username:     req.Username,
+			Email:        &req.Email,
+			PhoneNumber:  &req.PhoneNumber,
+			Type:         req.UserType,
+			AllowSending: req.UserType == domain.PersonalUser, // Merchants are receive-only by default
+		}
+
+		// Save user to the database
+		createdID, err := h.repo.CreateUser(r.Context(), newUser)
+		if err != nil {
+			// Check if it's a unique constraint violation
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				http.Error(w, "Conflict: Username or email already exists", http.StatusConflict)
+				return
+			}
+			http.Error(w, "Internal server error: could not create user", http.StatusInternalServerError)
+			return
+		}
+		internalUserID = createdID
 	}
 
 	// Prepare KYC data for the event (Tier 0 base fields + any provided extras)

@@ -81,6 +81,29 @@ func main() {
 
 	// Define routes
 	r.Post("/onboarding", onboardingHandler.ServeHTTP)
+	r.Get("/onboarding/status", func(w http.ResponseWriter, r *http.Request) {
+		clerkUserID := r.Header.Get("X-Clerk-User-Id")
+		if clerkUserID == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Unauthorized: Clerk User ID missing"))
+			return
+		}
+
+		// Minimal inline fetch to avoid new handler file; repository already constructed
+		existing, err := userRepo.FindByClerkUserID(r.Context(), clerkUserID)
+		if err != nil || existing == nil {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("User not found"))
+			return
+		}
+		status := "tier0_pending"
+		if existing.AnchorCustomerID != nil {
+			status = "tier0_created"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("{\"status\": \"" + status + "\"}"))
+	})
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Auth service is healthy"))

@@ -19,12 +19,14 @@ import (
 	"context"
 	"log"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // UserRepository defines the interface for user data storage operations needed by this service.
 type UserRepository interface {
 	UpdateAnchorCustomerID(ctx context.Context, userID, anchorCustomerID string) error
+	GetAnchorCustomerIDByUserID(ctx context.Context, userID string) (*string, error)
 }
 
 // PostgresUserRepository is the PostgreSQL implementation of the UserRepository.
@@ -58,4 +60,21 @@ func (r *PostgresUserRepository) UpdateAnchorCustomerID(ctx context.Context, use
 	}
 
 	return nil
+}
+
+// GetAnchorCustomerIDByUserID returns the anchor_customer_id if present for a user.
+func (r *PostgresUserRepository) GetAnchorCustomerIDByUserID(ctx context.Context, userID string) (*string, error) {
+	query := `
+		SELECT anchor_customer_id FROM users WHERE id = $1 LIMIT 1
+	`
+	var anchorID *string
+	row := r.db.QueryRow(ctx, query, userID)
+	if err := row.Scan(&anchorID); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, err
+		}
+		log.Printf("Error fetching anchor_customer_id for user %s: %v", userID, err)
+		return nil, err
+	}
+	return anchorID, nil
 }
