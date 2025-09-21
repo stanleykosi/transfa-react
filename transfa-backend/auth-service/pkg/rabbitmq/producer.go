@@ -3,7 +3,10 @@ package rabbitmq
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
+	"net/url"
+	"strings"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -15,10 +18,33 @@ type EventProducer struct {
 	channel *amqp.Channel
 }
 
+// sanitizeAMQPURL trims whitespace/quotes and ensures the URL has a valid
+// amqp/amqps scheme and a trailing slash to satisfy common brokers.
+func sanitizeAMQPURL(raw string) (string, error) {
+	clean := strings.TrimSpace(raw)
+	clean = strings.Trim(clean, "\"'")
+	if !strings.HasSuffix(clean, "/") {
+		clean += "/"
+	}
+	u, err := url.Parse(clean)
+	if err != nil {
+		return "", err
+	}
+	if u.Scheme != "amqp" && u.Scheme != "amqps" {
+		return "", errors.New("AMQP scheme must be either 'amqp://' or 'amqps://'")
+	}
+	return clean, nil
+}
+
 // NewEventProducer creates and returns a new EventProducer.
 // It establishes a connection and channel to RabbitMQ.
 func NewEventProducer(amqpURL string) (*EventProducer, error) {
-	conn, err := amqp.Dial(amqpURL)
+	cleanURL, err := sanitizeAMQPURL(amqpURL)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := amqp.Dial(cleanURL)
 	if err != nil {
 		return nil, err
 	}

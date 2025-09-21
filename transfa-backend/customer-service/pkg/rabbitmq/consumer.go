@@ -19,6 +19,8 @@ package rabbitmq
 
 import (
 	"log"
+	"net/url"
+	"strings"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -29,9 +31,27 @@ type Consumer struct {
 	ch   *amqp.Channel
 }
 
+func sanitizeAMQPURL(raw string) (string, error) {
+	clean := strings.TrimSpace(raw)
+	clean = strings.Trim(clean, "\"'")
+	if !strings.HasSuffix(clean, "/") {
+		clean += "/"
+	}
+	_, err := url.Parse(clean)
+	if err != nil {
+		return "", err
+	}
+	return clean, nil
+}
+
 // NewConsumer creates and returns a new RabbitMQ consumer.
 func NewConsumer(amqpURL string) (*Consumer, error) {
-	conn, err := amqp.Dial(amqpURL)
+	cleanURL, err := sanitizeAMQPURL(amqpURL)
+	if err != nil {
+		return nil, err
+	}
+
+	conn, err := amqp.Dial(cleanURL)
 	if err != nil {
 		return nil, err
 	}
