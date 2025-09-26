@@ -56,6 +56,7 @@ type FullName struct {
 	FirstName  string `json:"firstName"`
 	LastName   string `json:"lastName,omitempty"`
 	MiddleName string `json:"middleName,omitempty"`
+	MaidenName string `json:"maidenName,omitempty"`
 }
 
 // Address represents a physical address.

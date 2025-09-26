@@ -13,8 +13,11 @@ export interface OnboardingPayload {
   phoneNumber: string | undefined;
   kycData: {
     userType: 'personal' | 'merchant';
-    // Tier 0 (personal)
-    fullName?: string;
+    // Tier 0 (personal) - structured name fields
+    firstName?: string;
+    lastName?: string;
+    middleName?: string;
+    maidenName?: string;
     addressLine1?: string;
     city?: string;
     state?: string;
@@ -34,4 +37,5 @@ export interface OnboardingPayload {
 export interface OnboardingResponse {
   user_id: string;
   status: string;
+  anchor_customer_id?: string;
 }

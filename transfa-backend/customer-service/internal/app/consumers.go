@@ -77,7 +77,7 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 	// Create customer on Anchor based on user type
 	switch domain.UserType(userType) {
 	case domain.PersonalUser:
-		anchorCustomerID, err = h.createPersonalCustomer(ctx, event)
+		anchorCustomerID, err = h.createPersonalCustomerWithIdempotency(ctx, event)
 	case domain.MerchantUser:
 		log.Printf("Merchant user onboarding is not yet implemented. UserID: %s", event.UserID)
 		return true
@@ -93,26 +93,81 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "failed", ptr(err.Error()))
 			return true
 		}
+		
+		// Handle "customer already exists" errors - this means customer was created but DB update failed
+		if strings.Contains(err.Error(), "CUSTOMER_ALREADY_EXISTS") {
+			log.Printf("Customer already exists on Anchor for UserID %s. This indicates a previous creation succeeded but DB update failed.", event.UserID)
+			
+			// Check if we can extract the customer ID from the error for automatic recovery
+			if strings.Contains(err.Error(), "CUSTOMER_ALREADY_EXISTS_WITH_ID") {
+				// Extract customer ID from error message
+				parts := strings.Split(err.Error(), "|")
+				if len(parts) >= 2 {
+					customerID := strings.TrimPrefix(parts[0], "CUSTOMER_ALREADY_EXISTS_WITH_ID: ")
+					log.Printf("Attempting automatic recovery for UserID %s with extracted customer ID: %s", event.UserID, customerID)
+					
+					// Extract and construct full name from structured KYC data for database update
+					firstName, _ := event.KYCData["firstName"].(string)
+					lastName, _ := event.KYCData["lastName"].(string)
+					middleName, _ := event.KYCData["middleName"].(string)
+					maidenName, _ := event.KYCData["maidenName"].(string)
+					
+					var fullNamePtr *string
+					if firstName != "" && lastName != "" {
+						fullNameParts := []string{firstName}
+						if middleName != "" {
+							fullNameParts = append(fullNameParts, middleName)
+						}
+						fullNameParts = append(fullNameParts, lastName)
+						if maidenName != "" {
+							fullNameParts = append(fullNameParts, "("+maidenName+")")
+						}
+						constructedFullName := strings.Join(fullNameParts, " ")
+						fullNamePtr = &constructedFullName
+					}
+					
+					// Update the database with the existing customer ID and full name
+					if updateErr := h.repo.UpdateAnchorCustomerInfo(ctx, event.UserID, customerID, fullNamePtr); updateErr != nil {
+						log.Printf("ERROR: Failed to update user record with existing Anchor customer ID %s for UserID %s: %v", customerID, event.UserID, updateErr)
+						_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "system_error", ptr("Customer exists on Anchor but failed to link in database. Manual intervention required."))
+						return true // ACK to prevent infinite requeue
+					}
+					
+					log.Printf("Successfully recovered and linked existing Anchor customer %s to UserID %s", customerID, event.UserID)
+					_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "created", nil)
+					return true // ACK - recovery successful
+				}
+			}
+			
+			// If we can't extract customer ID, mark as system error requiring manual intervention
+			log.Printf("CRITICAL: Customer exists on Anchor but not in our DB for UserID %s. Manual intervention required to link the customer.", event.UserID)
+			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "system_error", ptr("Customer exists on Anchor but not linked in database. Manual intervention required."))
+			return true // ACK to prevent infinite requeue
+		}
+		
 		// Non-retriable client errors from Anchor (4xx): ACK to stop requeue storm
 		if strings.Contains(err.Error(), "status 400") ||
 			strings.Contains(err.Error(), "status 401") ||
 			strings.Contains(err.Error(), "status 403") ||
 			strings.Contains(err.Error(), "status 404") ||
 			strings.Contains(err.Error(), "status 409") ||
-			strings.Contains(err.Error(), "status 422") ||
-			strings.Contains(strings.ToLower(err.Error()), "already exist") {
+			strings.Contains(err.Error(), "status 422") {
 			log.Printf("Non-retriable client error from Anchor (ACK). UserID %s: %v", event.UserID, err)
 			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "failed", ptr(err.Error()))
 			return true
 		}
-		// Rate limit from Anchor: ACK to avoid hot-looping, rely on scheduled/backoff retry later
+		// Rate limit from Anchor: ACK to avoid hot-looping and API limits
 		if strings.Contains(err.Error(), "status 429") || strings.Contains(strings.ToLower(err.Error()), "too many requests") {
 			log.Printf("Rate limited by Anchor (ACK). UserID %s: %v", event.UserID, err)
-			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "rate_limited", ptr(err.Error()))
+			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "rate_limited", ptr("Rate limited by Anchor API. Please try again later."))
 			return true
 		}
-		log.Printf("ERROR: Failed to create Anchor customer for UserID %s: %v", event.UserID, err)
-		return false // transient error → retry
+		
+		// For any other errors (5xx, network issues, etc.), ACK to prevent API rate limiting
+		// This prevents hitting Anchor's API limits with repeated failed requests
+		log.Printf("ERROR: Failed to create Anchor customer for UserID %s (ACK to prevent API limits): %v", event.UserID, err)
+		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "failed", ptr("Failed to create customer on Anchor. Please try again later."))
+		return true // ACK to prevent API rate limiting
 	}
 
 	log.Printf("Successfully created Anchor customer %s for UserID %s", anchorCustomerID, event.UserID)
@@ -169,6 +224,50 @@ func (h *UserEventHandler) createPersonalCustomer(ctx context.Context, event dom
 	}
 
 	resp, err := h.anchorClient.CreateIndividualCustomer(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	return resp.Data.ID, nil
+}
+
+// createPersonalCustomerWithIdempotency handles the logic for creating an IndividualCustomer on Anchor with proper idempotency.
+func (h *UserEventHandler) createPersonalCustomerWithIdempotency(ctx context.Context, event domain.UserCreatedEvent) (string, error) {
+	// Extract structured name fields
+	firstName, _ := event.KYCData["firstName"].(string)
+	lastName, _ := event.KYCData["lastName"].(string)
+	middleName, _ := event.KYCData["middleName"].(string)
+	maidenName, _ := event.KYCData["maidenName"].(string)
+	email, _ := event.KYCData["email"].(string)
+	phoneNumber, _ := event.KYCData["phoneNumber"].(string)
+
+	if firstName == "" || lastName == "" || email == "" || phoneNumber == "" {
+		return "", fmt.Errorf("missing required fields (firstName, lastName, email, phoneNumber) in KYCData")
+	}
+
+	req := domain.AnchorCreateIndividualCustomerRequest{
+		Data: domain.RequestData{
+			Type: "IndividualCustomer",
+			Attributes: domain.IndividualCustomerAttributes{
+				FullName: domain.FullName{ 
+					FirstName:  firstName,
+					LastName:   lastName,
+					MiddleName: middleName,
+					MaidenName: maidenName,
+				},
+				Email:       email,
+				PhoneNumber: phoneNumber,
+				Address: domain.Address{
+					AddressLine1: getString(event.KYCData, "addressLine1", "123 Main Street"),
+					City:         getString(event.KYCData, "city", "Ikeja"),
+					State:        getString(event.KYCData, "state", "Lagos"),
+					PostalCode:   getString(event.KYCData, "postalCode", "100001"),
+					Country:      getString(event.KYCData, "country", "NG"),
+				},
+			},
+		},
+	}
+
+	resp, err := h.anchorClient.CreateIndividualCustomerWithIdempotency(ctx, req)
 	if err != nil {
 		return "", err
 	}

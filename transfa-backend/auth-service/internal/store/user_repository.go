@@ -16,6 +16,7 @@ type UserRepository interface {
 	CreateUser(ctx context.Context, user *domain.User) (string, error)
 	FindByClerkUserID(ctx context.Context, clerkUserID string) (*domain.User, error)
 	UpdateContactInfo(ctx context.Context, userID string, email *string, phone *string) error
+	UpdateAnchorCustomerInfo(ctx context.Context, userID string, anchorCustomerID string, fullName *string) error
 }
 
 // PostgresUserRepository is the PostgreSQL implementation of the UserRepository.
@@ -32,8 +33,8 @@ func NewPostgresUserRepository(db *pgxpool.Pool) *PostgresUserRepository {
 // It returns the new user's internal UUID or an error.
 func (r *PostgresUserRepository) CreateUser(ctx context.Context, user *domain.User) (string, error) {
 	query := `
-        INSERT INTO users (clerk_user_id, username, email, phone_number, user_type, allow_sending)
-        VALUES ($1, $2, $3, $4, $5, $6)
+        INSERT INTO users (clerk_user_id, username, email, phone_number, full_name, user_type, allow_sending)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
     `
 	var userID string
@@ -42,6 +43,7 @@ func (r *PostgresUserRepository) CreateUser(ctx context.Context, user *domain.Us
 		user.Username,
 		user.Email,
 		user.PhoneNumber,
+		user.FullName,
 		user.Type,
 		user.AllowSending,
 	).Scan(&userID)
@@ -63,7 +65,7 @@ func (r *PostgresUserRepository) CreateUser(ctx context.Context, user *domain.Us
 // FindByClerkUserID retrieves a user by their Clerk User ID.
 func (r *PostgresUserRepository) FindByClerkUserID(ctx context.Context, clerkUserID string) (*domain.User, error) {
 	query := `
-		SELECT id, clerk_user_id, anchor_customer_id, username, email, phone_number, user_type, allow_sending, created_at, updated_at
+		SELECT id, clerk_user_id, anchor_customer_id, username, email, phone_number, full_name, user_type, allow_sending, created_at, updated_at
 		FROM users WHERE clerk_user_id = $1 LIMIT 1
 	`
 	var u domain.User
@@ -76,6 +78,7 @@ func (r *PostgresUserRepository) FindByClerkUserID(ctx context.Context, clerkUse
 		&u.Username,
 		&u.Email,
 		&u.PhoneNumber,
+		&u.FullName,
 		&u.Type,
 		&u.AllowSending,
 		&u.CreatedAt,
@@ -104,6 +107,36 @@ func (r *PostgresUserRepository) UpdateContactInfo(ctx context.Context, userID s
 	_, err := r.db.Exec(ctx, query, email, phone, userID)
 	if err != nil {
 		log.Printf("Error updating contact info for user %s: %v", userID, err)
+		return err
+	}
+	return nil
+}
+
+// UpdateAnchorCustomerInfo updates the anchor customer ID and full name for a user.
+func (r *PostgresUserRepository) UpdateAnchorCustomerInfo(ctx context.Context, userID string, anchorCustomerID string, fullName *string) error {
+	var query string
+	var args []interface{}
+	
+	if anchorCustomerID != "" && fullName != nil {
+		// Update both anchor customer ID and full name
+		query = `UPDATE users SET anchor_customer_id = $1, full_name = $2, updated_at = NOW() WHERE id = $3`
+		args = []interface{}{anchorCustomerID, fullName, userID}
+	} else if anchorCustomerID != "" {
+		// Update only anchor customer ID
+		query = `UPDATE users SET anchor_customer_id = $1, updated_at = NOW() WHERE id = $2`
+		args = []interface{}{anchorCustomerID, userID}
+	} else if fullName != nil {
+		// Update only full name
+		query = `UPDATE users SET full_name = $1, updated_at = NOW() WHERE id = $2`
+		args = []interface{}{fullName, userID}
+	} else {
+		// Nothing to update
+		return nil
+	}
+	
+	_, err := r.db.Exec(ctx, query, args...)
+	if err != nil {
+		log.Printf("Error updating anchor customer info for user %s: %v", userID, err)
 		return err
 	}
 	return nil

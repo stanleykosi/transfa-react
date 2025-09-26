@@ -26,6 +26,7 @@ import (
 // UserRepository defines the interface for user data storage operations needed by this service.
 type UserRepository interface {
 	UpdateAnchorCustomerID(ctx context.Context, userID, anchorCustomerID string) error
+	UpdateAnchorCustomerInfo(ctx context.Context, userID string, anchorCustomerID string, fullName *string) error
 	GetAnchorCustomerIDByUserID(ctx context.Context, userID string) (*string, error)
     EnsureOnboardingStatusTable(ctx context.Context) error
     UpsertOnboardingStatus(ctx context.Context, userID, stage, status string, reason *string) error
@@ -57,6 +58,28 @@ func (r *PostgresUserRepository) UpdateAnchorCustomerID(ctx context.Context, use
 
 	if commandTag.RowsAffected() == 0 {
 		log.Printf("Warning: No user found with ID %s to update anchor_customer_id", userID)
+		// Depending on business logic, this might be considered an error.
+		// For now, we log it as a warning.
+	}
+
+	return nil
+}
+
+// UpdateAnchorCustomerInfo updates the anchor customer ID and full name for a user.
+func (r *PostgresUserRepository) UpdateAnchorCustomerInfo(ctx context.Context, userID string, anchorCustomerID string, fullName *string) error {
+	query := `
+        UPDATE users
+        SET anchor_customer_id = $1, full_name = $2, updated_at = NOW()
+        WHERE id = $3
+    `
+	commandTag, err := r.db.Exec(ctx, query, anchorCustomerID, fullName, userID)
+	if err != nil {
+		log.Printf("Error updating anchor customer info for user %s: %v", userID, err)
+		return err
+	}
+
+	if commandTag.RowsAffected() == 0 {
+		log.Printf("Warning: No user found with ID %s to update anchor customer info", userID)
 		// Depending on business logic, this might be considered an error.
 		// For now, we log it as a warning.
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/transfa/auth-service/internal/domain"
@@ -51,6 +52,30 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if findErr == nil && existing != nil {
 		internalUserID = existing.ID
 		_ = h.repo.UpdateContactInfo(r.Context(), existing.ID, &req.Email, &req.PhoneNumber)
+		
+		// Update full name if provided and user is personal type
+		if req.UserType == domain.PersonalUser {
+			firstName, _ := req.KYCData["firstName"].(string)
+			lastName, _ := req.KYCData["lastName"].(string)
+			middleName, _ := req.KYCData["middleName"].(string)
+			maidenName, _ := req.KYCData["maidenName"].(string)
+			
+			// Construct full name from structured fields
+			if firstName != "" && lastName != "" {
+				fullNameParts := []string{firstName}
+				if middleName != "" {
+					fullNameParts = append(fullNameParts, middleName)
+				}
+				fullNameParts = append(fullNameParts, lastName)
+				if maidenName != "" {
+					fullNameParts = append(fullNameParts, "("+maidenName+")")
+				}
+				constructedFullName := strings.Join(fullNameParts, " ")
+				// Update full name in database
+				_ = h.repo.UpdateAnchorCustomerInfo(r.Context(), existing.ID, "", &constructedFullName)
+			}
+		}
+		
 		// If Anchor customer already exists, don't re-publish create event
 		if existing.AnchorCustomerID != nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -63,12 +88,36 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
+		// Extract and construct full name from structured KYC data for personal users
+		var fullName *string
+		if req.UserType == domain.PersonalUser {
+			firstName, _ := req.KYCData["firstName"].(string)
+			lastName, _ := req.KYCData["lastName"].(string)
+			middleName, _ := req.KYCData["middleName"].(string)
+			maidenName, _ := req.KYCData["maidenName"].(string)
+			
+			// Construct full name from structured fields
+			if firstName != "" && lastName != "" {
+				fullNameParts := []string{firstName}
+				if middleName != "" {
+					fullNameParts = append(fullNameParts, middleName)
+				}
+				fullNameParts = append(fullNameParts, lastName)
+				if maidenName != "" {
+					fullNameParts = append(fullNameParts, "("+maidenName+")")
+				}
+				constructedFullName := strings.Join(fullNameParts, " ")
+				fullName = &constructedFullName
+			}
+		}
+
 		// Create user domain object
 		newUser := &domain.User{
 			ClerkUserID:  clerkUserID,
 			Username:     req.Username,
 			Email:        &req.Email,
 			PhoneNumber:  &req.PhoneNumber,
+			FullName:     fullName,
 			Type:         req.UserType,
 			AllowSending: req.UserType == domain.PersonalUser, // Merchants are receive-only by default
 		}
@@ -114,5 +163,5 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Respond to the client
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]string{"user_id": internalUserID, "status": "onboarding_initiated"})
+	json.NewEncoder(w).Encode(map[string]string{"user_id": internalUserID, "status": "tier0_processing"})
 }

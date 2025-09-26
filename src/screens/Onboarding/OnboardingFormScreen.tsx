@@ -27,7 +27,7 @@ import {
   Platform,
   Alert,
 } from 'react-native';
-import { useUser } from '@clerk/clerk-expo';
+import { useUser, useAuth } from '@clerk/clerk-expo';
 import { useNavigation, StackActions } from '@react-navigation/native';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import FormInput from '@/components/FormInput';
@@ -42,6 +42,7 @@ type UserType = 'personal' | 'merchant';
 const OnboardingFormScreen = () => {
   const navigation = useNavigation();
   const { user } = useUser();
+  const { signOut } = useAuth();
 
   const [userType, setUserType] = useState<UserType>('personal');
 
@@ -50,7 +51,10 @@ const OnboardingFormScreen = () => {
   const [phone, setPhone] = useState<string>(user?.primaryPhoneNumber?.phoneNumber || '');
 
   // Personal Tier 0
-  const [fullName, setFullName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [maidenName, setMaidenName] = useState('');
   const [addressLine1, setAddressLine1] = useState('');
   const [city, setCity] = useState('');
   const [stateVal, setStateVal] = useState('');
@@ -62,8 +66,24 @@ const OnboardingFormScreen = () => {
   const [rcNumber, setRcNumber] = useState('');
 
   const { mutate: submitOnboarding, isPending: isLoading } = useOnboardingMutation({
-    onSuccess: () => {
-      Alert.alert('Success', 'Profile created. Next, verify to open your account.');
+    onSuccess: (response) => {
+      // Check if this is a Tier 0 completion or already created
+      if (response.status === 'tier0_already_created') {
+        Alert.alert(
+          'Success',
+          'Your profile is already set up! You can now proceed to create your account.'
+        );
+      } else if (response.status === 'tier0_processing') {
+        Alert.alert(
+          'Processing',
+          "Your Tier 0 KYC is being processed. You will be notified when it's complete."
+        );
+      } else {
+        Alert.alert(
+          'Success',
+          'Tier 0 KYC completed successfully! Your customer profile has been created. You can now proceed to create your account.'
+        );
+      }
       // Proceed to Tier 1 create-account screen (guarded by backend status)
       navigation.dispatch(StackActions.replace('CreateAccount'));
     },
@@ -75,6 +95,21 @@ const OnboardingFormScreen = () => {
       console.error('Onboarding error:', error);
     },
   });
+
+  const handleSignOut = () => {
+    Alert.alert(
+      'Sign Out',
+      'Are you sure you want to sign out? You can use a different account to test the onboarding flow.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Sign Out',
+          style: 'destructive',
+          onPress: () => signOut(),
+        },
+      ]
+    );
+  };
 
   const handleOnboardingSubmit = () => {
     if (!username) {
@@ -89,14 +124,20 @@ const OnboardingFormScreen = () => {
     let kycData: OnboardingPayload['kycData'];
 
     if (userType === 'personal') {
-      // Tier 0 only
-      if (!fullName || !addressLine1 || !city || !stateVal || !country) {
-        Alert.alert('Validation Error', 'Please complete your address and full name.');
+      // Tier 0 only - firstName and lastName are required
+      if (!firstName || !lastName || !addressLine1 || !city || !stateVal || !country) {
+        Alert.alert(
+          'Validation Error',
+          'Please complete your address and name (first name and last name are required).'
+        );
         return;
       }
       kycData = {
         userType,
-        fullName,
+        firstName,
+        lastName,
+        middleName: middleName || undefined,
+        maidenName: maidenName || undefined,
         addressLine1,
         city,
         state: stateVal,
@@ -157,10 +198,28 @@ const OnboardingFormScreen = () => {
           {userType === 'personal' ? (
             <>
               <FormInput
-                label="Full Name"
-                value={fullName}
-                onChangeText={setFullName}
-                placeholder="Enter your full legal name"
+                label="First Name *"
+                value={firstName}
+                onChangeText={setFirstName}
+                placeholder="Enter your first name"
+              />
+              <FormInput
+                label="Last Name *"
+                value={lastName}
+                onChangeText={setLastName}
+                placeholder="Enter your last name"
+              />
+              <FormInput
+                label="Middle Name"
+                value={middleName}
+                onChangeText={setMiddleName}
+                placeholder="Enter your middle name (optional)"
+              />
+              <FormInput
+                label="Maiden Name"
+                value={maidenName}
+                onChangeText={setMaidenName}
+                placeholder="Enter your maiden name (optional)"
               />
               <FormInput
                 label="Address Line 1"
@@ -211,6 +270,12 @@ const OnboardingFormScreen = () => {
               onPress={handleOnboardingSubmit}
               isLoading={isLoading}
             />
+            <PrimaryButton
+              title="Sign Out (Test Different Account)"
+              onPress={handleSignOut}
+              style={styles.signOutButton}
+              textStyle={styles.signOutButtonText}
+            />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -238,6 +303,15 @@ const styles = StyleSheet.create({
   },
   buttonContainer: {
     marginTop: theme.spacing.s32,
+    gap: theme.spacing.s12,
+  },
+  signOutButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  signOutButtonText: {
+    color: theme.colors.textSecondary,
   },
 });
 
