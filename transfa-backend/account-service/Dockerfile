@@ -1,4 +1,5 @@
 # Multi-stage build for account-service
+# syntax=docker/dockerfile:1.5
 FROM golang:1.24-alpine AS builder
 
 # Install git and ca-certificates (needed for go mod download)
@@ -10,20 +11,21 @@ WORKDIR /app
 # Copy go mod files first for better caching
 COPY go.mod go.sum ./
 
-# Download dependencies
-RUN go mod download
+# Download dependencies with BuildKit cache
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
 
-# Copy source code
 COPY . .
 
 # Build the application
 # CGO_ENABLED=0 creates a statically linked binary
 # -a forces rebuilding of packages
 # -installsuffix cgo adds a suffix to the package installation directory
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags='-w -s' \
-    -o account-service \
-    ./cmd/main.go
+ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -ldflags='-w -s' -o account-service ./cmd/main.go
 
 # Final stage - minimal image
 FROM alpine:latest
