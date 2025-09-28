@@ -53,18 +53,18 @@ func main() {
 	}
 
 	// Establish database connection pool with better configuration
-	config, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	dbConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("Unable to parse database URL: %v\n", err)
 	}
 	
 	// Configure connection pool to prevent prepared statement conflicts
-	config.MaxConns = 10
-	config.MinConns = 2
-	config.MaxConnLifetime = 30 * time.Minute
-	config.MaxConnIdleTime = 5 * time.Minute
+	dbConfig.MaxConns = 10
+	dbConfig.MinConns = 2
+	dbConfig.MaxConnLifetime = 30 * time.Minute
+	dbConfig.MaxConnIdleTime = 5 * time.Minute
 	
-	dbpool, err := pgxpool.NewWithConfig(context.Background(), config)
+	dbpool, err := pgxpool.NewWithConfig(context.Background(), dbConfig)
 	if err != nil {
 		log.Fatalf("Unable to connect to database: %v\n", err)
 	}

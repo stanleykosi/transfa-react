@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
@@ -45,8 +46,19 @@ func main() {
 		log.Fatalf("cannot load config: %v", err)
 	}
 
-	// Establish database connection pool.
-	dbpool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	// Establish database connection pool with better configuration.
+	dbConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("Unable to parse database URL: %v\n", err)
+	}
+	
+	// Configure connection pool to prevent prepared statement conflicts
+	dbConfig.MaxConns = 10
+	dbConfig.MinConns = 2
+	dbConfig.MaxConnLifetime = 30 * time.Minute
+	dbConfig.MaxConnIdleTime = 5 * time.Minute
+	
+	dbpool, err := pgxpool.NewWithConfig(context.Background(), dbConfig)
 	if err != nil {
 		log.Fatalf("Unable to connect to database: %v\n", err)
 	}
