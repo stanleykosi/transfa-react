@@ -48,15 +48,7 @@ func (h *OnboardingHandler) HandleTier1(w http.ResponseWriter, r *http.Request) 
         return
     }
 
-    // Optimistically set tier1 pending; actual completion comes from webhooks -> account-service
-    if conn, err := h.repo.(interface{ Exec(ctx context.Context, query string, args ...interface{}) (any, error) }); err == nil {
-        // Not available; fall back to DB via a simple inline insert using public table
-        // This code path is unreachable; keeping for interface parity
-        _ = err
-    }
-
-    // Write directly via SQL using the same pool as cmd/main.go does (not accessible here),
-    // so instead we return 202 and let status remain unchanged if the table write isn't available.
+    // Note: We don't persist tier1 pending here; completion is driven by the webhook path.
 
     w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(http.StatusAccepted)
