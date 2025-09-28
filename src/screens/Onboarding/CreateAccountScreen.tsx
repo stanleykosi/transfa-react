@@ -16,9 +16,9 @@ import { useAuth, useUser } from '@clerk/clerk-expo';
 const CreateAccountScreen = () => {
   const { getToken, signOut } = useAuth();
   const { user } = useUser();
-  const [status, setStatus] = useState<'checking' | 'tier0_pending' | 'tier0_created' | 'error'>(
-    'checking'
-  );
+  const [status, setStatus] = useState<
+    'checking' | 'tier0_pending' | 'tier0_created' | 'error' | 'confirming_creation'
+  >('checking');
   const [dob, setDob] = useState(''); // YYYY-MM-DD
   const [gender, setGender] = useState<'male' | 'female' | ''>('');
   const [bvn, setBvn] = useState('');
@@ -42,25 +42,26 @@ const CreateAccountScreen = () => {
         if (!mounted) {
           return;
         }
-        setStatus(data?.status === 'tier0_created' ? 'tier0_created' : 'tier0_pending');
+
         if (data?.status === 'tier0_created') {
           // User can proceed to create account
+          setStatus('tier0_created');
           return;
         } else if (data?.status === 'tier0_processing') {
           Alert.alert(
             'Processing',
             'Your Tier 0 KYC is being processed. Please wait a moment and try again.'
           );
+          setStatus('tier0_pending');
         } else if (data?.status === 'tier0_failed') {
           Alert.alert(
             'Verification Failed',
             'There was an issue with your verification. Please contact support or try again.'
           );
+          setStatus('error');
         } else {
-          Alert.alert(
-            'Verification in progress',
-            'We are verifying your details. Please try again shortly.'
-          );
+          // Still pending - show loading state and poll for updates
+          setStatus('tier0_pending');
         }
       } catch (e) {
         if (!mounted) {
@@ -74,6 +75,36 @@ const CreateAccountScreen = () => {
       mounted = false;
     };
   }, [getToken, headers]);
+
+  // Poll for status updates when in pending state
+  useEffect(() => {
+    if (status !== 'tier0_pending') {
+      return;
+    }
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const token = await getToken().catch(() => undefined);
+        const { data } = await apiClient.get<{ status: string }>('/onboarding/status', {
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
+        });
+
+        if (data?.status === 'tier0_created') {
+          // Customer creation confirmed! Show loading state then proceed
+          setStatus('confirming_creation');
+
+          // Show confirmation for 2 seconds, then proceed to Tier 1
+          setTimeout(() => {
+            setStatus('tier0_created');
+          }, 2000);
+        }
+      } catch (e) {
+        console.error('Error polling status:', e);
+      }
+    }, 3000); // Poll every 3 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [status, getToken, headers]);
 
   const handleSignOut = () => {
     Alert.alert(
@@ -112,13 +143,26 @@ const CreateAccountScreen = () => {
     }
   };
 
+  if (status === 'confirming_creation') {
+    return (
+      <ScreenWrapper>
+        <View style={styles.centered}>
+          <Text style={styles.title}>✅ Customer Account Created!</Text>
+          <Text style={styles.subtitle}>
+            Your account has been successfully created. Proceeding to Tier 1 verification...
+          </Text>
+        </View>
+      </ScreenWrapper>
+    );
+  }
+
   if (status !== 'tier0_created') {
     return (
       <ScreenWrapper>
         <View style={styles.centered}>
           <Text style={styles.title}>Verifying your details…</Text>
           <Text style={styles.subtitle}>
-            You can return to this step once verification is complete.
+            We're creating your customer account. This will take just a moment...
           </Text>
         </View>
       </ScreenWrapper>

@@ -112,18 +112,20 @@ func main() {
 			w.Write([]byte("User not found"))
 			return
 		}
+		// Check onboarding_status table for the actual status
 		status := "tier0_pending"
-		if existing.AnchorCustomerID != nil {
-			status = "tier0_created"
-		}
-		// Also surface any failure reason recorded by customer-service
-		// Minimal inline query to onboarding_status (if exists)
-		type row struct{ Status string; Reason *string }
 		var reason *string
 		if conn, err := dbpool.Acquire(r.Context()); err == nil {
 			defer conn.Release()
-			qr := conn.QueryRow(r.Context(), `SELECT reason FROM onboarding_status WHERE user_id = $1 AND stage = 'tier0'`, existing.ID)
-			_ = qr.Scan(&reason)
+			qr := conn.QueryRow(r.Context(), `SELECT status, reason FROM onboarding_status WHERE user_id = $1 AND stage = 'tier0'`, existing.ID)
+			var dbStatus string
+			_ = qr.Scan(&dbStatus, &reason)
+			if dbStatus != "" {
+				status = dbStatus
+			} else if existing.AnchorCustomerID != nil {
+				// Fallback: if no onboarding_status record but has AnchorCustomerID, assume created
+				status = "tier0_created"
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
