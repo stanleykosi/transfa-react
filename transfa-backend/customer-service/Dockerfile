@@ -1,5 +1,5 @@
 # Multi-stage build for customer-service
-# syntax=docker/dockerfile:1.5
+# syntax=docker/dockerfile:1
 FROM golang:1.24-alpine AS builder
 
 # Install git and ca-certificates (needed for go mod download)
@@ -11,10 +11,7 @@ WORKDIR /app
 # Copy go mod files first for better caching
 COPY go.mod go.sum ./
 
-# Download dependencies with BuildKit cache
-RUN --mount=type=cache,id=gomodcache,target=/go/pkg/mod \
-    --mount=type=cache,id=gobuildcache,target=/root/.cache/go-build \
-    go mod download
+RUN go mod download
 
 COPY . .
 
@@ -23,9 +20,7 @@ COPY . .
 # -a forces rebuilding of packages
 # -installsuffix cgo adds a suffix to the package installation directory
 ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
-RUN --mount=type=cache,id=gomodcache,target=/go/pkg/mod \
-    --mount=type=cache,id=gobuildcache,target=/root/.cache/go-build \
-    go build -ldflags='-w -s' -o customer-service ./cmd/main.go
+RUN go build -ldflags='-w -s' -o customer-service ./cmd/main.go
 
 # Final stage - minimal image
 FROM alpine:latest
