@@ -17,7 +17,7 @@
  * - The submission logic is handled by the `useOnboardingMutation` hook.
  * - On successful submission, the user is navigated to the main app interface.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -36,6 +36,7 @@ import { theme } from '@/constants/theme';
 import UserTypeSelector from './components/UserTypeSelector';
 import { useOnboardingMutation } from '@/api/authApi';
 import { OnboardingPayload } from '@/types/api';
+import apiClient from '@/api/apiClient';
 
 type UserType = 'personal' | 'merchant';
 
@@ -66,10 +67,11 @@ const OnboardingFormScreen = () => {
   const [rcNumber, setRcNumber] = useState('');
 
   const { mutate: submitOnboarding, isPending: isLoading } = useOnboardingMutation({
-    onSuccess: (response) => {
+    onSuccess: async (response) => {
       console.log('✅ Tier 0 submission successful:', response.status);
-      // Navigate directly to Tier 1 form - no more alerts or verifying pages
-      navigation.dispatch(StackActions.replace('CreateAccount'));
+      // Immediately poll backend for tier0_created with a tight timeout and brief inline loader
+      setIsVerifying(true);
+      await pollTier0Created();
     },
     onError: (error) => {
       const errorMessage =
@@ -79,6 +81,55 @@ const OnboardingFormScreen = () => {
       console.error('Onboarding error:', error);
     },
   });
+
+  const [isVerifying, setIsVerifying] = useState(false);
+  const isMountedRef = useRef(true);
+  const { getToken } = useAuth();
+  const authHeaders = useMemo(() => ({ 'X-Clerk-User-Id': (user as any)?.id || '' }), [user]);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const pollTier0Created = async () => {
+    // Poll quickly up to ~3 seconds total, then fallback to CreateAccount to avoid any stall
+    const attempts = 6; // 6 * 500ms = 3s max
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const token = await getToken().catch(() => undefined);
+        const { data } = await apiClient.get<{ status: string }>('/onboarding/status', {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...authHeaders,
+          },
+        });
+        if (
+          data?.status === 'tier0_created' ||
+          data?.status === 'tier1_created' ||
+          data?.status === 'completed'
+        ) {
+          if (!isMountedRef.current) {
+            return;
+          }
+          // Move to Tier 1 immediately
+          navigation.dispatch(StackActions.replace('CreateAccount'));
+          setIsVerifying(false);
+          return;
+        }
+      } catch (e) {
+        // ignore transient errors
+      }
+      await new Promise((res) => setTimeout(res, 500));
+    }
+    // If still not ready, route to CreateAccount optimistically (backend guard will handle)
+    if (!isMountedRef.current) {
+      return;
+    }
+    setIsVerifying(false);
+    navigation.dispatch(StackActions.replace('CreateAccount'));
+  };
 
   const handleSignOut = () => {
     Alert.alert(
@@ -250,9 +301,9 @@ const OnboardingFormScreen = () => {
 
           <View style={styles.buttonContainer}>
             <PrimaryButton
-              title={isLoading ? 'Creating your account...' : 'Save & Continue'}
+              title={isLoading || isVerifying ? 'Please wait…' : 'Save & Continue'}
               onPress={handleOnboardingSubmit}
-              isLoading={isLoading}
+              isLoading={isLoading || isVerifying}
             />
             <PrimaryButton
               title="Sign Out (Test Different Account)"

@@ -83,7 +83,7 @@ const CreateAccountScreen = () => {
     return () => {
       mounted = false;
     };
-  }, [getToken, headers]);
+  }, [getToken, headers, navigation]);
 
   // No more polling - users come here when tier0 is already created
 
@@ -100,21 +100,6 @@ const CreateAccountScreen = () => {
         },
       ]
     );
-  };
-
-  const handleCheckStatus = async () => {
-    try {
-      const token = await getToken().catch(() => undefined);
-      const { data } = await apiClient.get<{ status: string }>('/onboarding/status', {
-        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
-      });
-
-      console.log('🔍 Manual status check:', data?.status);
-      Alert.alert('Status Check', `Current status: ${data?.status || 'unknown'}`);
-    } catch (error) {
-      console.error('Error checking status:', error);
-      Alert.alert('Error', 'Failed to check status');
-    }
   };
 
   const handleSubmitTier1 = async () => {
@@ -155,19 +140,15 @@ const CreateAccountScreen = () => {
     }
   };
 
-  // If tier0 is not created, show neutral loading block (nicer UX)
+  // If tier0 is not created, we rely on AppStack and OnboardingForm to drive the flow.
   if (status !== 'tier0_created') {
     return (
       <ScreenWrapper>
         <View style={styles.centered}>
           <ActivityIndicator size="large" />
-          <Text style={[styles.subtitle, { marginTop: theme.spacing.s16 }]}>Checking your verification status…</Text>
-          <PrimaryButton
-            title="Refresh"
-            onPress={handleCheckStatus}
-            style={styles.debugButton}
-            textStyle={styles.debugButtonText}
-          />
+          <Text style={[styles.subtitle, { marginTop: theme.spacing.s16 }]}>
+            Preparing your form…
+          </Text>
         </View>
       </ScreenWrapper>
     );

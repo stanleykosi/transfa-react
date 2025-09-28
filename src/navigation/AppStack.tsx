@@ -66,16 +66,23 @@ const AppStack = () => {
             setInitialRoute('AppTabs');
             break;
           case 'tier0_created':
-          case 'tier0_pending':
             setInitialRoute('CreateAccount');
+            break;
+          case 'tier0_pending':
+            // Keep user in onboarding; the screen will show a slim in-place loader and poll
+            setInitialRoute('OnboardingForm');
             break;
           case 'new':
           default:
             setInitialRoute('OnboardingForm');
             break;
         }
-      } catch (error) {
-        console.error('Error checking user status:', error);
+      } catch (error: any) {
+        // Swallow 404s (new user) and quietly route to onboarding
+        const status = error?.response?.status;
+        if (status !== 404) {
+          console.warn('Status check failed:', status);
+        }
         // Default to onboarding form if we can't check status
         setInitialRoute('OnboardingForm');
       } finally {
