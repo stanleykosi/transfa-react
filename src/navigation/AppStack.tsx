@@ -19,7 +19,6 @@
 
 import React, { useEffect, useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { useNavigation } from '@react-navigation/native';
 import AppTabs, { AppTabsParamList } from './AppTabs';
 import OnboardingFormScreen from '@/screens/Onboarding/OnboardingFormScreen';
 import { NavigatorScreenParams } from '@react-navigation/native';
@@ -39,20 +38,23 @@ const Stack = createNativeStackNavigator<AppStackParamList>();
 const AppStack = () => {
   const { getToken } = useAuth();
   const { user } = useUser();
-  const navigation = useNavigation();
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
-  const [initialRoute, setInitialRoute] = useState<'AppTabs' | 'OnboardingForm' | 'CreateAccount'>('AppTabs');
+  const [initialRoute, setInitialRoute] = useState<'AppTabs' | 'OnboardingForm' | 'CreateAccount'>(
+    'AppTabs'
+  );
 
   useEffect(() => {
     const checkUserStatus = async () => {
-      if (!user?.id) return;
+      if (!user?.id) {
+        return;
+      }
 
       try {
         const token = await getToken().catch(() => undefined);
         const { data } = await apiClient.get<{ status: string }>('/onboarding/status', {
           headers: {
             'X-Clerk-User-Id': user.id,
-            ...(token ? { Authorization: `Bearer ${token}` } : {})
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
         });
 

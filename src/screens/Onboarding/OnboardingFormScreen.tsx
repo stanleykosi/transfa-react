@@ -250,7 +250,7 @@ const OnboardingFormScreen = () => {
 
           <View style={styles.buttonContainer}>
             <PrimaryButton
-              title={isLoading ? "Creating your account..." : "Save & Continue"}
+              title={isLoading ? 'Creating your account...' : 'Save & Continue'}
               onPress={handleOnboardingSubmit}
               isLoading={isLoading}
             />

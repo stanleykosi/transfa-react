@@ -18,9 +18,9 @@ const CreateAccountScreen = () => {
   const { getToken, signOut } = useAuth();
   const { user } = useUser();
   const navigation = useNavigation();
-  const [status, setStatus] = useState<
-    'checking' | 'tier0_pending' | 'tier0_created' | 'error'
-  >('checking');
+  const [status, setStatus] = useState<'checking' | 'tier0_pending' | 'tier0_created' | 'error'>(
+    'checking'
+  );
   const [dob, setDob] = useState(''); // YYYY-MM-DD
   const [gender, setGender] = useState<'male' | 'female' | ''>('');
   const [bvn, setBvn] = useState('');
@@ -132,16 +132,20 @@ const CreateAccountScreen = () => {
     try {
       const token = await getToken().catch(() => undefined);
       // Submit Tier 1 details to backend
-      await apiClient.post('/onboarding/tier1', {
-        dob,
-        gender,
-        bvn
-      }, {
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...headers
+      await apiClient.post(
+        '/onboarding/tier1',
+        {
+          dob,
+          gender,
+          bvn,
+        },
+        {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...headers,
+          },
         }
-      });
+      );
 
       console.log('✅ Tier 1 details submitted successfully');
       Alert.alert(
@@ -153,8 +157,8 @@ const CreateAccountScreen = () => {
             onPress: () => {
               // Navigate to main app
               navigation.navigate('AppTabs' as never);
-            }
-          }
+            },
+          },
         ]
       );
     } catch (e) {
@@ -171,9 +175,7 @@ const CreateAccountScreen = () => {
       <ScreenWrapper>
         <View style={styles.centered}>
           <Text style={styles.title}>Access Denied</Text>
-          <Text style={styles.subtitle}>
-            Please complete Tier 0 verification first.
-          </Text>
+          <Text style={styles.subtitle}>Please complete Tier 0 verification first.</Text>
           <PrimaryButton
             title="Check Status (Debug)"
             onPress={handleCheckStatus}
