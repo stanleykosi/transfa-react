@@ -18,14 +18,15 @@
 package rabbitmq
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"log"
-	"net/url"
-	"strings"
+    "context"
+    "encoding/json"
+    "errors"
+    "log"
+    "net/url"
+    "strings"
+    "time"
 
-	"github.com/rabbitmq/amqp091-go"
+    "github.com/rabbitmq/amqp091-go"
 )
 
 // EventProducer is a client for publishing events to RabbitMQ.
@@ -58,7 +59,7 @@ func NewEventProducer(amqpURL string) (*EventProducer, error) {
 		return nil, err
 	}
 
-	conn, err := amqp091.Dial(cleanURL)
+    conn, err := amqp091.DialConfig(cleanURL, amqp091.Config{Dial: amqp091.DefaultDial(10 * time.Second)})
 	if err != nil {
 		return nil, err
 	}

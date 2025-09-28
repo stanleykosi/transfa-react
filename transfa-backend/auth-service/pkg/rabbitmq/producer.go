@@ -1,15 +1,15 @@
 package rabbitmq
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"log"
-	"net/url"
-	"strings"
-	"time"
+    "context"
+    "encoding/json"
+    "errors"
+    "log"
+    "net/url"
+    "strings"
+    "time"
 
-	amqp "github.com/rabbitmq/amqp091-go"
+    amqp "github.com/rabbitmq/amqp091-go"
 )
 
 // EventProducer is responsible for publishing events to a RabbitMQ exchange.
@@ -17,6 +17,16 @@ type EventProducer struct {
 	conn    *amqp.Connection
 	channel *amqp.Channel
 }
+
+// EventProducerFallback is a minimal no-op publisher used when RabbitMQ is unavailable at startup.
+// It allows the service to start and log events instead of failing hard.
+type EventProducerFallback struct{}
+
+func (p *EventProducerFallback) Publish(ctx context.Context, exchange, routingKey string, body interface{}) error {
+    log.Printf("[MQ-FALLBACK] Would publish to exchange='%s' routingKey='%s' body=%v", exchange, routingKey, body)
+    return nil
+}
+func (p *EventProducerFallback) Close() {}
 
 func sanitizeAMQPURL(raw string) (string, error) {
 	clean := strings.TrimSpace(raw)
@@ -44,12 +54,13 @@ func NewEventProducer(amqpURL string) (*EventProducer, error) {
 		return nil, err
 	}
 
-	conn, err := amqp.Dial(cleanURL)
+    // Use a bounded dial timeout so startup does not hang indefinitely
+    conn, err := amqp.DialConfig(cleanURL, amqp.Config{Dial: amqp.DefaultDial(10 * time.Second)})
 	if err != nil {
 		return nil, err
 	}
 
-	ch, err := conn.Channel()
+    ch, err := conn.Channel()
 	if err != nil {
 		return nil, err
 	}

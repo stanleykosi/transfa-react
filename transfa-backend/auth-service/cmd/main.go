@@ -78,15 +78,18 @@ func main() {
 	defer dbpool.Close()
 	log.Println("Database connection established")
 
-	log.Printf("RABBITMQ_URL (masked)=%s", maskAMQPURLForLog(cfg.RabbitMQURL))
+    log.Printf("RABBITMQ_URL (masked)=%s", maskAMQPURLForLog(cfg.RabbitMQURL))
 
-	// Set up RabbitMQ producer
-	producer, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL)
-	if err != nil {
-		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
-	}
-	defer producer.Close()
-	log.Println("RabbitMQ producer connected")
+    // Set up RabbitMQ producer with bounded dial timeout
+    producer, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL)
+    if err != nil {
+        // Don't block startup forever; log and continue with a no-op producer-like wrapper
+        log.Printf("WARNING: Failed to connect to RabbitMQ at startup: %v. Onboarding events will be logged only until MQ is available.", err)
+        producer = &rabbitmq.EventProducerFallback{}
+    } else {
+        defer producer.Close()
+        log.Println("RabbitMQ producer connected")
+    }
 
     // Set up repository
     userRepo := store.NewPostgresUserRepository(dbpool)
