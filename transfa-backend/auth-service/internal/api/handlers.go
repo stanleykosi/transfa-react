@@ -11,21 +11,65 @@ import (
 	"github.com/transfa/auth-service/internal/domain"
 	"github.com/transfa/auth-service/internal/store"
 	"github.com/transfa/auth-service/pkg/rabbitmq"
+	"github.com/transfa/auth-service/pkg/anchorclient"
 )
 
 // OnboardingHandler handles the user onboarding process.
 type OnboardingHandler struct {
     repo     store.UserRepository
     producer *rabbitmq.EventProducer
+    anchor   *anchorclient.Client
 }
 
 // NewOnboardingHandler creates a new handler for the onboarding endpoint.
-func NewOnboardingHandler(repo store.UserRepository, producer *rabbitmq.EventProducer) *OnboardingHandler {
-    return &OnboardingHandler{repo: repo, producer: producer}
+func NewOnboardingHandler(repo store.UserRepository, producer *rabbitmq.EventProducer, anchor *anchorclient.Client) *OnboardingHandler {
+    return &OnboardingHandler{repo: repo, producer: producer, anchor: anchor}
+}
+
+// handleTier1Upgrade receives BVN/DOB/Gender and calls Anchor identification upgrade.
+// It records onboarding_status (tier1 -> pending) and returns 202.
+func (h *OnboardingHandler) handleTier1Upgrade(w http.ResponseWriter, r *http.Request) {
+    clerkUserID := r.Header.Get("X-Clerk-User-Id")
+    if clerkUserID == "" {
+        http.Error(w, "Unauthorized: Clerk User ID missing", http.StatusUnauthorized)
+        return
+    }
+    existing, err := h.repo.FindByClerkUserID(r.Context(), clerkUserID)
+    if err != nil || existing == nil {
+        http.Error(w, "User not found", http.StatusNotFound)
+        return
+    }
+
+    // Parse payload
+    var body struct {
+        Dob    string `json:"dob"`
+        Gender string `json:"gender"`
+        Bvn    string `json:"bvn"`
+    }
+    if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
+        return
+    }
+
+    // Optimistically set tier1 pending; actual completion comes from Anchor webhook -> account-service
+    _ = h.repo.UpsertOnboardingStatus(r.Context(), existing.ID, "tier1", "pending", nil)
+
+    // If we have an Anchor client and customer id, we can trigger the upgrade (best-effort)
+    if h.anchor != nil && existing.AnchorCustomerID != nil {
+        _ = h.anchor.TriggerIndividualVerification(r.Context(), *existing.AnchorCustomerID, body.Bvn, body.Dob, body.Gender)
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusAccepted)
+    _ = json.NewEncoder(w).Encode(map[string]string{"status": "tier1_pending"})
 }
 
 // ServeHTTP implements the http.Handler interface.
 func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+    if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/onboarding/tier1") {
+        h.handleTier1Upgrade(w, r)
+        return
+    }
 	// The API Gateway is expected to validate the JWT and pass the Clerk User ID.
 	// For this implementation, we assume it's in a header like "X-Clerk-User-Id".
 	clerkUserID := r.Header.Get("X-Clerk-User-Id")

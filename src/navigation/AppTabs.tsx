@@ -67,12 +67,14 @@ const TabBarIcon: React.FC<TabBarIconProps> = React.memo(({ route, focused, colo
 const AppTabs = () => {
   return (
     <Tab.Navigator
-      screenOptions={{
-        tabBarIcon: TabBarIcon,
+      screenOptions={({ route }) => ({
+        tabBarIcon: ({ focused, color, size }) => (
+          <TabBarIcon route={route} focused={focused} color={color} size={size} />
+        ),
         tabBarActiveTintColor: theme.colors.primary,
         tabBarInactiveTintColor: theme.colors.textSecondary,
         headerShown: false, // Hiding default headers to use custom ones per screen
-      }}
+      })}
     >
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Payments" component={PaymentsScreen} />

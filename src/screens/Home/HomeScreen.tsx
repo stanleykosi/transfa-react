@@ -7,17 +7,63 @@
  * - react-native: For Text component.
  * - @/components/ScreenWrapper: For consistent screen layout and safe area handling.
  */
-import React from 'react';
-import { Text, View, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Text, View, StyleSheet, ActivityIndicator } from 'react-native';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import { theme } from '@/constants/theme';
+import apiClient from '@/api/apiClient';
+import { useAuth, useUser } from '@clerk/clerk-expo';
 
 const HomeScreen = () => {
+  const { getToken } = useAuth();
+  const { user } = useUser();
+  const [loading, setLoading] = useState(true);
+  const [nuban, setNuban] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const token = await getToken().catch(() => undefined);
+        const { data } = await apiClient.get<{ accountNumber?: string }>(
+          '/me/primary-account',
+          {
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              'X-Clerk-User-Id': user?.id || '',
+            },
+          }
+        );
+        if (!mounted) return;
+        setNuban(data?.accountNumber || null);
+      } catch (e) {
+        if (!mounted) return;
+        setNuban(null);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [getToken, user?.id]);
+
   return (
     <ScreenWrapper>
       <View style={styles.container}>
-        <Text style={styles.title}>Home Screen</Text>
-        <Text style={styles.subtitle}>User dashboard and wallet balance will be here.</Text>
+        {loading ? (
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+        ) : nuban ? (
+          <>
+            <Text style={styles.title}>Your Account</Text>
+            <Text style={styles.subtitle}>Virtual NUBAN: {nuban}</Text>
+          </>
+        ) : (
+          <>
+            <Text style={styles.title}>Home</Text>
+            <Text style={styles.subtitle}>No account found yet.</Text>
+          </>
+        )}
       </View>
     </ScreenWrapper>
   );

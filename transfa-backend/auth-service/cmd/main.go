@@ -21,6 +21,7 @@ import (
 	"github.com/transfa/auth-service/internal/config"
 	"github.com/transfa/auth-service/internal/store"
 	"github.com/transfa/auth-service/pkg/rabbitmq"
+	"github.com/transfa/auth-service/pkg/anchorclient"
 )
 
 func maskAMQPURLForLog(raw string) string {
@@ -113,8 +114,8 @@ func main() {
 	r.Use(middleware.Logger)    // Log API requests
 	r.Use(middleware.Recoverer) // Recover from panics
 
-	// Create the onboarding handler with its dependencies
-    onboardingHandler := api.NewOnboardingHandler(userRepo, producer)
+    // Create the onboarding handler with its dependencies (no anchor client needed here)
+    onboardingHandler := api.NewOnboardingHandler(userRepo, producer, nil)
 
 	// Define routes
 	r.Post("/onboarding", onboardingHandler.ServeHTTP)
@@ -232,6 +233,33 @@ func main() {
 		w.Write([]byte("Auth service is healthy"))
 	})
 
+    // Lightweight helper to fetch the user's primary account number (NUBAN)
+    r.Get("/me/primary-account", func(w http.ResponseWriter, r *http.Request) {
+        clerkUserID := r.Header.Get("X-Clerk-User-Id")
+        if clerkUserID == "" {
+            w.WriteHeader(http.StatusUnauthorized)
+            w.Write([]byte("Unauthorized: Clerk User ID missing"))
+            return
+        }
+        existing, err := userRepo.FindByClerkUserID(r.Context(), clerkUserID)
+        if err != nil || existing == nil {
+            w.WriteHeader(http.StatusNotFound)
+            w.Write([]byte("User not found"))
+            return
+        }
+        var accountNumber *string
+        if conn, err := dbpool.Acquire(r.Context()); err == nil {
+            defer conn.Release()
+            _ = conn.QueryRow(r.Context(), `SELECT virtual_nuban FROM accounts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, existing.ID).Scan(&accountNumber)
+        }
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusOK)
+        if accountNumber != nil {
+            w.Write([]byte("{\"accountNumber\": \"" + *accountNumber + "\"}"))
+        } else {
+            w.Write([]byte("{}"))
+        }
+    })
 	// Start the server
 	server := &http.Server{
 		Addr:    ":" + cfg.ServerPort,

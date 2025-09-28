@@ -114,23 +114,28 @@ const CreateAccountScreen = () => {
     setSubmitting(true);
     try {
       const token = await getToken().catch(() => undefined);
-      // Submit Tier 1 details to backend
-      const { data } = await apiClient.post(
+      // Submit Tier 1 details to backend (records intent only)
+      await apiClient.post(
         '/onboarding/tier1',
-        {
-          dob,
-          gender,
-          bvn,
-        },
-        {
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            ...headers,
-          },
-        }
+        { dob, gender, bvn },
+        { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers } }
       );
 
-      console.log('✅ Tier 1 details submitted successfully:', (data as any)?.status);
+      // Poll for completion (Anchor webhook -> account-service creates account -> status: completed)
+      const maxMs = 20000; // up to 20s
+      const stepMs = 1000;
+      const started = Date.now();
+      while (Date.now() - started < maxMs) {
+        const { data } = await apiClient.get<{ status: string }>('/onboarding/status', {
+          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
+        });
+        if (data?.status === 'completed') {
+          navigation.navigate('AppTabs' as never);
+          return;
+        }
+        await new Promise((res) => setTimeout(res, stepMs));
+      }
+      // Fallback: navigate; the app tabs can lazy-load account details
       navigation.navigate('AppTabs' as never);
     } catch (e) {
       console.error('Error submitting Tier 1:', e);
