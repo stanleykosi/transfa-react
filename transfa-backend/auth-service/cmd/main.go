@@ -80,13 +80,11 @@ func main() {
 
     log.Printf("RABBITMQ_URL (masked)=%s", maskAMQPURLForLog(cfg.RabbitMQURL))
 
-    // Set up RabbitMQ producer with bounded dial timeout
-    var producer rabbitmq.Publisher
-    p, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL)
-    if err != nil {
-        // Don't block startup forever; log and continue with a no-op producer-like wrapper
-        log.Printf("WARNING: Failed to connect to RabbitMQ at startup: %v. Onboarding events will be logged only until MQ is available.", err)
-        producer = &rabbitmq.EventProducerFallback{}
+    // Set up RabbitMQ producer with bounded dial timeout; allow nil on failure
+    var producer *rabbitmq.EventProducer
+    if p, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL); err != nil {
+        log.Printf("WARNING: Failed to connect to RabbitMQ at startup: %v. Continuing without MQ.", err)
+        producer = nil
     } else {
         producer = p
         defer producer.Close()
@@ -116,7 +114,7 @@ func main() {
 	r.Use(middleware.Recoverer) // Recover from panics
 
 	// Create the onboarding handler with its dependencies
-	onboardingHandler := api.NewOnboardingHandler(userRepo, producer)
+    onboardingHandler := api.NewOnboardingHandler(userRepo, producer)
 
 	// Define routes
 	r.Post("/onboarding", onboardingHandler.ServeHTTP)

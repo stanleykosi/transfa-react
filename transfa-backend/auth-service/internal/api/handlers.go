@@ -15,13 +15,13 @@ import (
 
 // OnboardingHandler handles the user onboarding process.
 type OnboardingHandler struct {
-	repo     store.UserRepository
-	producer *rabbitmq.EventProducer
+    repo     store.UserRepository
+    producer *rabbitmq.EventProducer
 }
 
 // NewOnboardingHandler creates a new handler for the onboarding endpoint.
 func NewOnboardingHandler(repo store.UserRepository, producer *rabbitmq.EventProducer) *OnboardingHandler {
-	return &OnboardingHandler{repo: repo, producer: producer}
+    return &OnboardingHandler{repo: repo, producer: producer}
 }
 
 // ServeHTTP implements the http.Handler interface.
@@ -152,13 +152,15 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		KYCData: eventKYC,
 	}
 
-	// In a real-world scenario, you would define your exchanges and routing keys in a config.
-	if pubErr := h.producer.Publish(r.Context(), "user_events", "user.created", event); pubErr != nil {
+    // Publish only if producer is available
+    if h.producer != nil {
+        if pubErr := h.producer.Publish(r.Context(), "user_events", "user.created", event); pubErr != nil {
 		// This is a critical failure. The user is in our DB, but downstream services won't know.
 		// This requires a compensation mechanism (e.g., a retry job, manual intervention).
 		log.Printf("CRITICAL: Failed to publish user.created event for user %s. Manual intervention required.", internalUserID)
 		// We still return a success to the client, as the user was created. The system must be resilient.
-	}
+        }
+    }
 
 	// Respond to the client
 	w.Header().Set("Content-Type", "application/json")
