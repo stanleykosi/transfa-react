@@ -18,6 +18,12 @@ type EventProducer struct {
 	channel *amqp.Channel
 }
 
+// Publisher is the interface implemented by types that can publish events.
+type Publisher interface {
+    Publish(ctx context.Context, exchange, routingKey string, body interface{}) error
+    Close()
+}
+
 // EventProducerFallback is a minimal no-op publisher used when RabbitMQ is unavailable at startup.
 // It allows the service to start and log events instead of failing hard.
 type EventProducerFallback struct{}

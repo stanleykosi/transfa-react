@@ -81,12 +81,14 @@ func main() {
     log.Printf("RABBITMQ_URL (masked)=%s", maskAMQPURLForLog(cfg.RabbitMQURL))
 
     // Set up RabbitMQ producer with bounded dial timeout
-    producer, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL)
+    var producer rabbitmq.Publisher
+    p, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL)
     if err != nil {
         // Don't block startup forever; log and continue with a no-op producer-like wrapper
         log.Printf("WARNING: Failed to connect to RabbitMQ at startup: %v. Onboarding events will be logged only until MQ is available.", err)
         producer = &rabbitmq.EventProducerFallback{}
     } else {
+        producer = p
         defer producer.Close()
         log.Println("RabbitMQ producer connected")
     }
