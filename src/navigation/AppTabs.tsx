@@ -64,13 +64,18 @@ const TabBarIcon: React.FC<TabBarIconProps> = React.memo(({ route, focused, colo
   <Ionicons name={getIconName(route.name, focused)} size={size} color={color} />
 ));
 
+// Define the tab bar icon function outside of render to avoid recreation
+const createTabBarIcon =
+  (route: { name: string }) =>
+  ({ focused, color, size }: { focused: boolean; color: string; size: number }) => (
+    <TabBarIcon route={route} focused={focused} color={color} size={size} />
+  );
+
 const AppTabs = () => {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
-        tabBarIcon: ({ focused, color, size }) => (
-          <TabBarIcon route={route} focused={focused} color={color} size={size} />
-        ),
+        tabBarIcon: createTabBarIcon(route),
         tabBarActiveTintColor: theme.colors.primary,
         tabBarInactiveTintColor: theme.colors.textSecondary,
         headerShown: false, // Hiding default headers to use custom ones per screen

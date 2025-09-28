@@ -116,43 +116,9 @@ func main() {
     // Create the onboarding handler with its dependencies
     onboardingHandler := api.NewOnboardingHandler(userRepo, producer)
 
-	// Define routes
-	r.Post("/onboarding", onboardingHandler.ServeHTTP)
-
-    // Tier 1 submission: mark tier1 as created (for now), to unlock the app while verification completes
-	r.Post("/onboarding/tier1", func(w http.ResponseWriter, r *http.Request) {
-		clerkUserID := r.Header.Get("X-Clerk-User-Id")
-		if clerkUserID == "" {
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte("Unauthorized: Clerk User ID missing"))
-			return
-		}
-
-		// Find existing user by Clerk ID
-        existing, err := userRepo.FindByClerkUserID(r.Context(), clerkUserID)
-		if err != nil || existing == nil {
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("User not found"))
-			return
-		}
-
-        // Idempotently record Tier 1 submission as created
-        if _, err := dbpool.Exec(r.Context(), `
-            INSERT INTO onboarding_status (user_id, stage, status, reason)
-            VALUES ($1, 'tier1', 'created', NULL)
-            ON CONFLICT (user_id, stage)
-            DO UPDATE SET status = EXCLUDED.status, reason = EXCLUDED.reason, updated_at = NOW()
-        `, existing.ID); err != nil {
-            log.Printf("ERROR: failed to upsert tier1 status for user %s: %v", existing.ID, err)
-            w.WriteHeader(http.StatusInternalServerError)
-            w.Write([]byte("Failed to record Tier 1 status"))
-            return
-        }
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{\"status\": \"tier1_created\"}"))
-	})
+    // Define routes
+    r.Post("/onboarding", onboardingHandler.ServeHTTP)
+    r.Post("/onboarding/tier1", onboardingHandler.HandleTier1)
 
 	r.Get("/onboarding/status", func(w http.ResponseWriter, r *http.Request) {
 		clerkUserID := r.Header.Get("X-Clerk-User-Id")

@@ -25,22 +25,25 @@ const HomeScreen = () => {
     (async () => {
       try {
         const token = await getToken().catch(() => undefined);
-        const { data } = await apiClient.get<{ accountNumber?: string }>(
-          '/me/primary-account',
-          {
-            headers: {
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
-              'X-Clerk-User-Id': user?.id || '',
-            },
-          }
-        );
-        if (!mounted) return;
+        const { data } = await apiClient.get<{ accountNumber?: string }>('/me/primary-account', {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            'X-Clerk-User-Id': user?.id || '',
+          },
+        });
+        if (!mounted) {
+          return;
+        }
         setNuban(data?.accountNumber || null);
       } catch (e) {
-        if (!mounted) return;
+        if (!mounted) {
+          return;
+        }
         setNuban(null);
       } finally {
-        if (mounted) setLoading(false);
+        if (mounted) {
+          setLoading(false);
+        }
       }
     })();
     return () => {
