@@ -6,6 +6,7 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, Alert } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import PrimaryButton from '@/components/PrimaryButton';
 import FormInput from '@/components/FormInput';
@@ -16,8 +17,9 @@ import { useAuth, useUser } from '@clerk/clerk-expo';
 const CreateAccountScreen = () => {
   const { getToken, signOut } = useAuth();
   const { user } = useUser();
+  const navigation = useNavigation();
   const [status, setStatus] = useState<
-    'checking' | 'tier0_pending' | 'tier0_created' | 'error' | 'confirming_creation'
+    'checking' | 'tier0_pending' | 'tier0_created' | 'error'
   >('checking');
   const [dob, setDob] = useState(''); // YYYY-MM-DD
   const [gender, setGender] = useState<'male' | 'female' | ''>('');
@@ -43,8 +45,16 @@ const CreateAccountScreen = () => {
           return;
         }
 
+        console.log('🔍 Status check response:', data?.status);
+        console.log('🔍 Full response data:', data);
+
         if (data?.status === 'tier0_created') {
-          // User can proceed to create account
+          // User can proceed to create account (Tier 1 form)
+          setStatus('tier0_created');
+          return;
+        } else if (data?.status === 'tier1_created' || data?.status === 'completed') {
+          // User has completed both tiers, should not be on this screen
+          // This shouldn't happen with the new navigation logic, but handle gracefully
           setStatus('tier0_created');
           return;
         } else if (data?.status === 'tier0_processing') {
@@ -61,6 +71,7 @@ const CreateAccountScreen = () => {
           setStatus('error');
         } else {
           // Still pending - show loading state and poll for updates
+          console.log('⚠️ Unknown status, defaulting to pending:', data?.status);
           setStatus('tier0_pending');
         }
       } catch (e) {
@@ -76,35 +87,7 @@ const CreateAccountScreen = () => {
     };
   }, [getToken, headers]);
 
-  // Poll for status updates when in pending state
-  useEffect(() => {
-    if (status !== 'tier0_pending') {
-      return;
-    }
-
-    const pollInterval = setInterval(async () => {
-      try {
-        const token = await getToken().catch(() => undefined);
-        const { data } = await apiClient.get<{ status: string }>('/onboarding/status', {
-          headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
-        });
-
-        if (data?.status === 'tier0_created') {
-          // Customer creation confirmed! Show loading state then proceed
-          setStatus('confirming_creation');
-
-          // Show confirmation for 2 seconds, then proceed to Tier 1
-          setTimeout(() => {
-            setStatus('tier0_created');
-          }, 2000);
-        }
-      } catch (e) {
-        console.error('Error polling status:', e);
-      }
-    }, 3000); // Poll every 3 seconds
-
-    return () => clearInterval(pollInterval);
-  }, [status, getToken, headers]);
+  // No more polling - users come here when tier0 is already created
 
   const handleSignOut = () => {
     Alert.alert(
@@ -121,6 +104,21 @@ const CreateAccountScreen = () => {
     );
   };
 
+  const handleCheckStatus = async () => {
+    try {
+      const token = await getToken().catch(() => undefined);
+      const { data } = await apiClient.get<{ status: string }>('/onboarding/status', {
+        headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
+      });
+
+      console.log('🔍 Manual status check:', data?.status);
+      Alert.alert('Status Check', `Current status: ${data?.status || 'unknown'}`);
+    } catch (error) {
+      console.error('Error checking status:', error);
+      Alert.alert('Error', 'Failed to check status');
+    }
+  };
+
   const handleSubmitTier1 = async () => {
     if (status !== 'tier0_created') {
       Alert.alert('Please wait', 'Your Tier 0 verification has not completed yet.');
@@ -132,38 +130,56 @@ const CreateAccountScreen = () => {
     }
     setSubmitting(true);
     try {
-      // Placeholder: call your Tier 1 endpoint when available
-      // const token = await getToken().catch(() => undefined);
-      // await apiClient.post('/verification/tier1', { bvn, dob, gender }, { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers } });
-      Alert.alert('Submitted', 'Tier 1 details submitted. We will notify you once approved.');
+      const token = await getToken().catch(() => undefined);
+      // Submit Tier 1 details to backend
+      await apiClient.post('/onboarding/tier1', {
+        dob,
+        gender,
+        bvn
+      }, {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...headers
+        }
+      });
+
+      console.log('✅ Tier 1 details submitted successfully');
+      Alert.alert(
+        'Success!',
+        'Your Tier 1 verification has been submitted. You now have full access to the app!',
+        [
+          {
+            text: 'Continue to App',
+            onPress: () => {
+              // Navigate to main app
+              navigation.navigate('AppTabs' as never);
+            }
+          }
+        ]
+      );
     } catch (e) {
+      console.error('Error submitting Tier 1:', e);
       Alert.alert('Error', 'Failed to submit verification. Please try again.');
     } finally {
       setSubmitting(false);
     }
   };
 
-  if (status === 'confirming_creation') {
-    return (
-      <ScreenWrapper>
-        <View style={styles.centered}>
-          <Text style={styles.title}>✅ Customer Account Created!</Text>
-          <Text style={styles.subtitle}>
-            Your account has been successfully created. Proceeding to Tier 1 verification...
-          </Text>
-        </View>
-      </ScreenWrapper>
-    );
-  }
-
+  // If tier0 is not created, show error (this shouldn't happen with new flow)
   if (status !== 'tier0_created') {
     return (
       <ScreenWrapper>
         <View style={styles.centered}>
-          <Text style={styles.title}>Verifying your details…</Text>
+          <Text style={styles.title}>Access Denied</Text>
           <Text style={styles.subtitle}>
-            We're creating your customer account. This will take just a moment...
+            Please complete Tier 0 verification first.
           </Text>
+          <PrimaryButton
+            title="Check Status (Debug)"
+            onPress={handleCheckStatus}
+            style={styles.debugButton}
+            textStyle={styles.debugButtonText}
+          />
         </View>
       </ScreenWrapper>
     );
@@ -172,8 +188,10 @@ const CreateAccountScreen = () => {
   return (
     <ScreenWrapper>
       <View style={styles.container}>
-        <Text style={styles.title}>Create your account</Text>
-        <Text style={styles.subtitle}>Provide the details required to finish verification.</Text>
+        <Text style={styles.title}>Complete Your Verification</Text>
+        <Text style={styles.subtitle}>
+          Please provide your additional details to complete your account setup.
+        </Text>
 
         <FormInput
           label="BVN"
@@ -231,6 +249,15 @@ const styles = StyleSheet.create({
   },
   signOutButtonText: {
     color: theme.colors.textSecondary,
+  },
+  debugButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
+    marginTop: theme.spacing.s16,
+  },
+  debugButtonText: {
+    color: theme.colors.primary,
   },
 });
 

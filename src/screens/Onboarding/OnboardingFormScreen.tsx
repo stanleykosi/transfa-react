@@ -67,24 +67,8 @@ const OnboardingFormScreen = () => {
 
   const { mutate: submitOnboarding, isPending: isLoading } = useOnboardingMutation({
     onSuccess: (response) => {
-      // Check if this is a Tier 0 completion or already created
-      if (response.status === 'tier0_already_created') {
-        Alert.alert(
-          'Success',
-          'Your profile is already set up! You can now proceed to create your account.'
-        );
-      } else if (response.status === 'tier0_processing') {
-        Alert.alert(
-          'Processing',
-          "Your Tier 0 KYC is being processed. You will be notified when it's complete."
-        );
-      } else {
-        Alert.alert(
-          'Success',
-          'Tier 0 KYC completed successfully! Your customer profile has been created. You can now proceed to create your account.'
-        );
-      }
-      // Proceed to Tier 1 create-account screen (guarded by backend status)
+      console.log('✅ Tier 0 submission successful:', response.status);
+      // Navigate directly to Tier 1 form - no more alerts or verifying pages
       navigation.dispatch(StackActions.replace('CreateAccount'));
     },
     onError: (error) => {
@@ -266,7 +250,7 @@ const OnboardingFormScreen = () => {
 
           <View style={styles.buttonContainer}>
             <PrimaryButton
-              title="Save & Continue"
+              title={isLoading ? "Creating your account..." : "Save & Continue"}
               onPress={handleOnboardingSubmit}
               isLoading={isLoading}
             />

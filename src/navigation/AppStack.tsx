@@ -17,11 +17,14 @@
  *   entire tab bar, which is ideal for modal or sequential flows post-authentication.
  */
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { useNavigation } from '@react-navigation/native';
 import AppTabs, { AppTabsParamList } from './AppTabs';
 import OnboardingFormScreen from '@/screens/Onboarding/OnboardingFormScreen';
 import { NavigatorScreenParams } from '@react-navigation/native';
+import { useAuth, useUser } from '@clerk/clerk-expo';
+import apiClient from '@/api/apiClient';
 
 // Define the parameter list for the AppStack routes for type safety.
 // It includes the AppTabs (as a nested navigator) and the OnboardingForm.
@@ -34,16 +37,57 @@ export type AppStackParamList = {
 const Stack = createNativeStackNavigator<AppStackParamList>();
 
 const AppStack = () => {
-  // TODO: In a later step, add logic here to check if the user needs onboarding.
-  // This would involve an API call to a `/users/me` endpoint.
-  // const { data: user, isLoading } = useQuery(['currentUser']);
-  // const needsOnboarding = user && !user.onboardingCompleted;
-  // Based on `needsOnboarding`, the initialRouteName could be conditionally set,
-  // or a `useEffect` could trigger a navigation.replace action.
-  const initialRouteName = 'OnboardingForm'; // For testing the onboarding flow
+  const { getToken } = useAuth();
+  const { user } = useUser();
+  const navigation = useNavigation();
+  const [isCheckingStatus, setIsCheckingStatus] = useState(true);
+  const [initialRoute, setInitialRoute] = useState<'AppTabs' | 'OnboardingForm' | 'CreateAccount'>('AppTabs');
+
+  useEffect(() => {
+    const checkUserStatus = async () => {
+      if (!user?.id) return;
+
+      try {
+        const token = await getToken().catch(() => undefined);
+        const { data } = await apiClient.get<{ status: string }>('/onboarding/status', {
+          headers: {
+            'X-Clerk-User-Id': user.id,
+            ...(token ? { Authorization: `Bearer ${token}` } : {})
+          },
+        });
+
+        if (data?.status === 'tier0_created') {
+          // User has completed tier0, go to Tier 1 form (CreateAccount)
+          setInitialRoute('CreateAccount');
+        } else if (data?.status === 'tier0_pending') {
+          // User is in the middle of tier0, go to create account screen
+          setInitialRoute('CreateAccount');
+        } else if (data?.status === 'tier1_created' || data?.status === 'completed') {
+          // User has completed both tier0 and tier1, go to main app
+          setInitialRoute('AppTabs');
+        } else {
+          // User hasn't started onboarding, go to onboarding form
+          setInitialRoute('OnboardingForm');
+        }
+      } catch (error) {
+        console.error('Error checking user status:', error);
+        // Default to onboarding form if we can't check status
+        setInitialRoute('OnboardingForm');
+      } finally {
+        setIsCheckingStatus(false);
+      }
+    };
+
+    checkUserStatus();
+  }, [user?.id, getToken]);
+
+  // Show loading while checking status
+  if (isCheckingStatus) {
+    return null; // Or a loading component
+  }
 
   return (
-    <Stack.Navigator initialRouteName={initialRouteName}>
+    <Stack.Navigator initialRouteName={initialRoute}>
       <Stack.Screen
         name="AppTabs"
         component={AppTabs}
