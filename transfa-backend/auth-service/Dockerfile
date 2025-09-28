@@ -12,8 +12,8 @@ WORKDIR /app
 COPY go.mod go.sum ./
 
 # Download dependencies with BuildKit cache
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=gomodcache,target=/go/pkg/mod \
+    --mount=type=cache,id=gobuildcache,target=/root/.cache/go-build \
     go mod download
 
 # Copy source code
@@ -21,8 +21,8 @@ COPY . .
 
 # Build the application (cached)
 ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=gomodcache,target=/go/pkg/mod \
+    --mount=type=cache,id=gobuildcache,target=/root/.cache/go-build \
     go build -ldflags='-w -s' -o auth-service ./cmd/main.go
 
 # Final stage - minimal image

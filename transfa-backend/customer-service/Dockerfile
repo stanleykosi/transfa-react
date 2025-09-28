@@ -12,8 +12,8 @@ WORKDIR /app
 COPY go.mod go.sum ./
 
 # Download dependencies with BuildKit cache
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=gomodcache,target=/go/pkg/mod \
+    --mount=type=cache,id=gobuildcache,target=/root/.cache/go-build \
     go mod download
 
 COPY . .
@@ -23,8 +23,8 @@ COPY . .
 # -a forces rebuilding of packages
 # -installsuffix cgo adds a suffix to the package installation directory
 ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
+RUN --mount=type=cache,id=gomodcache,target=/go/pkg/mod \
+    --mount=type=cache,id=gobuildcache,target=/root/.cache/go-build \
     go build -ldflags='-w -s' -o customer-service ./cmd/main.go
 
 # Final stage - minimal image
