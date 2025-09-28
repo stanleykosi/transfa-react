@@ -60,7 +60,7 @@ func main() {
 	dbConfig.MaxConnIdleTime = 5 * time.Minute
 	
 	// Disable prepared statement caching to prevent conflicts
-	dbConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+	dbConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 	
 	dbpool, err := pgxpool.NewWithConfig(context.Background(), dbConfig)
 	if err != nil {
