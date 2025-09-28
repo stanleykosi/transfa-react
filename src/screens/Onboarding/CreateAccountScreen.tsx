@@ -5,7 +5,7 @@
  * Collects Tier 1 fields (DOB, gender, BVN) and submits to backend (placeholder for now).
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Alert } from 'react-native';
+import { View, Text, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import PrimaryButton from '@/components/PrimaryButton';
@@ -48,16 +48,14 @@ const CreateAccountScreen = () => {
         console.log('🔍 Status check response:', data?.status);
         console.log('🔍 Full response data:', data);
 
-        if (data?.status === 'tier0_created') {
-          // User can proceed to create account (Tier 1 form)
+        if (data?.status === 'completed' || data?.status === 'tier1_created') {
+          // Already fully enabled -> go to main app
+          navigation.navigate('AppTabs' as never);
+          return;
+        } else if (data?.status === 'tier0_created') {
           setStatus('tier0_created');
           return;
-        } else if (data?.status === 'tier1_created' || data?.status === 'completed') {
-          // User has completed both tiers, should not be on this screen
-          // This shouldn't happen with the new navigation logic, but handle gracefully
-          setStatus('tier0_created');
-          return;
-        } else if (data?.status === 'tier0_processing') {
+        } else if (data?.status === 'tier0_processing' || data?.status === 'tier0_pending') {
           Alert.alert(
             'Processing',
             'Your Tier 0 KYC is being processed. Please wait a moment and try again.'
@@ -132,7 +130,7 @@ const CreateAccountScreen = () => {
     try {
       const token = await getToken().catch(() => undefined);
       // Submit Tier 1 details to backend
-      await apiClient.post(
+      const { data } = await apiClient.post(
         '/onboarding/tier1',
         {
           dob,
@@ -147,20 +145,8 @@ const CreateAccountScreen = () => {
         }
       );
 
-      console.log('✅ Tier 1 details submitted successfully');
-      Alert.alert(
-        'Success!',
-        'Your Tier 1 verification has been submitted. You now have full access to the app!',
-        [
-          {
-            text: 'Continue to App',
-            onPress: () => {
-              // Navigate to main app
-              navigation.navigate('AppTabs' as never);
-            },
-          },
-        ]
-      );
+      console.log('✅ Tier 1 details submitted successfully:', (data as any)?.status);
+      navigation.navigate('AppTabs' as never);
     } catch (e) {
       console.error('Error submitting Tier 1:', e);
       Alert.alert('Error', 'Failed to submit verification. Please try again.');
@@ -169,15 +155,15 @@ const CreateAccountScreen = () => {
     }
   };
 
-  // If tier0 is not created, show error (this shouldn't happen with new flow)
+  // If tier0 is not created, show neutral loading block (nicer UX)
   if (status !== 'tier0_created') {
     return (
       <ScreenWrapper>
         <View style={styles.centered}>
-          <Text style={styles.title}>Access Denied</Text>
-          <Text style={styles.subtitle}>Please complete Tier 0 verification first.</Text>
+          <ActivityIndicator size="large" />
+          <Text style={[styles.subtitle, { marginTop: theme.spacing.s16 }]}>Checking your verification status…</Text>
           <PrimaryButton
-            title="Check Status (Debug)"
+            title="Refresh"
             onPress={handleCheckStatus}
             style={styles.debugButton}
             textStyle={styles.debugButtonText}

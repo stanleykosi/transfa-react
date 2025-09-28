@@ -84,8 +84,22 @@ func main() {
 	defer producer.Close()
 	log.Println("RabbitMQ producer connected")
 
-	// Set up repository
-	userRepo := store.NewPostgresUserRepository(dbpool)
+    // Set up repository
+    userRepo := store.NewPostgresUserRepository(dbpool)
+
+    // Ensure required tables exist (local DDL here since auth-service store doesn't expose it)
+    if _, err := dbpool.Exec(context.Background(), `
+        CREATE TABLE IF NOT EXISTS onboarding_status (
+            user_id UUID NOT NULL,
+            stage TEXT NOT NULL,
+            status TEXT NOT NULL,
+            reason TEXT,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            PRIMARY KEY (user_id, stage)
+        )
+    `); err != nil {
+        log.Fatalf("failed ensuring onboarding_status table: %v", err)
+    }
 
 	// Set up router and handlers
 	r := chi.NewRouter()
@@ -97,6 +111,42 @@ func main() {
 
 	// Define routes
 	r.Post("/onboarding", onboardingHandler.ServeHTTP)
+
+    // Tier 1 submission: mark tier1 as created (for now), to unlock the app while verification completes
+	r.Post("/onboarding/tier1", func(w http.ResponseWriter, r *http.Request) {
+		clerkUserID := r.Header.Get("X-Clerk-User-Id")
+		if clerkUserID == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Unauthorized: Clerk User ID missing"))
+			return
+		}
+
+		// Find existing user by Clerk ID
+        existing, err := userRepo.FindByClerkUserID(r.Context(), clerkUserID)
+		if err != nil || existing == nil {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("User not found"))
+			return
+		}
+
+        // Idempotently record Tier 1 submission as created
+        if _, err := dbpool.Exec(r.Context(), `
+            INSERT INTO onboarding_status (user_id, stage, status, reason)
+            VALUES ($1, 'tier1', 'created', NULL)
+            ON CONFLICT (user_id, stage)
+            DO UPDATE SET status = EXCLUDED.status, reason = EXCLUDED.reason, updated_at = NOW()
+        `, existing.ID); err != nil {
+            log.Printf("ERROR: failed to upsert tier1 status for user %s: %v", existing.ID, err)
+            w.WriteHeader(http.StatusInternalServerError)
+            w.Write([]byte("Failed to record Tier 1 status"))
+            return
+        }
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("{\"status\": \"tier1_created\"}"))
+	})
+
 	r.Get("/onboarding/status", func(w http.ResponseWriter, r *http.Request) {
 		clerkUserID := r.Header.Get("X-Clerk-User-Id")
 		if clerkUserID == "" {
@@ -112,21 +162,56 @@ func main() {
 			w.Write([]byte("User not found"))
 			return
 		}
-		// Check onboarding_status table for the actual status
-		status := "tier0_pending"
+		// Derive a normalized, frontend-friendly status
+		// Priority: completed (has account) > tier1_created > tier0_created/pending > new
+		status := "new"
 		var reason *string
 		if conn, err := dbpool.Acquire(r.Context()); err == nil {
 			defer conn.Release()
-			qr := conn.QueryRow(r.Context(), `SELECT status, reason FROM onboarding_status WHERE user_id = $1 AND stage = 'tier0'`, existing.ID)
-			var dbStatus string
-			_ = qr.Scan(&dbStatus, &reason)
-			if dbStatus != "" {
-				status = dbStatus
-			} else if existing.AnchorCustomerID != nil {
-				// Fallback: if no onboarding_status record but has AnchorCustomerID, assume created
-				status = "tier0_created"
+
+			// 1) Completed if user has any account
+			var accountCount int
+			_ = conn.QueryRow(r.Context(), `SELECT COUNT(1) FROM accounts WHERE user_id = $1`, existing.ID).Scan(&accountCount)
+			if accountCount > 0 {
+				status = "completed"
+			} else {
+				// 2) Tier1 status
+				var t1 string
+				_ = conn.QueryRow(r.Context(), `SELECT status FROM onboarding_status WHERE user_id = $1 AND stage = 'tier1'`, existing.ID).Scan(&t1)
+				if t1 != "" {
+					switch t1 {
+					case "created":
+						status = "tier1_created"
+					case "failed":
+						status = "tier1_failed"
+					default:
+						status = "tier1_" + t1
+					}
+				} else {
+					// 3) Tier0 status
+					var t0 string
+					_ = conn.QueryRow(r.Context(), `SELECT status, reason FROM onboarding_status WHERE user_id = $1 AND stage = 'tier0'`, existing.ID).Scan(&t0, &reason)
+					if t0 != "" {
+						switch t0 {
+						case "created":
+							status = "tier0_created"
+						case "pending", "processing":
+							status = "tier0_pending"
+						case "failed":
+							status = "tier0_failed"
+						default:
+							status = "tier0_" + t0
+						}
+					} else if existing.AnchorCustomerID != nil {
+						// Fallback: anchor customer exists => tier 0 created
+						status = "tier0_created"
+					} else {
+						status = "new"
+					}
+				}
 			}
 		}
+
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		if reason != nil {

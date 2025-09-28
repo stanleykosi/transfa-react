@@ -24,6 +24,8 @@ import OnboardingFormScreen from '@/screens/Onboarding/OnboardingFormScreen';
 import { NavigatorScreenParams } from '@react-navigation/native';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import apiClient from '@/api/apiClient';
+import { View, ActivityIndicator } from 'react-native';
+import { theme } from '@/constants/theme';
 
 // Define the parameter list for the AppStack routes for type safety.
 // It includes the AppTabs (as a nested navigator) and the OnboardingForm.
@@ -58,18 +60,19 @@ const AppStack = () => {
           },
         });
 
-        if (data?.status === 'tier0_created') {
-          // User has completed tier0, go to Tier 1 form (CreateAccount)
-          setInitialRoute('CreateAccount');
-        } else if (data?.status === 'tier0_pending') {
-          // User is in the middle of tier0, go to create account screen
-          setInitialRoute('CreateAccount');
-        } else if (data?.status === 'tier1_created' || data?.status === 'completed') {
-          // User has completed both tier0 and tier1, go to main app
-          setInitialRoute('AppTabs');
-        } else {
-          // User hasn't started onboarding, go to onboarding form
-          setInitialRoute('OnboardingForm');
+        switch (data?.status) {
+          case 'completed':
+          case 'tier1_created':
+            setInitialRoute('AppTabs');
+            break;
+          case 'tier0_created':
+          case 'tier0_pending':
+            setInitialRoute('CreateAccount');
+            break;
+          case 'new':
+          default:
+            setInitialRoute('OnboardingForm');
+            break;
         }
       } catch (error) {
         console.error('Error checking user status:', error);
@@ -85,7 +88,11 @@ const AppStack = () => {
 
   // Show loading while checking status
   if (isCheckingStatus) {
-    return null; // Or a loading component
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
+      </View>
+    );
   }
 
   return (
