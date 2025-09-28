@@ -11,19 +11,17 @@ import (
 	"github.com/transfa/auth-service/internal/domain"
 	"github.com/transfa/auth-service/internal/store"
 	"github.com/transfa/auth-service/pkg/rabbitmq"
-	"github.com/transfa/auth-service/pkg/anchorclient"
 )
 
 // OnboardingHandler handles the user onboarding process.
 type OnboardingHandler struct {
     repo     store.UserRepository
     producer *rabbitmq.EventProducer
-    anchor   *anchorclient.Client
 }
 
 // NewOnboardingHandler creates a new handler for the onboarding endpoint.
-func NewOnboardingHandler(repo store.UserRepository, producer *rabbitmq.EventProducer, anchor *anchorclient.Client) *OnboardingHandler {
-    return &OnboardingHandler{repo: repo, producer: producer, anchor: anchor}
+func NewOnboardingHandler(repo store.UserRepository, producer *rabbitmq.EventProducer) *OnboardingHandler {
+    return &OnboardingHandler{repo: repo, producer: producer}
 }
 
 // handleTier1Upgrade receives BVN/DOB/Gender and calls Anchor identification upgrade.
@@ -53,11 +51,6 @@ func (h *OnboardingHandler) handleTier1Upgrade(w http.ResponseWriter, r *http.Re
 
     // Optimistically set tier1 pending; actual completion comes from Anchor webhook -> account-service
     _ = h.repo.UpsertOnboardingStatus(r.Context(), existing.ID, "tier1", "pending", nil)
-
-    // If we have an Anchor client and customer id, we can trigger the upgrade (best-effort)
-    if h.anchor != nil && existing.AnchorCustomerID != nil {
-        _ = h.anchor.TriggerIndividualVerification(r.Context(), *existing.AnchorCustomerID, body.Bvn, body.Dob, body.Gender)
-    }
 
     w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(http.StatusAccepted)

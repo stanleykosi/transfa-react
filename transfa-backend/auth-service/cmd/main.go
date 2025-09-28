@@ -21,7 +21,6 @@ import (
 	"github.com/transfa/auth-service/internal/config"
 	"github.com/transfa/auth-service/internal/store"
 	"github.com/transfa/auth-service/pkg/rabbitmq"
-	"github.com/transfa/auth-service/pkg/anchorclient"
 )
 
 func maskAMQPURLForLog(raw string) string {
@@ -114,8 +113,8 @@ func main() {
 	r.Use(middleware.Logger)    // Log API requests
 	r.Use(middleware.Recoverer) // Recover from panics
 
-    // Create the onboarding handler with its dependencies (no anchor client needed here)
-    onboardingHandler := api.NewOnboardingHandler(userRepo, producer, nil)
+    // Create the onboarding handler with its dependencies
+    onboardingHandler := api.NewOnboardingHandler(userRepo, producer)
 
 	// Define routes
 	r.Post("/onboarding", onboardingHandler.ServeHTTP)
