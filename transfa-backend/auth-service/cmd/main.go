@@ -58,7 +58,7 @@ func main() {
 		log.Fatalf("Unable to parse database URL: %v\n", err)
 	}
 	
-	// Configure connection pool to prevent prepared statement conflicts
+	// Configure connection pool to prevent prepared statement conflict
 	dbConfig.MaxConns = 10
 	dbConfig.MinConns = 2
 	dbConfig.MaxConnLifetime = 30 * time.Minute
