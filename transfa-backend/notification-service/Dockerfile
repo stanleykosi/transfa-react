@@ -21,8 +21,7 @@ COPY . .
 # -a forces rebuilding of packages
 # -installsuffix cgo adds a suffix to the package installation directory
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags='-w -s -extldflags "-static"' \
-    -a -installsuffix cgo \
+    -ldflags='-w -s' \
     -o notification-service \
     ./cmd/main.go
 
