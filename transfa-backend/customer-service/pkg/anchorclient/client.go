@@ -70,7 +70,8 @@ func (c *Client) CreateIndividualCustomer(ctx context.Context, req domain.Anchor
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusCreated {
+	// Handle successful responses (both 200 OK and 201 Created are valid)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return nil, c.handleErrorResponse(resp)
 	}
 
@@ -150,7 +151,8 @@ func (c *Client) CreateIndividualCustomerWithIdempotency(ctx context.Context, re
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusCreated {
+	// Handle successful responses (both 200 OK and 201 Created are valid)
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
 		var customerResp domain.AnchorIndividualCustomerResponse
 		if err := json.NewDecoder(resp.Body).Decode(&customerResp); err != nil {
 			return nil, fmt.Errorf("failed to decode successful response: %w", err)
