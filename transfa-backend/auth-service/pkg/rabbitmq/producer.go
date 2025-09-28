@@ -76,6 +76,32 @@ func NewEventProducer(amqpURL string) (*EventProducer, error) {
 
 // Publish sends a message to a specific exchange with a routing key.
 func (p *EventProducer) Publish(ctx context.Context, exchange, routingKey string, body interface{}) error {
+    // Ensure the exchange exists (durable topic)
+    if err := p.channel.ExchangeDeclare(
+        exchange, // name
+        "topic",  // type
+        true,      // durable
+        false,     // autoDelete
+        false,     // internal
+        false,     // noWait
+        nil,       // args
+    ); err != nil {
+        log.Printf("Failed to declare exchange '%s': %v. Attempting channel reopen...", exchange, err)
+        // Attempt simple channel reopen once
+        if p.conn != nil {
+            if ch, chErr := p.conn.Channel(); chErr == nil {
+                p.channel = ch
+                if err2 := p.channel.ExchangeDeclare(exchange, "topic", true, false, false, false, nil); err2 != nil {
+                    return err2
+                }
+            } else {
+                return chErr
+            }
+        } else {
+            return err
+        }
+    }
+
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
 		log.Printf("Error marshalling JSON body: %v", err)
@@ -94,8 +120,26 @@ func (p *EventProducer) Publish(ctx context.Context, exchange, routingKey string
 		},
 	)
 	if err != nil {
-		log.Printf("Failed to publish a message to exchange '%s': %v", exchange, err)
-		return err
+        log.Printf("Failed to publish a message to exchange '%s': %v", exchange, err)
+        // One-shot retry: reopen channel and try again
+        if p.conn != nil {
+            if ch, chErr := p.conn.Channel(); chErr == nil {
+                p.channel = ch
+                // re-declare exchange and retry
+                if exErr := p.channel.ExchangeDeclare(exchange, "topic", true, false, false, false, nil); exErr == nil {
+                    err = p.channel.PublishWithContext(ctx, exchange, routingKey, false, false, amqp.Publishing{
+                        ContentType: "application/json",
+                        Timestamp:   time.Now(),
+                        Body:        jsonBody,
+                    })
+                    if err == nil {
+                        log.Printf("Successfully published message to exchange '%s' after retry", exchange)
+                        return nil
+                    }
+                }
+            }
+        }
+        return err
 	}
 
 	log.Printf("Successfully published message to exchange '%s' with routing key '%s'", exchange, routingKey)

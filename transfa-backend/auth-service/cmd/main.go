@@ -94,7 +94,7 @@ func main() {
     // Set up repository
     userRepo := store.NewPostgresUserRepository(dbpool)
 
-    // Ensure required tables exist (local DDL here since auth-service store doesn't expose it)
+    // Ensure required tables exist (idempotent)
     if _, err := dbpool.Exec(context.Background(), `
         CREATE TABLE IF NOT EXISTS onboarding_status (
             user_id UUID NOT NULL,
@@ -103,9 +103,17 @@ func main() {
             reason TEXT,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             PRIMARY KEY (user_id, stage)
-        )
+        );
+        CREATE TABLE IF NOT EXISTS accounts (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            user_id UUID NOT NULL,
+            anchor_account_id TEXT NOT NULL,
+            virtual_nuban TEXT,
+            account_type TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
     `); err != nil {
-        log.Fatalf("failed ensuring onboarding_status table: %v", err)
+        log.Printf("Warning: failed ensuring tables (may already exist): %v", err)
     }
 
 	// Set up router and handlers
