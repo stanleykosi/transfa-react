@@ -48,9 +48,7 @@ RUN chown -R appuser:appgroup /app
 # Switch to non-root user
 USER appuser
 
-# Expose port (Railway will set PORT env var)
-EXPOSE 8080
-
+# Worker service: no HTTP port exposed. Railway should treat this as a worker.
 # Health check - account service doesn't have HTTP endpoints, so we'll check if the process is running
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD pgrep account-service || exit 1

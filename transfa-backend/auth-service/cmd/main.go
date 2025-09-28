@@ -47,10 +47,14 @@ func main() {
 		log.Fatalf("cannot load config: %v", err)
 	}
 
-	// If a platform-provided PORT is set (e.g., Railway/Render), prefer it
-	if port := os.Getenv("PORT"); port != "" {
-		cfg.ServerPort = port
-	}
+    // If a platform-provided PORT is set (e.g., Railway/Render), prefer it
+    if port := os.Getenv("PORT"); port != "" {
+        cfg.ServerPort = port
+    }
+    // Ensure we have a port fallback if neither env is set
+    if cfg.ServerPort == "" {
+        cfg.ServerPort = "8080"
+    }
 
 	// Establish database connection pool with better configuration
 	dbConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
