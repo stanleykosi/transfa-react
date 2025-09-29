@@ -101,7 +101,7 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 	if err != nil {
 		log.Printf("ERROR: Failed to fetch VirtualNUBAN for AnchorAccountID %s: %v", anchorAccount.Data.ID, err)
 		reason := fmt.Sprintf("Failed to fetch virtual account number: %v", err)
-		_ = h.repo.UpsertOnboardingStatus(ctx, userID, "tier1", "failed", &reason)
+		_ = h.repo.UpdateTierStatus(ctx, userID, "tier1", "failed", &reason)
 		return false // Retryable API error.
 	}
 	log.Printf("Successfully fetched VirtualNUBAN: %s", nuban)
@@ -115,7 +115,7 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 	if _, err = h.repo.CreateAccount(ctx, newAccount); err != nil {
 		log.Printf("ERROR: Failed to save new account to DB for UserID %s: %v", userID, err)
 		reason := fmt.Sprintf("Failed to persist account record: %v", err)
-		_ = h.repo.UpsertOnboardingStatus(ctx, userID, "tier1", "failed", &reason)
+		_ = h.repo.UpdateTierStatus(ctx, userID, "tier1", "failed", &reason)
 		return false
 	}
 
