@@ -17,6 +17,7 @@ type UserRepository interface {
 	FindByClerkUserID(ctx context.Context, clerkUserID string) (*domain.User, error)
 	UpdateContactInfo(ctx context.Context, userID string, email *string, phone *string) error
 	UpdateAnchorCustomerInfo(ctx context.Context, userID string, anchorCustomerID string, fullName *string) error
+	UpsertOnboardingStatus(ctx context.Context, userID, stage, status string, reason *string) error
 }
 
 // PostgresUserRepository is the PostgreSQL implementation of the UserRepository.
@@ -116,7 +117,7 @@ func (r *PostgresUserRepository) UpdateContactInfo(ctx context.Context, userID s
 func (r *PostgresUserRepository) UpdateAnchorCustomerInfo(ctx context.Context, userID string, anchorCustomerID string, fullName *string) error {
 	var query string
 	var args []interface{}
-	
+
 	if anchorCustomerID != "" && fullName != nil {
 		// Update both anchor customer ID and full name
 		query = `UPDATE users SET anchor_customer_id = $1, full_name = $2, updated_at = NOW() WHERE id = $3`
@@ -133,10 +134,25 @@ func (r *PostgresUserRepository) UpdateAnchorCustomerInfo(ctx context.Context, u
 		// Nothing to update
 		return nil
 	}
-	
+
 	_, err := r.db.Exec(ctx, query, args...)
 	if err != nil {
 		log.Printf("Error updating anchor customer info for user %s: %v", userID, err)
+		return err
+	}
+	return nil
+}
+
+func (r *PostgresUserRepository) UpsertOnboardingStatus(ctx context.Context, userID, stage, status string, reason *string) error {
+	query := `
+		INSERT INTO onboarding_status (user_id, stage, status, reason)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (user_id, stage)
+		DO UPDATE SET status = EXCLUDED.status, reason = EXCLUDED.reason, updated_at = NOW()
+	`
+	_, err := r.db.Exec(ctx, query, userID, stage, status, reason)
+	if err != nil {
+		log.Printf("Error upserting onboarding status for user %s: %v", userID, err)
 		return err
 	}
 	return nil

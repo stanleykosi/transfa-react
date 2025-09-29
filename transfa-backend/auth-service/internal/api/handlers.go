@@ -15,44 +15,68 @@ import (
 
 // OnboardingHandler handles the user onboarding process.
 type OnboardingHandler struct {
-    repo     store.UserRepository
-    producer *rabbitmq.EventProducer
+	repo     store.UserRepository
+	producer *rabbitmq.EventProducer
 }
 
 // NewOnboardingHandler creates a new handler for the onboarding endpoint.
 func NewOnboardingHandler(repo store.UserRepository, producer *rabbitmq.EventProducer) *OnboardingHandler {
-    return &OnboardingHandler{repo: repo, producer: producer}
+	return &OnboardingHandler{repo: repo, producer: producer}
 }
 
 // HandleTier1 receives BVN/DOB/Gender and records onboarding_status (tier1 -> pending). Returns 202.
 func (h *OnboardingHandler) HandleTier1(w http.ResponseWriter, r *http.Request) {
-    clerkUserID := r.Header.Get("X-Clerk-User-Id")
-    if clerkUserID == "" {
-        http.Error(w, "Unauthorized: Clerk User ID missing", http.StatusUnauthorized)
-        return
-    }
-    existing, err := h.repo.FindByClerkUserID(r.Context(), clerkUserID)
-    if err != nil || existing == nil {
-        http.Error(w, "User not found", http.StatusNotFound)
-        return
-    }
+	clerkUserID := r.Header.Get("X-Clerk-User-Id")
+	if clerkUserID == "" {
+		http.Error(w, "Unauthorized: Clerk User ID missing", http.StatusUnauthorized)
+		return
+	}
+	existing, err := h.repo.FindByClerkUserID(r.Context(), clerkUserID)
+	if err != nil || existing == nil {
+		http.Error(w, "User not found", http.StatusNotFound)
+		return
+	}
 
-    // Parse payload
-    var body struct {
-        Dob    string `json:"dob"`
-        Gender string `json:"gender"`
-        Bvn    string `json:"bvn"`
-    }
-    if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-        http.Error(w, "Invalid request body", http.StatusBadRequest)
-        return
-    }
+	// Parse payload
+	var body struct {
+		Dob    string `json:"dob"`
+		Gender string `json:"gender"`
+		Bvn    string `json:"bvn"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
 
-    // Note: We don't persist tier1 pending here; completion is driven by the webhook path.
+	// Persist tier1 pending status so status endpoint reflects current progress
+	if err := h.repo.UpsertOnboardingStatus(r.Context(), existing.ID, "tier1", "pending", nil); err != nil {
+		log.Printf("Failed to upsert tier1 status for user %s: %v", existing.ID, err)
+		http.Error(w, "Failed to update status", http.StatusInternalServerError)
+		return
+	}
 
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(http.StatusAccepted)
-    _ = json.NewEncoder(w).Encode(map[string]string{"status": "tier1_pending"})
+	// Publish verification event for downstream services to trigger Anchor Tier1 verification
+	if h.producer != nil {
+		event := domain.Tier1VerificationRequestedEvent{
+			UserID: existing.ID,
+			AnchorCustomerID: func() string {
+				if existing.AnchorCustomerID != nil {
+					return *existing.AnchorCustomerID
+				}
+				return ""
+			}(),
+			BVN:         body.Bvn,
+			DateOfBirth: body.Dob,
+			Gender:      body.Gender,
+		}
+		if err := h.producer.Publish(r.Context(), "customer_events", "tier1.verification.requested", event); err != nil {
+			log.Printf("Failed to publish tier1.verification.requested event for user %s: %v", existing.ID, err)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "tier1_pending"})
 }
 
 // ServeHTTP implements the http.Handler interface.
@@ -83,14 +107,14 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if findErr == nil && existing != nil {
 		internalUserID = existing.ID
 		_ = h.repo.UpdateContactInfo(r.Context(), existing.ID, &req.Email, &req.PhoneNumber)
-		
+
 		// Update full name if provided and user is personal type
 		if req.UserType == domain.PersonalUser {
 			firstName, _ := req.KYCData["firstName"].(string)
 			lastName, _ := req.KYCData["lastName"].(string)
 			middleName, _ := req.KYCData["middleName"].(string)
 			maidenName, _ := req.KYCData["maidenName"].(string)
-			
+
 			// Construct full name from structured fields
 			if firstName != "" && lastName != "" {
 				fullNameParts := []string{firstName}
@@ -106,15 +130,15 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				_ = h.repo.UpdateAnchorCustomerInfo(r.Context(), existing.ID, "", &constructedFullName)
 			}
 		}
-		
+
 		// If Anchor customer already exists, don't re-publish create event
 		if existing.AnchorCustomerID != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			json.NewEncoder(w).Encode(map[string]any{
-				"user_id":             existing.ID,
-				"anchor_customer_id":  existing.AnchorCustomerID,
-				"status":              "tier0_already_created",
+				"user_id":            existing.ID,
+				"anchor_customer_id": existing.AnchorCustomerID,
+				"status":             "tier0_already_created",
 			})
 			return
 		}
@@ -126,7 +150,7 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			lastName, _ := req.KYCData["lastName"].(string)
 			middleName, _ := req.KYCData["middleName"].(string)
 			maidenName, _ := req.KYCData["maidenName"].(string)
-			
+
 			// Construct full name from structured fields
 			if firstName != "" && lastName != "" {
 				fullNameParts := []string{firstName}
@@ -183,15 +207,15 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		KYCData: eventKYC,
 	}
 
-    // Publish only if producer is available
-    if h.producer != nil {
-        if pubErr := h.producer.Publish(r.Context(), "user_events", "user.created", event); pubErr != nil {
-		// This is a critical failure. The user is in our DB, but downstream services won't know.
-		// This requires a compensation mechanism (e.g., a retry job, manual intervention).
-		log.Printf("CRITICAL: Failed to publish user.created event for user %s. Manual intervention required.", internalUserID)
-		// We still return a success to the client, as the user was created. The system must be resilient.
-        }
-    }
+	// Publish only if producer is available
+	if h.producer != nil {
+		if pubErr := h.producer.Publish(r.Context(), "user_events", "user.created", event); pubErr != nil {
+			// This is a critical failure. The user is in our DB, but downstream services won't know.
+			// This requires a compensation mechanism (e.g., a retry job, manual intervention).
+			log.Printf("CRITICAL: Failed to publish user.created event for user %s. Manual intervention required.", internalUserID)
+			// We still return a success to the client, as the user was created. The system must be resilient.
+		}
+	}
 
 	// Respond to the client
 	w.Header().Set("Content-Type", "application/json")

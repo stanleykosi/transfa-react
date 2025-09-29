@@ -28,8 +28,8 @@ type UserRepository interface {
 	UpdateAnchorCustomerID(ctx context.Context, userID, anchorCustomerID string) error
 	UpdateAnchorCustomerInfo(ctx context.Context, userID string, anchorCustomerID string, fullName *string) error
 	GetAnchorCustomerIDByUserID(ctx context.Context, userID string) (*string, error)
-    EnsureOnboardingStatusTable(ctx context.Context) error
-    UpsertOnboardingStatus(ctx context.Context, userID, stage, status string, reason *string) error
+	EnsureOnboardingStatusTable(ctx context.Context) error
+	UpsertOnboardingStatus(ctx context.Context, userID, stage, status string, reason *string) error
 }
 
 // PostgresUserRepository is the PostgreSQL implementation of the UserRepository.
@@ -106,7 +106,7 @@ func (r *PostgresUserRepository) GetAnchorCustomerIDByUserID(ctx context.Context
 
 // EnsureOnboardingStatusTable creates the onboarding_status table if it doesn't exist.
 func (r *PostgresUserRepository) EnsureOnboardingStatusTable(ctx context.Context) error {
-    query := `
+	query := `
         CREATE TABLE IF NOT EXISTS onboarding_status (
             user_id UUID NOT NULL,
             stage TEXT NOT NULL,
@@ -116,26 +116,26 @@ func (r *PostgresUserRepository) EnsureOnboardingStatusTable(ctx context.Context
             PRIMARY KEY (user_id, stage)
         )
     `
-    _, err := r.db.Exec(ctx, query)
-    if err != nil {
-        log.Printf("Error ensuring onboarding_status table: %v", err)
-        return err
-    }
-    return nil
+	_, err := r.db.Exec(ctx, query)
+	if err != nil {
+		log.Printf("Error ensuring onboarding_status table: %v", err)
+		return err
+	}
+	return nil
 }
 
 // UpsertOnboardingStatus writes or updates the onboarding status for a user and stage.
 func (r *PostgresUserRepository) UpsertOnboardingStatus(ctx context.Context, userID, stage, status string, reason *string) error {
-    query := `
+	query := `
         INSERT INTO onboarding_status (user_id, stage, status, reason)
         VALUES ($1, $2, $3, $4)
         ON CONFLICT (user_id, stage)
         DO UPDATE SET status = EXCLUDED.status, reason = EXCLUDED.reason, updated_at = NOW()
     `
-    _, err := r.db.Exec(ctx, query, userID, stage, status, reason)
-    if err != nil {
-        log.Printf("Error upserting onboarding status for user %s: %v", userID, err)
-        return err
-    }
-    return nil
+	_, err := r.db.Exec(ctx, query, userID, stage, status, reason)
+	if err != nil {
+		log.Printf("Error upserting onboarding status for user %s: %v", userID, err)
+		return err
+	}
+	return nil
 }
