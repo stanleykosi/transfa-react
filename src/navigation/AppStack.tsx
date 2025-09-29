@@ -62,16 +62,13 @@ const AppStack = () => {
 
         switch (data?.status) {
           case 'completed':
-          case 'tier1_created':
             setInitialRoute('AppTabs');
             break;
+          case 'tier1_pending':
           case 'tier0_created':
             setInitialRoute('CreateAccount');
             break;
           case 'tier0_pending':
-            // Keep user in onboarding; the screen will show a slim in-place loader and poll
-            setInitialRoute('OnboardingForm');
-            break;
           case 'new':
           default:
             setInitialRoute('OnboardingForm');

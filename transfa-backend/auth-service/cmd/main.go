@@ -143,8 +143,8 @@ func main() {
 			w.Write([]byte("User not found"))
 			return
 		}
-		// Derive a normalized, frontend-friendly status
-		// Priority: completed (has account) > tier1_created > tier0_created/pending > new
+        // Derive a normalized, frontend-friendly status
+        // Priority: completed (has account) > tier1_pending > tier0_created/pending > new
 		status := "new"
 		var reason *string
 		if conn, err := dbpool.Acquire(r.Context()); err == nil {
@@ -156,18 +156,12 @@ func main() {
 			if accountCount > 0 {
 				status = "completed"
 			} else {
-				// 2) Tier1 status
+                // 2) Tier1 status
 				var t1 string
 				_ = conn.QueryRow(r.Context(), `SELECT status FROM onboarding_status WHERE user_id = $1 AND stage = 'tier1'`, existing.ID).Scan(&t1)
 				if t1 != "" {
-					switch t1 {
-					case "created":
-						status = "tier1_created"
-					case "failed":
-						status = "tier1_failed"
-					default:
-						status = "tier1_" + t1
-					}
+                    // Treat any presence of tier1 record as pending until account exists
+                    status = "tier1_pending"
 				} else {
 					// 3) Tier0 status
 					var t0 string

@@ -48,11 +48,11 @@ const CreateAccountScreen = () => {
         console.log('🔍 Status check response:', data?.status);
         console.log('🔍 Full response data:', data);
 
-        if (data?.status === 'completed' || data?.status === 'tier1_created') {
+        if (data?.status === 'completed') {
           // Already fully enabled -> go to main app
           navigation.navigate('AppTabs' as never);
           return;
-        } else if (data?.status === 'tier0_created') {
+        } else if (data?.status === 'tier1_pending' || data?.status === 'tier0_created') {
           setStatus('tier0_created');
           return;
         } else if (data?.status === 'tier0_processing' || data?.status === 'tier0_pending') {
