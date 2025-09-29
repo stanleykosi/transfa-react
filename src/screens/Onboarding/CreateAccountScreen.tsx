@@ -5,7 +5,16 @@
  * Collects Tier 1 fields (DOB, gender, BVN) and submits to backend (placeholder for now).
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Alert,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import PrimaryButton from '@/components/PrimaryButton';
@@ -22,7 +31,7 @@ const CreateAccountScreen = () => {
     'checking'
   );
   const [dob, setDob] = useState(''); // YYYY-MM-DD
-  const [gender, setGender] = useState<'male' | 'female' | ''>('');
+  const [gender, setGender] = useState('');
   const [bvn, setBvn] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -107,8 +116,13 @@ const CreateAccountScreen = () => {
       Alert.alert('Please wait', 'Your Tier 0 verification has not completed yet.');
       return;
     }
-    if (!dob || !gender || !bvn) {
+    const normalizedGender = gender.trim().toLowerCase();
+    if (!dob || !normalizedGender || !bvn) {
       Alert.alert('Validation Error', 'Please provide BVN, date of birth, and gender.');
+      return;
+    }
+    if (normalizedGender !== 'male' && normalizedGender !== 'female') {
+      Alert.alert('Validation Error', "Gender must be 'male' or 'female'.");
       return;
     }
     setSubmitting(true);
@@ -117,7 +131,7 @@ const CreateAccountScreen = () => {
       // Submit Tier 1 details to backend (records intent only)
       await apiClient.post(
         '/onboarding/tier1',
-        { dob, gender, bvn },
+        { dob, gender: normalizedGender, bvn },
         { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers } }
       );
 
@@ -161,47 +175,66 @@ const CreateAccountScreen = () => {
 
   return (
     <ScreenWrapper>
-      <View style={styles.container}>
-        <Text style={styles.title}>Complete Your Verification</Text>
-        <Text style={styles.subtitle}>
-          Please provide your additional details to complete your account setup.
-        </Text>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
+      >
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.scrollContainer}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.container}>
+            <Text style={styles.title}>Complete Your Verification</Text>
+            <Text style={styles.subtitle}>
+              Please provide your additional details to complete your account setup.
+            </Text>
 
-        <FormInput
-          label="BVN"
-          value={bvn}
-          onChangeText={setBvn}
-          placeholder="Enter your 11-digit BVN"
-          keyboardType="number-pad"
-          maxLength={11}
-        />
-        <FormInput
-          label="Date of Birth"
-          value={dob}
-          onChangeText={setDob}
-          placeholder="YYYY-MM-DD"
-        />
-        <FormInput
-          label="Gender (male/female)"
-          value={gender}
-          onChangeText={(t) => setGender((t as any).toLowerCase() as any)}
-          placeholder="male or female"
-        />
+            <FormInput
+              label="BVN"
+              value={bvn}
+              onChangeText={setBvn}
+              placeholder="Enter your 11-digit BVN"
+              keyboardType="number-pad"
+              maxLength={11}
+            />
+            <FormInput
+              label="Date of Birth"
+              value={dob}
+              onChangeText={setDob}
+              placeholder="YYYY-MM-DD"
+            />
+            <FormInput
+              label="Gender"
+              value={gender}
+              onChangeText={(t) => setGender(t)}
+              placeholder="male or female"
+            />
 
-        <PrimaryButton title="Submit" onPress={handleSubmitTier1} isLoading={submitting} />
-        <PrimaryButton
-          title="Sign Out (Test Different Account)"
-          onPress={handleSignOut}
-          style={styles.signOutButton}
-          textStyle={styles.signOutButtonText}
-        />
-      </View>
+            <PrimaryButton title="Submit" onPress={handleSubmitTier1} isLoading={submitting} />
+            <PrimaryButton
+              title="Sign Out (Test Different Account)"
+              onPress={handleSignOut}
+              style={styles.signOutButton}
+              textStyle={styles.signOutButtonText}
+            />
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </ScreenWrapper>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { padding: theme.spacing.s24, gap: theme.spacing.s16 },
+  scrollContainer: {
+    flexGrow: 1,
+  },
+  container: {
+    padding: theme.spacing.s24,
+    gap: theme.spacing.s16,
+    paddingBottom: theme.spacing.s48,
+  },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: theme.spacing.s24 },
   title: {
     fontSize: theme.fontSizes['2xl'],
