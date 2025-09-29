@@ -27,6 +27,7 @@ import (
 type AccountRepository interface {
 	CreateAccount(ctx context.Context, account *domain.Account) (string, error)
 	FindUserIDByAnchorCustomerID(ctx context.Context, anchorCustomerID string) (string, error)
+	UpdateTierStatus(ctx context.Context, userID, stage, status string, reason *string) error
 }
 
 // PostgresAccountRepository is the PostgreSQL implementation of the AccountRepository.
@@ -82,4 +83,19 @@ func (r *PostgresAccountRepository) CreateAccount(ctx context.Context, account *
 
 	log.Printf("Successfully created account with ID: %s", accountID)
 	return accountID, nil
+}
+
+func (r *PostgresAccountRepository) UpdateTierStatus(ctx context.Context, userID, stage, status string, reason *string) error {
+	query := `
+		INSERT INTO onboarding_status (user_id, stage, status, reason)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (user_id, stage)
+		DO UPDATE SET status = EXCLUDED.status, reason = EXCLUDED.reason, updated_at = NOW()
+	`
+	_, err := r.db.Exec(ctx, query, userID, stage, status, reason)
+	if err != nil {
+		log.Printf("Error updating tier status for user %s in account service: %v", userID, err)
+		return err
+	}
+	return nil
 }

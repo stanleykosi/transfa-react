@@ -37,7 +37,11 @@ func (h *OnboardingHandler) HandleTier1(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Parse payload
+	if existing.AnchorCustomerID == nil || *existing.AnchorCustomerID == "" {
+		http.Error(w, "Tier 0 verification incomplete", http.StatusPreconditionFailed)
+		return
+	}
+
 	var body struct {
 		Dob    string `json:"dob"`
 		Gender string `json:"gender"`
@@ -48,26 +52,49 @@ func (h *OnboardingHandler) HandleTier1(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Persist tier1 pending status so status endpoint reflects current progress
+	body.Dob = strings.TrimSpace(body.Dob)
+	body.Gender = strings.TrimSpace(body.Gender)
+	body.Bvn = strings.TrimSpace(body.Bvn)
+
+	if body.Dob == "" || body.Gender == "" || body.Bvn == "" {
+		http.Error(w, "BVN, date of birth and gender are required", http.StatusBadRequest)
+		return
+	}
+
+	if len(body.Bvn) != 11 {
+		http.Error(w, "BVN must be 11 digits", http.StatusBadRequest)
+		return
+	}
+	for _, ch := range body.Bvn {
+		if ch < '0' || ch > '9' {
+			http.Error(w, "BVN must contain only digits", http.StatusBadRequest)
+			return
+		}
+	}
+
+	genderLower := strings.ToLower(body.Gender)
+	switch genderLower {
+	case "male", "female":
+	default:
+		http.Error(w, "Gender must be 'male' or 'female'", http.StatusBadRequest)
+		return
+	}
+
+	normalizedGender := strings.ToUpper(genderLower[:1]) + genderLower[1:]
+
 	if err := h.repo.UpsertOnboardingStatus(r.Context(), existing.ID, "tier1", "pending", nil); err != nil {
-		log.Printf("Failed to upsert tier1 status for user %s: %v", existing.ID, err)
+		log.Printf("Failed to persist tier1 pending status for user %s: %v", existing.ID, err)
 		http.Error(w, "Failed to update status", http.StatusInternalServerError)
 		return
 	}
 
-	// Publish verification event for downstream services to trigger Anchor Tier1 verification
 	if h.producer != nil {
 		event := domain.Tier1VerificationRequestedEvent{
-			UserID: existing.ID,
-			AnchorCustomerID: func() string {
-				if existing.AnchorCustomerID != nil {
-					return *existing.AnchorCustomerID
-				}
-				return ""
-			}(),
-			BVN:         body.Bvn,
-			DateOfBirth: body.Dob,
-			Gender:      body.Gender,
+			UserID:           existing.ID,
+			AnchorCustomerID: *existing.AnchorCustomerID,
+			BVN:              body.Bvn,
+			DateOfBirth:      body.Dob,
+			Gender:           normalizedGender,
 		}
 		if err := h.producer.Publish(r.Context(), "customer_events", "tier1.verification.requested", event); err != nil {
 			log.Printf("Failed to publish tier1.verification.requested event for user %s: %v", existing.ID, err)

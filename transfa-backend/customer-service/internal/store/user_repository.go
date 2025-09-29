@@ -28,6 +28,7 @@ type UserRepository interface {
 	UpdateAnchorCustomerID(ctx context.Context, userID, anchorCustomerID string) error
 	UpdateAnchorCustomerInfo(ctx context.Context, userID string, anchorCustomerID string, fullName *string) error
 	GetAnchorCustomerIDByUserID(ctx context.Context, userID string) (*string, error)
+	FindUserIDByAnchorCustomerID(ctx context.Context, anchorCustomerID string) (string, error)
 	EnsureOnboardingStatusTable(ctx context.Context) error
 	UpsertOnboardingStatus(ctx context.Context, userID, stage, status string, reason *string) error
 }
@@ -50,7 +51,7 @@ func (r *PostgresUserRepository) UpdateAnchorCustomerID(ctx context.Context, use
         SET anchor_customer_id = $1, updated_at = NOW()
         WHERE id = $2
     `
-	commandTag, err := r.db.Exec(ctx, query, anchorCustomerID, userID)
+	commandTag, err := r.db.Exec(ctx, query, nullIfEmpty(anchorCustomerID), userID)
 	if err != nil {
 		log.Printf("Error updating anchor_customer_id for user %s: %v", userID, err)
 		return err
@@ -58,8 +59,6 @@ func (r *PostgresUserRepository) UpdateAnchorCustomerID(ctx context.Context, use
 
 	if commandTag.RowsAffected() == 0 {
 		log.Printf("Warning: No user found with ID %s to update anchor_customer_id", userID)
-		// Depending on business logic, this might be considered an error.
-		// For now, we log it as a warning.
 	}
 
 	return nil
@@ -67,12 +66,26 @@ func (r *PostgresUserRepository) UpdateAnchorCustomerID(ctx context.Context, use
 
 // UpdateAnchorCustomerInfo updates the anchor customer ID and full name for a user.
 func (r *PostgresUserRepository) UpdateAnchorCustomerInfo(ctx context.Context, userID string, anchorCustomerID string, fullName *string) error {
-	query := `
-        UPDATE users
-        SET anchor_customer_id = $1, full_name = $2, updated_at = NOW()
-        WHERE id = $3
-    `
-	commandTag, err := r.db.Exec(ctx, query, anchorCustomerID, fullName, userID)
+	var (
+		query string
+		args  []interface{}
+	)
+
+	switch {
+	case anchorCustomerID != "" && fullName != nil:
+		query = `UPDATE users SET anchor_customer_id = $1, full_name = $2, updated_at = NOW() WHERE id = $3`
+		args = []interface{}{anchorCustomerID, fullName, userID}
+	case anchorCustomerID != "" && fullName == nil:
+		query = `UPDATE users SET anchor_customer_id = $1, updated_at = NOW() WHERE id = $2`
+		args = []interface{}{anchorCustomerID, userID}
+	case anchorCustomerID == "" && fullName != nil:
+		query = `UPDATE users SET full_name = $1, updated_at = NOW() WHERE id = $2`
+		args = []interface{}{fullName, userID}
+	default:
+		return nil
+	}
+
+	commandTag, err := r.db.Exec(ctx, query, args...)
 	if err != nil {
 		log.Printf("Error updating anchor customer info for user %s: %v", userID, err)
 		return err
@@ -80,8 +93,6 @@ func (r *PostgresUserRepository) UpdateAnchorCustomerInfo(ctx context.Context, u
 
 	if commandTag.RowsAffected() == 0 {
 		log.Printf("Warning: No user found with ID %s to update anchor customer info", userID)
-		// Depending on business logic, this might be considered an error.
-		// For now, we log it as a warning.
 	}
 
 	return nil
@@ -102,6 +113,22 @@ func (r *PostgresUserRepository) GetAnchorCustomerIDByUserID(ctx context.Context
 		return nil, err
 	}
 	return anchorID, nil
+}
+
+func (r *PostgresUserRepository) FindUserIDByAnchorCustomerID(ctx context.Context, anchorCustomerID string) (string, error) {
+	query := `
+		SELECT id FROM users WHERE anchor_customer_id = $1 LIMIT 1
+	`
+	var userID string
+	row := r.db.QueryRow(ctx, query, anchorCustomerID)
+	if err := row.Scan(&userID); err != nil {
+		if err == pgx.ErrNoRows {
+			return "", err
+		}
+		log.Printf("Error fetching user id by anchor_customer_id %s: %v", anchorCustomerID, err)
+		return "", err
+	}
+	return userID, nil
 }
 
 // EnsureOnboardingStatusTable creates the onboarding_status table if it doesn't exist.
@@ -138,4 +165,11 @@ func (r *PostgresUserRepository) UpsertOnboardingStatus(ctx context.Context, use
 		return err
 	}
 	return nil
+}
+
+func nullIfEmpty(val string) interface{} {
+	if val == "" {
+		return nil
+	}
+	return val
 }

@@ -106,6 +106,18 @@ func main() {
 		}
 	}()
 
+	// Consume tier1 verification requests on the same exchange using a dedicated queue
+	go func() {
+		tier1Queue := "customer_service_tier1_requested"
+		bindings := map[string]func([]byte) bool{
+			"tier1.verification.requested": eventHandler.HandleTier1VerificationRequestedEvent,
+		}
+		log.Printf("Starting consumer for tier1 queue '%s'...", tier1Queue)
+		if err := consumer.ConsumeWithBindings("customer_events", tier1Queue, bindings); err != nil {
+			log.Fatalf("Tier1 consumer error: %v", err)
+		}
+	}()
+
 	log.Println("Customer service is running. Waiting for events.")
 
 	// Wait for termination signal for graceful shutdown

@@ -193,9 +193,13 @@ func (h *UserEventHandler) HandleTier1VerificationRequestedEvent(body []byte) bo
 		return true
 	}
 
-	if event.UserID == "" || event.AnchorCustomerID == "" {
-		log.Printf("Invalid tier1.verification.requested event: missing user or anchor customer ID")
-		return true
+	if event.UserID == "" {
+		var err error
+		event.UserID, err = h.repo.FindUserIDByAnchorCustomerID(context.Background(), event.AnchorCustomerID)
+		if err != nil || event.UserID == "" {
+			log.Printf("Invalid tier1.verification.requested event: missing user or anchor customer ID")
+			return true
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -213,7 +217,7 @@ func (h *UserEventHandler) HandleTier1VerificationRequestedEvent(body []byte) bo
 				Level1: domain.KYCLevel1{
 					BVN:         event.BVN,
 					DateOfBirth: event.DateOfBirth,
-					Gender:      strings.Title(strings.ToLower(event.Gender)),
+					Gender:      event.Gender,
 				},
 			},
 		},

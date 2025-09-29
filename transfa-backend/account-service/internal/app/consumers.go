@@ -10,16 +10,17 @@
 package app
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
-	"log"
-	"time"
+    "context"
+    "encoding/json"
+    "errors"
+    "fmt"
+    "log"
+    "time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/transfa/account-service/internal/domain"
-	"github.com/transfa/account-service/internal/store"
-	"github.com/transfa/account-service/pkg/anchorclient"
+    "github.com/jackc/pgx/v5"
+    "github.com/transfa/account-service/internal/domain"
+    "github.com/transfa/account-service/internal/store"
+    "github.com/transfa/account-service/pkg/anchorclient"
 )
 
 // AccountEventHandler handles the processing of account-related events.
@@ -36,8 +37,7 @@ func NewAccountEventHandler(repo store.AccountRepository, anchorClient *anchorcl
 	}
 }
 
-// HandleCustomerVerifiedEvent processes a `customer.verified` event.
-// It returns true if the message should be acknowledged, false if it should be re-queued.
+// HandleCustomerVerifiedEvent processes Tier1 approval events.
 func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 	var event domain.CustomerVerifiedEvent
 	if err := json.Unmarshal(body, &event); err != nil {
@@ -45,11 +45,15 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 		return true // Acknowledge malformed message.
 	}
 
+	if event.AnchorCustomerID == "" {
+		log.Printf("customer.verified event missing AnchorCustomerID; acking")
+		return true
+	}
+
 	log.Printf("Processing customer.verified event for AnchorCustomerID: %s", event.AnchorCustomerID)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	// 1. Find our internal user ID from the Anchor Customer ID.
 	userID, err := h.repo.FindUserIDByAnchorCustomerID(ctx, event.AnchorCustomerID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -60,9 +64,11 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 		return false // Retryable database error.
 	}
 
-	// 2. Create a Deposit Account on Anchor for this customer.
-	// For now, we assume all are 'personal' users getting a 'SAVINGS' account.
-	// A more robust implementation would fetch user type from the DB.
+    reason := "Tier1 approved"
+    if err := h.repo.UpdateTierStatus(ctx, userID, "tier1", "approved", &reason); err != nil {
+		log.Printf("WARN: Failed to persist tier1 approved status for user %s: %v", userID, err)
+	}
+
 	accountReq := domain.CreateDepositAccountRequest{
 		Data: domain.RequestData{
 			Type: "DepositAccount",
@@ -84,38 +90,40 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 	}
 	anchorAccount, err := h.anchorClient.CreateDepositAccount(ctx, accountReq)
 	if err != nil {
-		log.Printf("ERROR: Failed to create Anchor DepositAccount for AnchorCustomerID %s: %v", event.AnchorCustomerID, err)
-		return false // Retryable API error.
+        log.Printf("ERROR: Failed to create Anchor DepositAccount for AnchorCustomerID %s: %v", event.AnchorCustomerID, err)
+        reason := fmt.Sprintf("Failed to create Anchor deposit account: %v", err)
+        _ = h.repo.UpdateTierStatus(ctx, userID, "tier1", "failed", &reason)
+        return false // Retryable API error.
 	}
 	log.Printf("Successfully created Anchor DepositAccount %s", anchorAccount.Data.ID)
 
-	// 3. Get the Virtual NUBAN associated with the new deposit account.
 	nuban, err := h.anchorClient.GetVirtualNUBANForAccount(ctx, anchorAccount.Data.ID)
 	if err != nil {
 		log.Printf("ERROR: Failed to fetch VirtualNUBAN for AnchorAccountID %s: %v", anchorAccount.Data.ID, err)
+		reason := fmt.Sprintf("Failed to fetch virtual account number: %v", err)
+		_ = h.repo.UpsertOnboardingStatus(ctx, userID, "tier1", "failed", &reason)
 		return false // Retryable API error.
 	}
 	log.Printf("Successfully fetched VirtualNUBAN: %s", nuban)
 
-	// 4. Save the new account details to our database.
 	newAccount := &domain.Account{
 		UserID:          userID,
 		AnchorAccountID: anchorAccount.Data.ID,
 		VirtualNUBAN:    nuban,
 		Type:            domain.PrimaryAccount,
 	}
-	_, err = h.repo.CreateAccount(ctx, newAccount)
-	if err != nil {
+	if _, err = h.repo.CreateAccount(ctx, newAccount); err != nil {
 		log.Printf("ERROR: Failed to save new account to DB for UserID %s: %v", userID, err)
-		// This is a critical state. The account exists on Anchor but not in our DB.
-		// A retry is necessary. If it persists, it will require manual intervention.
+		reason := fmt.Sprintf("Failed to persist account record: %v", err)
+		_ = h.repo.UpsertOnboardingStatus(ctx, userID, "tier1", "failed", &reason)
 		return false
+	}
+
+    if err := h.repo.UpdateTierStatus(ctx, userID, "tier1", "completed", nil); err != nil {
+		log.Printf("WARN: Failed to persist tier1 completed status for user %s: %v", userID, err)
 	}
 
 	log.Printf("Successfully provisioned and saved account for UserID %s", userID)
 
-	// TODO: In a later step, publish an `account.created` event for the notification-service
-	// to send a "Welcome!" push notification to the user.
-
-	return true // Acknowledge the message.
+	return true
 }
