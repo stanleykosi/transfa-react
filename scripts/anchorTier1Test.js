@@ -2,6 +2,7 @@
 
 const https = require('https');
 const { URL } = require('url');
+const { Buffer } = require('buffer');
 
 function fail(msg) {
   console.error(`❌ ${msg}`);
@@ -10,7 +11,9 @@ function fail(msg) {
 
 const [customerId, bvn, dob, gender] = process.argv.slice(2);
 if (!customerId || !bvn || !dob || !gender) {
-  console.log('Usage: node scripts/anchorTier1Test.js <customerId> <bvn> <YYYY-MM-DD> <male|female> [tier1|tier2]');
+  console.log(
+    'Usage: node scripts/anchorTier1Test.js <customerId> <bvn> <YYYY-MM-DD> <male|female> [tier1|tier2]'
+  );
   process.exit(0);
 }
 
@@ -45,7 +48,7 @@ function request(method, path, body) {
         'Content-Type': 'application/json',
         Accept: 'application/json',
         'x-anchor-key': anchorKey,
-        'Content-Length': body ? Buffer.byteLength(body) : 0,
+        'Content-Length': body ? Buffer.from(body).length : 0,
       },
     };
     const req = https.request(url, options, (res) => {

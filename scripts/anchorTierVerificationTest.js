@@ -2,6 +2,8 @@
 
 const https = require('https');
 const { URL } = require('url');
+const crypto = require('crypto');
+const { Buffer } = require('buffer');
 
 function fail(msg) {
   console.error(`❌ ${msg}`);
@@ -10,7 +12,9 @@ function fail(msg) {
 
 const [customerId, tier, jsonPayload] = process.argv.slice(2);
 if (!customerId || !tier || !jsonPayload) {
-  console.log('Usage: node scripts/anchorTierVerificationTest.js <customerId> <tier1|tier2|tier3> <attributes-json>');
+  console.log(
+    'Usage: node scripts/anchorTierVerificationTest.js <customerId> <tier1|tier2|tier3> <attributes-json>'
+  );
   process.exit(0);
 }
 
@@ -29,7 +33,7 @@ if (!anchorKey) {
 
 const tierUpper = tier.toUpperCase();
 if (!['TIER1', 'TIER2', 'TIER3', 'TIER_1', 'TIER_2', 'TIER_3'].includes(tierUpper)) {
-  fail("Tier must be tier1, tier2, or tier3");
+  fail('Tier must be tier1, tier2, or tier3');
 }
 
 const levelKey = `level${tierUpper.replace('TIER_', '')}`;
@@ -52,7 +56,7 @@ function request(method, path, body) {
         'Content-Type': 'application/json',
         Accept: 'application/json',
         'x-anchor-key': anchorKey,
-        'Content-Length': body ? Buffer.byteLength(body) : 0,
+        'Content-Length': body ? Buffer.from(body).length : 0,
       },
     };
     const req = https.request(url, options, (res) => {
@@ -78,13 +82,31 @@ function request(method, path, body) {
   try {
     console.log(`➡️  Triggering ${tierUpper} for ${customerId}`);
     await request('POST', `/api/v1/customers/${customerId}/verification/individual`, payload);
+    if (process.env.ANCHOR_WEBHOOK_SECRET) {
+      const body = JSON.stringify(payload);
+      const sha1Sig = crypto
+        .createHmac('sha1', process.env.ANCHOR_WEBHOOK_SECRET)
+        .update(body)
+        .digest('base64');
+      const sha256Sig = crypto
+        .createHmac('sha256', process.env.ANCHOR_WEBHOOK_SECRET)
+        .update(body)
+        .digest('hex');
+      console.log('🔐 Expected webhook signatures:');
+      console.log('   x-anchor-signature:', sha1Sig);
+      console.log('   x-anchor-signature (sha256=...):', `sha256=${sha256Sig}`);
+    }
     console.log('✅ Triggered. Polling status...');
     const maxSeconds = 120;
     for (let elapsed = 5; elapsed <= maxSeconds; elapsed += 5) {
       await new Promise((res) => setTimeout(res, 5000));
       const statusResp = await request('GET', `/api/v1/customers/${customerId}`);
       const verification = statusResp?.data?.attributes?.verification;
-      const current = verification?.level1?.status || verification?.status || verification?.latestStatus || 'unknown';
+      const current =
+        verification?.level1?.status ||
+        verification?.status ||
+        verification?.latestStatus ||
+        'unknown';
       console.log(`⏱️  Status after ${elapsed}s: ${current}`);
       if (current === 'approved' || current === 'rejected') {
         console.log('🎯 Final status:', current);

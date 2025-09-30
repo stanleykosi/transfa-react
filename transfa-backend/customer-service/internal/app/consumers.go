@@ -90,7 +90,7 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 		// On known validation errors, acknowledge to prevent infinite requeue
 		if strings.Contains(err.Error(), "missing required fields") {
 			log.Printf("ACK after validation failure for UserID %s: %v", event.UserID, err)
-            _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", ptr(err.Error()))
+			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", ptr(err.Error()))
 			return true
 		}
 

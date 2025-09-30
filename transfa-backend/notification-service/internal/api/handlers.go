@@ -19,17 +19,20 @@
 package api
 
 import (
-	"bytes"
-	"crypto/hmac"
-	"crypto/sha1"
-	"encoding/base64"
-	"encoding/json"
-	"io"
-	"log"
-	"net/http"
+    "bytes"
+    "crypto/hmac"
+    "crypto/sha1"
+    "crypto/sha256"
+    "encoding/base64"
+    "encoding/hex"
+    "encoding/json"
+    "io"
+    "log"
+    "net/http"
+    "strings"
 
-	"github.com/transfa/notification-service/internal/domain"
-	"github.com/transfa/notification-service/pkg/rabbitmq"
+    "github.com/transfa/notification-service/internal/domain"
+    "github.com/transfa/notification-service/pkg/rabbitmq"
 )
 
 // WebhookHandler processes incoming webhooks from Anchor.
@@ -155,16 +158,28 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // isValidSignature validates the HMAC-SHA1 signature of the webhook.
 // signature = Base64(HMAC_SHA1(request_body, secret_token))
 func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) bool {
-	if h.secret == "" {
-		log.Println("Warning: ANCHOR_WEBHOOK_SECRET is not set. Skipping signature validation.")
-		// In a production environment, you should return false here to enforce security.
-		return true
-	}
+    if h.secret == "" {
+        log.Println("Warning: ANCHOR_WEBHOOK_SECRET is not set. Skipping signature validation.")
+        return true
+    }
 
-	mac := hmac.New(sha1.New, []byte(h.secret))
-	mac.Write(body)
-	expectedMAC := mac.Sum(nil)
-	expectedSignature := base64.StdEncoding.EncodeToString(expectedMAC)
+    header := strings.TrimSpace(signatureHeader)
+    if strings.HasPrefix(strings.ToLower(header), "sha256=") {
+        provided, err := hex.DecodeString(header[7:])
+        if err != nil {
+            log.Printf("Invalid hex signature: %v", err)
+            return false
+        }
+        mac := hmac.New(sha256.New, []byte(h.secret))
+        mac.Write(body)
+        expected := mac.Sum(nil)
+        return hmac.Equal(provided, expected)
+    }
 
-	return hmac.Equal([]byte(signatureHeader), []byte(expectedSignature))
+    // Legacy SHA1 support
+    mac := hmac.New(sha1.New, []byte(h.secret))
+    mac.Write(body)
+    expectedMAC := mac.Sum(nil)
+    expectedSignature := base64.StdEncoding.EncodeToString(expectedMAC)
+    return hmac.Equal([]byte(header), []byte(expectedSignature))
 }
