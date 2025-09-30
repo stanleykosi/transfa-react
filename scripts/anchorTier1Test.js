@@ -81,12 +81,12 @@ function request(method, path, body) {
     for (let i = 0; i < maxSeconds; i += 5) {
       await new Promise((r) => setTimeout(r, 5000));
       const status = await request('GET', `/api/v1/customers/${customerId}`);
-    const verification = status?.data?.attributes?.verification;
-    const current = verification?.level1?.status || verification?.status || 'unknown';
-    console.log(`⏱️  Status after ${i + 5}s: ${current}`);
-    if (current === 'unknown') {
-      console.log('ℹ️  Full verification block:', JSON.stringify(verification, null, 2));
-    }
+      const verification = status?.data?.attributes?.verification;
+      const current = verification?.level1?.status || verification?.status || 'unknown';
+      console.log(`⏱️  Status after ${i + 5}s: ${current}`);
+      if (current === 'unknown') {
+        console.log('ℹ️  Full verification block:', JSON.stringify(verification, null, 2));
+      }
       if (current === 'approved' || current === 'rejected') {
         console.log('🎯 Final status:', current);
         process.exit(0);
