@@ -35,3 +35,9 @@ type EventResource struct {
 type CustomerVerifiedEvent struct {
 	AnchorCustomerID string `json:"anchor_customer_id"`
 }
+
+type CustomerTierStatusEvent struct {
+    AnchorCustomerID string `json:"anchor_customer_id"`
+    Status           string `json:"status"`
+    Reason           string `json:"reason,omitempty"`
+}

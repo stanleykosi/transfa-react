@@ -37,7 +37,7 @@ func NewAccountEventHandler(repo store.AccountRepository, anchorClient *anchorcl
 	}
 }
 
-// HandleCustomerVerifiedEvent processes Tier1 approval events.
+// HandleCustomerVerifiedEvent processes Tier2 approval events.
 func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 	var event domain.CustomerVerifiedEvent
 	if err := json.Unmarshal(body, &event); err != nil {
@@ -64,8 +64,8 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 		return false // Retryable database error.
 	}
 
-    reason := "Tier1 approved"
-    if err := h.repo.UpdateTierStatus(ctx, userID, "tier1", "approved", &reason); err != nil {
+    reason := "Tier2 approved"
+    if err := h.repo.UpdateTierStatus(ctx, userID, "tier2", "approved", &reason); err != nil {
 		log.Printf("WARN: Failed to persist tier1 approved status for user %s: %v", userID, err)
 	}
 
@@ -92,7 +92,7 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 	if err != nil {
         log.Printf("ERROR: Failed to create Anchor DepositAccount for AnchorCustomerID %s: %v", event.AnchorCustomerID, err)
         reason := fmt.Sprintf("Failed to create Anchor deposit account: %v", err)
-        _ = h.repo.UpdateTierStatus(ctx, userID, "tier1", "failed", &reason)
+        _ = h.repo.UpdateTierStatus(ctx, userID, "tier2", "failed", &reason)
         return false // Retryable API error.
 	}
 	log.Printf("Successfully created Anchor DepositAccount %s", anchorAccount.Data.ID)
@@ -100,8 +100,8 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 	nuban, err := h.anchorClient.GetVirtualNUBANForAccount(ctx, anchorAccount.Data.ID)
 	if err != nil {
 		log.Printf("ERROR: Failed to fetch VirtualNUBAN for AnchorAccountID %s: %v", anchorAccount.Data.ID, err)
-		reason := fmt.Sprintf("Failed to fetch virtual account number: %v", err)
-		_ = h.repo.UpdateTierStatus(ctx, userID, "tier1", "failed", &reason)
+        reason := fmt.Sprintf("Failed to fetch virtual account number: %v", err)
+        _ = h.repo.UpdateTierStatus(ctx, userID, "tier2", "failed", &reason)
 		return false // Retryable API error.
 	}
 	log.Printf("Successfully fetched VirtualNUBAN: %s", nuban)
@@ -114,12 +114,12 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 	}
 	if _, err = h.repo.CreateAccount(ctx, newAccount); err != nil {
 		log.Printf("ERROR: Failed to save new account to DB for UserID %s: %v", userID, err)
-		reason := fmt.Sprintf("Failed to persist account record: %v", err)
-		_ = h.repo.UpdateTierStatus(ctx, userID, "tier1", "failed", &reason)
+        reason := fmt.Sprintf("Failed to persist account record: %v", err)
+        _ = h.repo.UpdateTierStatus(ctx, userID, "tier2", "failed", &reason)
 		return false
 	}
 
-    if err := h.repo.UpdateTierStatus(ctx, userID, "tier1", "completed", nil); err != nil {
+    if err := h.repo.UpdateTierStatus(ctx, userID, "tier2", "completed", nil); err != nil {
 		log.Printf("WARN: Failed to persist tier1 completed status for user %s: %v", userID, err)
 	}
 

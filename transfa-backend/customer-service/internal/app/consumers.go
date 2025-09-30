@@ -90,7 +90,7 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 		// On known validation errors, acknowledge to prevent infinite requeue
 		if strings.Contains(err.Error(), "missing required fields") {
 			log.Printf("ACK after validation failure for UserID %s: %v", event.UserID, err)
-			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "failed", ptr(err.Error()))
+            _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", ptr(err.Error()))
 			return true
 		}
 
@@ -129,19 +129,19 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 					// Update the database with the existing customer ID and full name
 					if updateErr := h.repo.UpdateAnchorCustomerInfo(ctx, event.UserID, customerID, fullNamePtr); updateErr != nil {
 						log.Printf("ERROR: Failed to update user record with existing Anchor customer ID %s for UserID %s: %v", customerID, event.UserID, updateErr)
-						_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "system_error", ptr("Customer exists on Anchor but failed to link in database. Manual intervention required."))
+                        _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "system_error", ptr("Customer exists on Anchor but failed to link in database. Manual intervention required."))
 						return true // ACK to prevent infinite requeue
 					}
 
 					log.Printf("Successfully recovered and linked existing Anchor customer %s to UserID %s", customerID, event.UserID)
-					_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "created", nil)
+                    _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "created", nil)
 					return true // ACK - recovery successful
 				}
 			}
 
 			// If we can't extract customer ID, mark as system error requiring manual intervention
 			log.Printf("CRITICAL: Customer exists on Anchor but not in our DB for UserID %s. Manual intervention required to link the customer.", event.UserID)
-			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "system_error", ptr("Customer exists on Anchor but not linked in database. Manual intervention required."))
+            _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "system_error", ptr("Customer exists on Anchor but not linked in database. Manual intervention required."))
 			return true // ACK to prevent infinite requeue
 		}
 
@@ -153,20 +153,20 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 			strings.Contains(err.Error(), "status 409") ||
 			strings.Contains(err.Error(), "status 422") {
 			log.Printf("Non-retriable client error from Anchor (ACK). UserID %s: %v", event.UserID, err)
-			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "failed", ptr(err.Error()))
+            _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", ptr(err.Error()))
 			return true
 		}
 		// Rate limit from Anchor: ACK to avoid hot-looping and API limits
 		if strings.Contains(err.Error(), "status 429") || strings.Contains(strings.ToLower(err.Error()), "too many requests") {
 			log.Printf("Rate limited by Anchor (ACK). UserID %s: %v", event.UserID, err)
-			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "rate_limited", ptr("Rate limited by Anchor API. Please try again later."))
+            _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "rate_limited", ptr("Rate limited by Anchor API. Please try again later."))
 			return true
 		}
 
 		// For any other errors (5xx, network issues, etc.), ACK to prevent API rate limiting
 		// This prevents hitting Anchor's API limits with repeated failed requests
 		log.Printf("ERROR: Failed to create Anchor customer for UserID %s (ACK to prevent API limits): %v", event.UserID, err)
-		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "failed", ptr("Failed to create customer on Anchor. Please try again later."))
+        _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", ptr("Failed to create customer on Anchor. Please try again later."))
 		return true // ACK to prevent API rate limiting
 	}
 
@@ -179,15 +179,15 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 	}
 	log.Printf("Successfully updated user record for UserID %s", event.UserID)
 
-	// Record success status for Tier 0 so frontend can surface it
-	_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier0", "created", nil)
+    // Record success status for Tier 1 so frontend can surface it
+    _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "created", nil)
 
-	// Tier 1 is handled later in the account creation flow
+    // Tier 2 is handled later in the account creation flow
 	return true
 }
 
-func (h *UserEventHandler) HandleTier1VerificationRequestedEvent(body []byte) bool {
-	var event domain.Tier1VerificationRequestedEvent
+func (h *UserEventHandler) HandleTier2VerificationRequestedEvent(body []byte) bool {
+    var event domain.Tier2VerificationRequestedEvent
 	if err := json.Unmarshal(body, &event); err != nil {
 		log.Printf("Error unmarshaling tier1.verification.requested event: %v", err)
 		return true
@@ -205,16 +205,16 @@ func (h *UserEventHandler) HandleTier1VerificationRequestedEvent(body []byte) bo
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "processing", nil); err != nil {
-		log.Printf("Failed to mark tier1 processing for user %s: %v", event.UserID, err)
+    if err := h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier2", "processing", nil); err != nil {
+        log.Printf("Failed to mark tier2 processing for user %s: %v", event.UserID, err)
 	}
 
 	req := domain.AnchorIndividualKYCRequest{
 		Data: domain.RequestData{
 			Type: "Verification",
 			Attributes: domain.IndividualKYCAttributes{
-				Level: "TIER_1",
-				Level1: domain.KYCLevel1{
+				Level: "TIER_2",
+				Level2: &domain.KYCLevel2{
 					BVN:         event.BVN,
 					DateOfBirth: event.DateOfBirth,
 					Gender:      event.Gender,
@@ -223,14 +223,14 @@ func (h *UserEventHandler) HandleTier1VerificationRequestedEvent(body []byte) bo
 		},
 	}
 
-	if err := h.anchorClient.TriggerIndividualKYC(ctx, event.AnchorCustomerID, req); err != nil {
+    if err := h.anchorClient.TriggerIndividualKYC(ctx, event.AnchorCustomerID, req); err != nil {
 		log.Printf("ERROR: Failed to trigger Anchor Tier1 KYC for user %s: %v", event.UserID, err)
-		reason := fmt.Sprintf("Failed to trigger Anchor Tier1 KYC: %v", err)
-		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", &reason)
+        reason := fmt.Sprintf("Failed to trigger Anchor Tier2 KYC: %v", err)
+        _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier2", "failed", &reason)
 		return false
 	}
 
-	log.Printf("Successfully triggered Anchor Tier1 KYC for user %s", event.UserID)
+    log.Printf("Successfully triggered Anchor Tier2 KYC for user %s", event.UserID)
 	return true
 }
 

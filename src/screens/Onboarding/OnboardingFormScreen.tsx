@@ -68,10 +68,10 @@ const OnboardingFormScreen = () => {
 
   const { mutate: submitOnboarding, isPending: isLoading } = useOnboardingMutation({
     onSuccess: async (response) => {
-      console.log('✅ Tier 0 submission successful:', response.status);
-      // Immediately poll backend for tier0_created with a tight timeout and brief inline loader
+      console.log('✅ Tier 1 submission successful:', response.status);
+      // Immediately poll backend for tier1_created with a tight timeout and brief inline loader
       setIsVerifying(true);
-      await pollTier0Created();
+      await pollTier1Created();
     },
     onError: (error) => {
       const errorMessage =
@@ -93,7 +93,7 @@ const OnboardingFormScreen = () => {
     };
   }, []);
 
-  const pollTier0Created = async () => {
+  const pollTier1Created = async () => {
     // Poll quickly up to ~3 seconds total, then fallback to CreateAccount to avoid any stall
     const attempts = 6; // 6 * 500ms = 3s max
     for (let i = 0; i < attempts; i++) {
@@ -106,14 +106,14 @@ const OnboardingFormScreen = () => {
           },
         });
         if (
-          data?.status === 'tier0_created' ||
           data?.status === 'tier1_created' ||
+          data?.status === 'tier2_created' ||
           data?.status === 'completed'
         ) {
           if (!isMountedRef.current) {
             return;
           }
-          // Move to Tier 1 immediately
+          // Move to Tier 2 immediately
           navigation.dispatch(StackActions.replace('CreateAccount'));
           setIsVerifying(false);
           return;

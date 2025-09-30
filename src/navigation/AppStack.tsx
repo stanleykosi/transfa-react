@@ -64,11 +64,11 @@ const AppStack = () => {
           case 'completed':
             setInitialRoute('AppTabs');
             break;
-          case 'tier1_pending':
-          case 'tier0_created':
+          case 'tier2_pending':
+          case 'tier1_created':
             setInitialRoute('CreateAccount');
             break;
-          case 'tier0_pending':
+          case 'tier1_pending':
           case 'new':
           default:
             setInitialRoute('OnboardingForm');

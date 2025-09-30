@@ -28,8 +28,8 @@ type UserCreatedEvent struct {
 	KYCData map[string]interface{} `json:"kyc_data"`
 }
 
-// Tier1VerificationRequestedEvent is emitted by the auth-service when the user submits Tier1 details.
-type Tier1VerificationRequestedEvent struct {
+// Tier2VerificationRequestedEvent is emitted by the auth-service when the user submits Tier2 details.
+type Tier2VerificationRequestedEvent struct {
 	UserID           string `json:"user_id"`
 	AnchorCustomerID string `json:"anchor_customer_id"`
 	BVN              string `json:"bvn"`

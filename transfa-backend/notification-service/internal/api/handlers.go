@@ -38,6 +38,19 @@ type WebhookHandler struct {
 	secret   string
 }
 
+func extractReason(attrs map[string]interface{}) string {
+	if attrs == nil {
+		return ""
+	}
+	if v, ok := attrs["message"].(string); ok {
+		return v
+	}
+	if detail, ok := attrs["detail"].(string); ok {
+		return detail
+	}
+	return ""
+}
+
 // NewWebhookHandler creates a new handler for the webhook endpoint.
 func NewWebhookHandler(producer *rabbitmq.EventProducer, secret string) *WebhookHandler {
 	return &WebhookHandler{
@@ -92,11 +105,32 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case "customer.identification.rejected":
-		// Handle the case where KYC fails.
 		log.Printf("KYC rejected for customer %s. Attributes: %v", event.Data.ID, event.Data.Attributes)
-		// TODO: In a real implementation, this would trigger a user notification
-		// and potentially update the user's status in the database.
-		// For now, we just log it.
+        rejection := domain.CustomerTierStatusEvent{
+			AnchorCustomerID: event.Data.ID,
+			Status:           "tier2_rejected",
+			Reason:           extractReason(event.Data.Attributes),
+		}
+		if err := h.producer.Publish(ctx, "customer_events", "customer.tier.status", rejection); err != nil {
+			processingError = err
+		}
+
+	case "customer.identification.manualReview":
+		log.Printf("KYC manual review for customer %s", event.Data.ID)
+		manual := domain.CustomerTierStatusEvent{AnchorCustomerID: event.Data.ID, Status: "tier2_manual_review"}
+		if err := h.producer.Publish(ctx, "customer_events", "customer.tier.status", manual); err != nil {
+			processingError = err
+		}
+
+	case "customer.identification.error":
+		errStatus := domain.CustomerTierStatusEvent{
+			AnchorCustomerID: event.Data.ID,
+			Status:           "tier2_error",
+			Reason:           extractReason(event.Data.Attributes),
+		}
+		if err := h.producer.Publish(ctx, "customer_events", "customer.tier.status", errStatus); err != nil {
+			processingError = err
+		}
 
 	case "nip.inbound.completed":
 		// Handle incoming funds.

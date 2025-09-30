@@ -126,7 +126,7 @@ func main() {
 
     // Define routes
     r.Post("/onboarding", onboardingHandler.ServeHTTP)
-    r.Post("/onboarding/tier1", onboardingHandler.HandleTier1)
+    r.Post("/onboarding/tier2", onboardingHandler.HandleTier2)
 
 	r.Get("/onboarding/status", func(w http.ResponseWriter, r *http.Request) {
 		clerkUserID := r.Header.Get("X-Clerk-User-Id")
@@ -144,7 +144,7 @@ func main() {
 			return
 		}
         // Derive a normalized, frontend-friendly status
-        // Priority: completed (has account) > tier1_pending > tier0_created/pending > new
+        // Priority: completed (has account) > tier2_pending > tier1_created/pending > new
 		status := "new"
 		var reason *string
 		if conn, err := dbpool.Acquire(r.Context()); err == nil {
@@ -156,30 +156,27 @@ func main() {
 			if accountCount > 0 {
 				status = "completed"
 			} else {
-                // 2) Tier1 status
-				var t1 string
-				_ = conn.QueryRow(r.Context(), `SELECT status FROM onboarding_status WHERE user_id = $1 AND stage = 'tier1'`, existing.ID).Scan(&t1)
-				if t1 != "" {
-                    // Treat any presence of tier1 record as pending until account exists
-                    status = "tier1_pending"
+		        // 2) Tier2 status
+				var t2 string
+				_ = conn.QueryRow(r.Context(), `SELECT status FROM onboarding_status WHERE user_id = $1 AND stage = 'tier2'`, existing.ID).Scan(&t2)
+				if t2 != "" {
+		            // Treat any presence of tier2 record as pending until account exists
+		            status = "tier2_pending"
 				} else {
-					// 3) Tier0 status
-					var t0 string
-					_ = conn.QueryRow(r.Context(), `SELECT status, reason FROM onboarding_status WHERE user_id = $1 AND stage = 'tier0'`, existing.ID).Scan(&t0, &reason)
-					if t0 != "" {
-						switch t0 {
+					// 3) Tier1 status
+					var t1 string
+					_ = conn.QueryRow(r.Context(), `SELECT status, reason FROM onboarding_status WHERE user_id = $1 AND stage = 'tier1'`, existing.ID).Scan(&t1, &reason)
+					if t1 != "" {
+						switch t1 {
 						case "created":
-							status = "tier0_created"
+							status = "tier1_created"
 						case "pending", "processing":
-							status = "tier0_pending"
+							status = "tier1_pending"
 						case "failed":
-							status = "tier0_failed"
+							status = "tier1_failed"
 						default:
-							status = "tier0_" + t0
+							status = "tier1_" + t1
 						}
-					} else if existing.AnchorCustomerID != nil {
-						// Fallback: anchor customer exists => tier 0 created
-						status = "tier0_created"
 					} else {
 						status = "new"
 					}

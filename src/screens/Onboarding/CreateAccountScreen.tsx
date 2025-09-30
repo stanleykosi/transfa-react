@@ -1,8 +1,8 @@
 /**
  * @description
- * Tier 1 Create Account screen.
- * Guarded by Tier 0 status: will not render form unless backend reports `tier0_created`.
- * Collects Tier 1 fields (DOB, gender, BVN) and submits to backend (placeholder for now).
+ * Tier 2 KYC screen.
+ * Guarded by Tier 1 status: will not render form unless backend reports `tier1_created`.
+ * Collects Tier 2 fields (DOB, gender, BVN) and submits to backend.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import {
@@ -27,7 +27,7 @@ const CreateAccountScreen = () => {
   const { getToken, signOut } = useAuth();
   const { user } = useUser();
   const navigation = useNavigation();
-  const [status, setStatus] = useState<'checking' | 'tier0_pending' | 'tier0_created' | 'error'>(
+  const [status, setStatus] = useState<'checking' | 'tier1_pending' | 'tier1_created' | 'error'>(
     'checking'
   );
   const [dob, setDob] = useState(''); // YYYY-MM-DD
@@ -61,16 +61,16 @@ const CreateAccountScreen = () => {
           // Already fully enabled -> go to main app
           navigation.navigate('AppTabs' as never);
           return;
-        } else if (data?.status === 'tier1_pending' || data?.status === 'tier0_created') {
-          setStatus('tier0_created');
+        } else if (data?.status === 'tier2_pending' || data?.status === 'tier1_created') {
+          setStatus('tier1_created');
           return;
-        } else if (data?.status === 'tier0_processing' || data?.status === 'tier0_pending') {
+        } else if (data?.status === 'tier1_processing' || data?.status === 'tier1_pending') {
           Alert.alert(
             'Processing',
-            'Your Tier 0 KYC is being processed. Please wait a moment and try again.'
+            'Your Tier 1 KYC is being processed. Please wait a moment and try again.'
           );
-          setStatus('tier0_pending');
-        } else if (data?.status === 'tier0_failed') {
+          setStatus('tier1_pending');
+        } else if (data?.status === 'tier1_failed') {
           Alert.alert(
             'Verification Failed',
             'There was an issue with your verification. Please contact support or try again.'
@@ -79,7 +79,7 @@ const CreateAccountScreen = () => {
         } else {
           // Still pending - show loading state and poll for updates
           console.log('⚠️ Unknown status, defaulting to pending:', data?.status);
-          setStatus('tier0_pending');
+          setStatus('tier1_pending');
         }
       } catch (e) {
         if (!mounted) {
@@ -94,7 +94,7 @@ const CreateAccountScreen = () => {
     };
   }, [getToken, headers, navigation]);
 
-  // No more polling - users come here when tier0 is already created
+  // No more polling - users come here when tier1 is already created
 
   const handleSignOut = () => {
     Alert.alert(
@@ -111,9 +111,9 @@ const CreateAccountScreen = () => {
     );
   };
 
-  const handleSubmitTier1 = async () => {
-    if (status !== 'tier0_created') {
-      Alert.alert('Please wait', 'Your Tier 0 verification has not completed yet.');
+  const handleSubmitTier2 = async () => {
+    if (status !== 'tier1_created') {
+      Alert.alert('Please wait', 'Your Tier 1 verification has not completed yet.');
       return;
     }
     const normalizedGender = gender.trim().toLowerCase();
@@ -128,9 +128,9 @@ const CreateAccountScreen = () => {
     setSubmitting(true);
     try {
       const token = await getToken().catch(() => undefined);
-      // Submit Tier 1 details to backend (records intent only)
+      // Submit Tier 2 details to backend
       await apiClient.post(
-        '/onboarding/tier1',
+        '/onboarding/tier2',
         { dob, gender: normalizedGender, bvn },
         { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers } }
       );
@@ -159,8 +159,8 @@ const CreateAccountScreen = () => {
     }
   };
 
-  // If tier0 is not created, we rely on AppStack and OnboardingForm to drive the flow.
-  if (status !== 'tier0_created') {
+  // If tier1 is not created, we rely on AppStack and OnboardingForm to drive the flow.
+  if (status !== 'tier1_created') {
     return (
       <ScreenWrapper>
         <View style={styles.centered}>
@@ -188,7 +188,7 @@ const CreateAccountScreen = () => {
           <View style={styles.container}>
             <Text style={styles.title}>Complete Your Verification</Text>
             <Text style={styles.subtitle}>
-              Please provide your additional details to complete your account setup.
+              Please provide your additional details to finish your account setup.
             </Text>
 
             <FormInput
@@ -212,7 +212,7 @@ const CreateAccountScreen = () => {
               placeholder="male or female"
             />
 
-            <PrimaryButton title="Submit" onPress={handleSubmitTier1} isLoading={submitting} />
+            <PrimaryButton title="Submit" onPress={handleSubmitTier2} isLoading={submitting} />
             <PrimaryButton
               title="Sign Out (Test Different Account)"
               onPress={handleSignOut}

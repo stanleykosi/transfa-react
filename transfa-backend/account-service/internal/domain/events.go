@@ -14,3 +14,9 @@ package domain
 type CustomerVerifiedEvent struct {
 	AnchorCustomerID string `json:"anchor_customer_id"`
 }
+
+type CustomerTier1StatusEvent struct {
+	AnchorCustomerID string `json:"anchor_customer_id"`
+	Status           string `json:"status"`
+	Reason           string `json:"reason,omitempty"`
+}
