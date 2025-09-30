@@ -164,22 +164,51 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
     }
 
     header := strings.TrimSpace(signatureHeader)
-    if strings.HasPrefix(strings.ToLower(header), "sha256=") {
-        provided, err := hex.DecodeString(header[7:])
-        if err != nil {
-            log.Printf("Invalid hex signature: %v", err)
-            return false
-        }
-        mac := hmac.New(sha256.New, []byte(h.secret))
-        mac.Write(body)
-        expected := mac.Sum(nil)
-        return hmac.Equal(provided, expected)
+    if header == "" {
+        log.Println("Missing x-anchor-signature header")
+        return false
     }
 
-    // Legacy SHA1 support
-    mac := hmac.New(sha1.New, []byte(h.secret))
-    mac.Write(body)
-    expectedMAC := mac.Sum(nil)
-    expectedSignature := base64.StdEncoding.EncodeToString(expectedMAC)
-    return hmac.Equal([]byte(header), []byte(expectedSignature))
+    sha1Mac := hmac.New(sha1.New, []byte(h.secret))
+    sha1Mac.Write(body)
+    sha1Expected := sha1Mac.Sum(nil)
+    sha1Base64 := base64.StdEncoding.EncodeToString(sha1Expected)
+
+    sha256Mac := hmac.New(sha256.New, []byte(h.secret))
+    sha256Mac.Write(body)
+    sha256Expected := sha256Mac.Sum(nil)
+    sha256Hex := hex.EncodeToString(sha256Expected)
+
+    parts := strings.Split(header, ",")
+    for _, part := range parts {
+        sig := strings.TrimSpace(part)
+        lower := strings.ToLower(sig)
+
+        if strings.HasPrefix(lower, "sha256=") {
+            providedHex := strings.TrimSpace(sig[7:])
+            if providedBytes, err := hex.DecodeString(providedHex); err == nil {
+                if hmac.Equal(providedBytes, sha256Expected) {
+                    return true
+                }
+            } else {
+                log.Printf("Invalid sha256 signature format: %v", err)
+            }
+            continue
+        }
+
+        if strings.HasPrefix(lower, "sha1=") {
+            if strings.EqualFold(sig[5:], sha1Base64) {
+                return true
+            }
+            continue
+        }
+
+        // Legacy plain SHA1 base64 without prefix
+        if strings.EqualFold(sig, sha1Base64) {
+            return true
+        }
+    }
+
+    log.Printf("Signature mismatch. Provided header: %s | Expected sha256=%s or sha1=%s", header, sha256Hex, sha1Base64)
+    return false
 }
