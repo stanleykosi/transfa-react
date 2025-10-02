@@ -53,15 +53,20 @@ type CreateDepositAccountResponse struct {
 
 // --- Get Account Numbers (Virtual NUBAN) ---
 
-// GetAccountNumbersResponse represents the response from fetching account numbers.
-// It can contain multiple account numbers linked to a deposit account.
-type GetAccountNumbersResponse struct {
-	Data []struct {
+// GetDepositAccountResponse captures the deposit account resource and any included
+// related resources (such as AccountNumber records) returned by Anchor.
+type GetDepositAccountResponse struct {
+	Data struct {
+		ID         string                 `json:"id"`
+		Type       string                 `json:"type"`
+		Attributes map[string]interface{} `json:"attributes"`
+	} `json:"data"`
+	Included []struct {
 		ID         string `json:"id"`
 		Type       string `json:"type"`
 		Attributes struct {
 			AccountNumber string `json:"accountNumber"`
-			BankName      string `json:"bankName"`
+			BankName      string `json:"bankName,omitempty"`
 		} `json:"attributes"`
-	} `json:"data"`
+	} `json:"included"`
 }

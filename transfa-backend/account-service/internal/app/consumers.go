@@ -10,17 +10,17 @@
 package app
 
 import (
-    "context"
-    "encoding/json"
-    "errors"
-    "fmt"
-    "log"
-    "time"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"time"
 
-    "github.com/jackc/pgx/v5"
-    "github.com/transfa/account-service/internal/domain"
-    "github.com/transfa/account-service/internal/store"
-    "github.com/transfa/account-service/pkg/anchorclient"
+	"github.com/jackc/pgx/v5"
+	"github.com/transfa/account-service/internal/domain"
+	"github.com/transfa/account-service/internal/store"
+	"github.com/transfa/account-service/pkg/anchorclient"
 )
 
 // AccountEventHandler handles the processing of account-related events.
@@ -64,9 +64,9 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 		return false // Retryable database error.
 	}
 
-    reason := "Tier2 approved"
-    if err := h.repo.UpdateTierStatus(ctx, userID, "tier2", "approved", &reason); err != nil {
-		log.Printf("WARN: Failed to persist tier1 approved status for user %s: %v", userID, err)
+	approvedReason := ptr("Tier2 approved")
+	if err := h.repo.UpdateTierStatus(ctx, userID, "tier2", "approved", approvedReason); err != nil {
+		log.Printf("WARN: Failed to persist tier2 approved status for user %s: %v", userID, err)
 	}
 
 	accountReq := domain.CreateDepositAccountRequest{
@@ -90,19 +90,19 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 	}
 	anchorAccount, err := h.anchorClient.CreateDepositAccount(ctx, accountReq)
 	if err != nil {
-        log.Printf("ERROR: Failed to create Anchor DepositAccount for AnchorCustomerID %s: %v", event.AnchorCustomerID, err)
-        reason := fmt.Sprintf("Failed to create Anchor deposit account: %v", err)
-        _ = h.repo.UpdateTierStatus(ctx, userID, "tier2", "failed", &reason)
-        return false // Retryable API error.
+		log.Printf("ERROR: Failed to create Anchor DepositAccount for AnchorCustomerID %s: %v", event.AnchorCustomerID, err)
+		reason := fmt.Sprintf("Failed to create Anchor deposit account: %v", err)
+		_ = h.repo.UpdateTierStatus(ctx, userID, "tier2", "failed", ptr(reason))
+		return true // Ack to avoid duplicate provisioning attempts.
 	}
 	log.Printf("Successfully created Anchor DepositAccount %s", anchorAccount.Data.ID)
 
 	nuban, err := h.anchorClient.GetVirtualNUBANForAccount(ctx, anchorAccount.Data.ID)
 	if err != nil {
 		log.Printf("ERROR: Failed to fetch VirtualNUBAN for AnchorAccountID %s: %v", anchorAccount.Data.ID, err)
-        reason := fmt.Sprintf("Failed to fetch virtual account number: %v", err)
-        _ = h.repo.UpdateTierStatus(ctx, userID, "tier2", "failed", &reason)
-		return false // Retryable API error.
+		reason := fmt.Sprintf("Failed to fetch virtual account number: %v", err)
+		_ = h.repo.UpdateTierStatus(ctx, userID, "tier2", "failed", ptr(reason))
+		return true // Ack to prevent hot-looping; manual retry can be triggered later.
 	}
 	log.Printf("Successfully fetched VirtualNUBAN: %s", nuban)
 
@@ -114,16 +114,20 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 	}
 	if _, err = h.repo.CreateAccount(ctx, newAccount); err != nil {
 		log.Printf("ERROR: Failed to save new account to DB for UserID %s: %v", userID, err)
-        reason := fmt.Sprintf("Failed to persist account record: %v", err)
-        _ = h.repo.UpdateTierStatus(ctx, userID, "tier2", "failed", &reason)
-		return false
+		reason := fmt.Sprintf("Failed to persist account record: %v", err)
+		_ = h.repo.UpdateTierStatus(ctx, userID, "tier2", "failed", ptr(reason))
+		return false // Requeue for transient database errors.
 	}
 
-    if err := h.repo.UpdateTierStatus(ctx, userID, "tier2", "completed", nil); err != nil {
-		log.Printf("WARN: Failed to persist tier1 completed status for user %s: %v", userID, err)
+	if err := h.repo.UpdateTierStatus(ctx, userID, "tier2", "completed", nil); err != nil {
+		log.Printf("WARN: Failed to persist tier2 completed status for user %s: %v", userID, err)
 	}
 
 	log.Printf("Successfully provisioned and saved account for UserID %s", userID)
 
 	return true
+}
+
+func ptr(v string) *string {
+	return &v
 }

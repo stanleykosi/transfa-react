@@ -139,12 +139,13 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "customer.identification.approved":
 		message = domain.CustomerVerifiedEvent{AnchorCustomerID: anchorCustomerID}
 	case "customer.identification.rejected":
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_rejected", Reason: extractReason(event.Data.Attributes)}
+		reason := extractReason(event.Data.Attributes)
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_rejected", Reason: nullableString(reason)}
 	case "customer.identification.manualReview":
 		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_manual_review"}
 	case "customer.identification.error":
 		reason := extractReason(event.Data.Attributes)
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_error", Reason: reason}
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_error", Reason: nullableString(reason)}
 	case "customer.created":
 		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_customer_created"}
 	}
@@ -157,6 +158,13 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Webhook received"))
+}
+
+func nullableString(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 
 func extractAnchorCustomerID(event domain.AnchorWebhookEvent) string {

@@ -52,7 +52,7 @@ type CustomerVerifiedEvent struct {
 }
 
 type CustomerTierStatusEvent struct {
-	AnchorCustomerID string `json:"anchor_customer_id"`
-	Status           string `json:"status"`
-	Reason           string `json:"reason,omitempty"`
+	AnchorCustomerID string  `json:"anchor_customer_id"`
+	Status           string  `json:"status"`
+	Reason           *string `json:"reason,omitempty"`
 }
