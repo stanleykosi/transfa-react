@@ -89,6 +89,21 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
 		return
 	}
+	if event.Event == "" {
+		var raw map[string]interface{}
+		if err := json.Unmarshal(body, &raw); err == nil {
+			if evt, ok := raw["eventName"].(string); ok && evt != "" {
+				event.Event = evt
+			} else if evt, ok := raw["eventType"].(string); ok && evt != "" {
+				event.Event = evt
+			} else if evt, ok := raw["event"].(string); ok && evt != "" {
+				event.Event = evt
+			}
+		}
+		if event.Event == "" {
+			log.Printf("Webhook missing event field. Raw payload: %s", string(body))
+		}
+	}
 
 	log.Printf("Received webhook event: %s for resource ID: %s", event.Event, event.Data.ID)
 
@@ -158,8 +173,8 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // isValidSignature validates the HMAC-SHA1 signature of the webhook.
 // signature = Base64(HMAC_SHA1(request_body, secret_token))
 func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) bool {
-	if h.secret == "" {
-		log.Println("Warning: ANCHOR_WEBHOOK_SECRET is not set. Skipping signature validation.")
+    if h.secret == "" {
+        log.Println("Warning: ANCHOR_WEBHOOK_SECRET is not set. Skipping signature validation.")
         return true
     }
 
@@ -180,7 +195,9 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
     sha256Expected := sha256Mac.Sum(nil)
     sha256Hex := hex.EncodeToString(sha256Expected)
 
-	parts := strings.Split(header, ",")
+    log.Printf("Debug signature check: provided=%s | expected sha1=%s | expected sha256=%s", header, sha1Base64, sha256Hex)
+
+    parts := strings.Split(header, ",")
     for _, part := range parts {
         sig := strings.TrimSpace(part)
         lower := strings.ToLower(sig)
@@ -189,6 +206,7 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
             providedHex := strings.TrimSpace(sig[7:])
             if providedBytes, err := hex.DecodeString(providedHex); err == nil {
                 if hmac.Equal(providedBytes, sha256Expected) {
+                    log.Println("Signature matched sha256 prefix")
                     return true
                 }
             } else {
@@ -200,34 +218,49 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
         if strings.HasPrefix(lower, "sha1=") {
             candidate := strings.TrimSpace(sig[5:])
             if strings.EqualFold(candidate, sha1Base64) {
+                log.Println("Signature matched sha1 prefix")
                 return true
             }
-            // Anchor sometimes base64-encodes the raw sha1 bytes (without prefix)
             if decoded, err := base64.StdEncoding.DecodeString(candidate); err == nil {
                 if hmac.Equal(decoded, sha1Expected) {
+                    log.Println("Signature matched sha1 prefix (decoded b64)")
                     return true
                 }
             }
             continue
         }
 
-        // Legacy plain SHA1 base64 without prefix
         if strings.EqualFold(sig, sha1Base64) {
-		return true
-	}
+            log.Println("Signature matched legacy sha1 base64")
+            return true
+        }
 
         if decoded, err := base64.StdEncoding.DecodeString(sig); err == nil {
-            if hmac.Equal(decoded, sha1Expected) || hmac.Equal(decoded, sha256Expected) {
+            if hmac.Equal(decoded, sha1Expected) {
+                log.Println("Signature matched decoded sha1 bytes")
                 return true
             }
-            // Some integrators send base64-encoded ASCII hex
+            if hmac.Equal(decoded, sha256Expected) {
+                log.Println("Signature matched decoded sha256 bytes")
+                return true
+            }
+            if len(decoded) == len(sha1Expected) && hmac.Equal(decoded, sha1Expected) {
+                log.Println("Signature matched decoded sha1 raw length")
+                return true
+            }
+            if len(decoded) == len(sha256Expected) && hmac.Equal(decoded, sha256Expected) {
+                log.Println("Signature matched decoded sha256 raw length")
+                return true
+            }
             if hexCandidate := strings.TrimSpace(string(decoded)); len(hexCandidate) == len(sha1Hex) {
                 if b, err := hex.DecodeString(hexCandidate); err == nil && hmac.Equal(b, sha1Expected) {
+                    log.Println("Signature matched ascii hex sha1")
                     return true
                 }
             }
             if hexCandidate := strings.TrimSpace(string(decoded)); len(hexCandidate) == len(sha256Hex) {
                 if b, err := hex.DecodeString(hexCandidate); err == nil && hmac.Equal(b, sha256Expected) {
+                    log.Println("Signature matched ascii hex sha256")
                     return true
                 }
             }
