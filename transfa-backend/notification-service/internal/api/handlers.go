@@ -100,6 +100,9 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				event.Event = evt
 			}
 		}
+		if event.Event == "" && event.Data.Type != "" {
+			event.Event = event.Data.Type
+		}
 		if event.Event == "" {
 			log.Printf("Webhook missing event field. Raw payload: %s", string(body))
 		}
@@ -120,6 +123,13 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			processingError = err
 			log.Printf("Failed to publish customer.verified event: %v", err)
+		}
+
+	case "customer.created":
+		log.Printf("Customer created webhook received for resource ID: %s", event.Data.ID)
+		creation := domain.CustomerTierStatusEvent{AnchorCustomerID: event.Data.ID, Status: "tier2_customer_created"}
+		if err := h.producer.Publish(ctx, "customer_events", "customer.tier.status", creation); err != nil {
+			processingError = err
 		}
 
 	case "customer.identification.rejected":
@@ -267,6 +277,6 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
         }
     }
 
-    log.Printf("Signature mismatch. Provided header: %s | Expected sha256=%s or sha1=%s", header, sha256Hex, sha1Base64)
+        log.Printf("Signature mismatch. Provided header: %s | Expected sha256=%s or sha1=%s", header, sha256Hex, sha1Base64)
     return false
 }
