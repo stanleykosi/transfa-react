@@ -19,20 +19,20 @@
 package api
 
 import (
-    "bytes"
-    "crypto/hmac"
-    "crypto/sha1"
-    "crypto/sha256"
-    "encoding/base64"
-    "encoding/hex"
-    "encoding/json"
-    "io"
-    "log"
-    "net/http"
-    "strings"
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha1"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"io"
+	"log"
+	"net/http"
+	"strings"
 
-    "github.com/transfa/notification-service/internal/domain"
-    "github.com/transfa/notification-service/pkg/rabbitmq"
+	"github.com/transfa/notification-service/internal/domain"
+	"github.com/transfa/notification-service/pkg/rabbitmq"
 )
 
 // WebhookHandler processes incoming webhooks from Anchor.
@@ -108,175 +108,193 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	log.Printf("Received webhook event: %s for resource ID: %s", event.Event, event.Data.ID)
+	anchorCustomerID := event.Data.ID
+	if id := extractAnchorCustomerID(event); id != "" {
+		anchorCustomerID = id
+	}
+
+	log.Printf("Received webhook event: %s for resource ID: %s (anchor customer: %s)", event.Event, event.Data.ID, anchorCustomerID)
 
 	// 4. Process the event based on its type.
 	ctx := r.Context()
 	var processingError error
 
-	switch event.Event {
-	case "customer.identification.approved":
-		// This event signifies that a user's KYC is complete and an account can be created.
-		// We publish a new, internal event for the account-service to consume.
-		internalEvent := domain.CustomerVerifiedEvent{AnchorCustomerID: event.Data.ID}
-		err := h.producer.Publish(ctx, "customer_events", "customer.verified", internalEvent)
-		if err != nil {
-			processingError = err
-			log.Printf("Failed to publish customer.verified event: %v", err)
-		}
-
-	case "customer.created":
-		log.Printf("Customer created webhook received for resource ID: %s", event.Data.ID)
-		creation := domain.CustomerTierStatusEvent{AnchorCustomerID: event.Data.ID, Status: "tier2_customer_created"}
-		if err := h.producer.Publish(ctx, "customer_events", "customer.tier.status", creation); err != nil {
-			processingError = err
-		}
-
-	case "customer.identification.rejected":
-		log.Printf("KYC rejected for customer %s. Attributes: %v", event.Data.ID, event.Data.Attributes)
-        rejection := domain.CustomerTierStatusEvent{
-			AnchorCustomerID: event.Data.ID,
-			Status:           "tier2_rejected",
-			Reason:           extractReason(event.Data.Attributes),
-		}
-		if err := h.producer.Publish(ctx, "customer_events", "customer.tier.status", rejection); err != nil {
-			processingError = err
-		}
-
-	case "customer.identification.manualReview":
-		log.Printf("KYC manual review for customer %s", event.Data.ID)
-		manual := domain.CustomerTierStatusEvent{AnchorCustomerID: event.Data.ID, Status: "tier2_manual_review"}
-		if err := h.producer.Publish(ctx, "customer_events", "customer.tier.status", manual); err != nil {
-			processingError = err
-		}
-
-	case "customer.identification.error":
-		errStatus := domain.CustomerTierStatusEvent{
-			AnchorCustomerID: event.Data.ID,
-			Status:           "tier2_error",
-			Reason:           extractReason(event.Data.Attributes),
-		}
-		if err := h.producer.Publish(ctx, "customer_events", "customer.tier.status", errStatus); err != nil {
-			processingError = err
-		}
-
-	case "nip.inbound.completed":
-		// Handle incoming funds.
-		log.Printf("Incoming transfer completed for account associated with resource ID: %s", event.Data.ID)
-		// TODO: Publish an event for the transaction-service to update the user's wallet balance.
-
-	default:
-		log.Printf("Unhandled webhook event type: %s", event.Event)
+	eventRouting := map[string]string{
+		"customer.identification.approved":     "customer.verified",
+		"customer.identification.rejected":     "customer.tier.status",
+		"customer.identification.manualReview": "customer.tier.status",
+		"customer.identification.error":        "customer.tier.status",
+		"customer.created":                     "customer.lifecycle",
 	}
 
-	// 5. Respond to Anchor.
-	if processingError != nil {
-		// If publishing to RabbitMQ failed, we should signal an error so Anchor might retry.
-		http.Error(w, "Internal server error during event processing", http.StatusInternalServerError)
-	} else {
-		// Acknowledge receipt of the webhook.
+	routingKey, known := eventRouting[event.Event]
+	if !known {
+		log.Printf("Unhandled webhook event type: %s", event.Event)
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Webhook received"))
+		return
 	}
+
+	var message any
+	switch event.Event {
+	case "customer.identification.approved":
+		message = domain.CustomerVerifiedEvent{AnchorCustomerID: anchorCustomerID}
+	case "customer.identification.rejected":
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_rejected", Reason: extractReason(event.Data.Attributes)}
+	case "customer.identification.manualReview":
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_manual_review"}
+	case "customer.identification.error":
+		reason := extractReason(event.Data.Attributes)
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_error", Reason: reason}
+	case "customer.created":
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_customer_created"}
+	}
+
+	if err := h.producer.Publish(ctx, "customer_events", routingKey, message); err != nil {
+		log.Printf("Failed to publish %s: %v", routingKey, err)
+		http.Error(w, "Internal server error during event processing", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Webhook received"))
+}
+
+func extractAnchorCustomerID(event domain.AnchorWebhookEvent) string {
+	if rel, ok := event.Data.Relationships["customer"]; ok {
+		if rel.Data != nil && rel.Data.ID != "" {
+			return rel.Data.ID
+		}
+	}
+	for _, included := range event.Included {
+		lowerType := strings.ToLower(included.Type)
+		if strings.Contains(lowerType, "customer") && included.ID != "" {
+			return included.ID
+		}
+	}
+	return ""
 }
 
 // isValidSignature validates the HMAC-SHA1 signature of the webhook.
 // signature = Base64(HMAC_SHA1(request_body, secret_token))
 func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) bool {
-    if h.secret == "" {
-        log.Println("Warning: ANCHOR_WEBHOOK_SECRET is not set. Skipping signature validation.")
-        return true
-    }
+	if h.secret == "" {
+		log.Println("Warning: ANCHOR_WEBHOOK_SECRET is not set. Skipping signature validation.")
+		return true
+	}
 
-    header := strings.TrimSpace(signatureHeader)
-    if header == "" {
-        log.Println("Missing x-anchor-signature header")
-        return false
-    }
+	header := strings.TrimSpace(signatureHeader)
+	if header == "" {
+		log.Println("Missing x-anchor-signature header")
+		return false
+	}
 
-    sha1Mac := hmac.New(sha1.New, []byte(h.secret))
-    sha1Mac.Write(body)
-    sha1Expected := sha1Mac.Sum(nil)
-    sha1Base64 := base64.StdEncoding.EncodeToString(sha1Expected)
-    sha1Hex := hex.EncodeToString(sha1Expected)
+	sha1Mac := hmac.New(sha1.New, []byte(h.secret))
+	sha1Mac.Write(body)
+	sha1Expected := sha1Mac.Sum(nil)
+	sha1Base64 := base64.StdEncoding.EncodeToString(sha1Expected)
+	sha1Hex := hex.EncodeToString(sha1Expected)
 
-    sha256Mac := hmac.New(sha256.New, []byte(h.secret))
-    sha256Mac.Write(body)
-    sha256Expected := sha256Mac.Sum(nil)
-    sha256Hex := hex.EncodeToString(sha256Expected)
+	sha256Mac := hmac.New(sha256.New, []byte(h.secret))
+	sha256Mac.Write(body)
+	sha256Expected := sha256Mac.Sum(nil)
+	sha256Hex := hex.EncodeToString(sha256Expected)
 
-    log.Printf("Debug signature check: provided=%s | expected sha1=%s | expected sha256=%s", header, sha1Base64, sha256Hex)
+	log.Printf("Debug signature check: provided=%s | expected sha1=%s | expected sha256=%s", header, sha1Base64, sha256Hex)
 
-    parts := strings.Split(header, ",")
-    for _, part := range parts {
-        sig := strings.TrimSpace(part)
-        lower := strings.ToLower(sig)
+	if decoded, err := base64.StdEncoding.DecodeString(header); err == nil {
+		if bytes.Equal(decoded, sha1Expected) {
+			log.Println("Signature matched raw sha1 bytes (primary)")
+			return true
+		}
+		if bytes.Equal(decoded, sha256Expected) {
+			log.Println("Signature matched raw sha256 bytes (primary)")
+			return true
+		}
+		if len(decoded) == len(sha1Expected)*2 {
+			if hexCandidate, err := hex.DecodeString(string(decoded)); err == nil && bytes.Equal(hexCandidate, sha1Expected) {
+				log.Println("Signature matched base64-encoded sha1 hex (primary)")
+				return true
+			}
+		}
+		if len(decoded) == len(sha256Expected)*2 {
+			if hexCandidate, err := hex.DecodeString(string(decoded)); err == nil && bytes.Equal(hexCandidate, sha256Expected) {
+				log.Println("Signature matched base64-encoded sha256 hex (primary)")
+				return true
+			}
+		}
+	}
 
-        if strings.HasPrefix(lower, "sha256=") {
-            providedHex := strings.TrimSpace(sig[7:])
-            if providedBytes, err := hex.DecodeString(providedHex); err == nil {
-                if hmac.Equal(providedBytes, sha256Expected) {
-                    log.Println("Signature matched sha256 prefix")
-                    return true
-                }
-            } else {
-                log.Printf("Invalid sha256 signature format: %v", err)
-            }
-            continue
-        }
+	parts := strings.Split(header, ",")
+	for _, part := range parts {
+		sig := strings.TrimSpace(part)
+		lower := strings.ToLower(sig)
 
-        if strings.HasPrefix(lower, "sha1=") {
-            candidate := strings.TrimSpace(sig[5:])
-            if strings.EqualFold(candidate, sha1Base64) {
-                log.Println("Signature matched sha1 prefix")
-                return true
-            }
-            if decoded, err := base64.StdEncoding.DecodeString(candidate); err == nil {
-                if hmac.Equal(decoded, sha1Expected) {
-                    log.Println("Signature matched sha1 prefix (decoded b64)")
-                    return true
-                }
-            }
-            continue
-        }
+		if strings.HasPrefix(lower, "sha256=") {
+			providedHex := strings.TrimSpace(sig[7:])
+			if providedBytes, err := hex.DecodeString(providedHex); err == nil {
+				if hmac.Equal(providedBytes, sha256Expected) {
+					log.Println("Signature matched sha256 prefix")
+					return true
+				}
+			} else {
+				log.Printf("Invalid sha256 signature format: %v", err)
+			}
+			continue
+		}
 
-        if strings.EqualFold(sig, sha1Base64) {
-            log.Println("Signature matched legacy sha1 base64")
-            return true
-        }
+		if strings.HasPrefix(lower, "sha1=") {
+			candidate := strings.TrimSpace(sig[5:])
+			if strings.EqualFold(candidate, sha1Base64) {
+				log.Println("Signature matched sha1 prefix")
+				return true
+			}
+			if decoded, err := base64.StdEncoding.DecodeString(candidate); err == nil {
+				if hmac.Equal(decoded, sha1Expected) {
+					log.Println("Signature matched sha1 prefix (decoded b64)")
+					return true
+				}
+			}
+			continue
+		}
 
-        if decoded, err := base64.StdEncoding.DecodeString(sig); err == nil {
-            if hmac.Equal(decoded, sha1Expected) {
-                log.Println("Signature matched decoded sha1 bytes")
-                return true
-            }
-            if hmac.Equal(decoded, sha256Expected) {
-                log.Println("Signature matched decoded sha256 bytes")
-                return true
-            }
-            if len(decoded) == len(sha1Expected) && hmac.Equal(decoded, sha1Expected) {
-                log.Println("Signature matched decoded sha1 raw length")
-                return true
-            }
-            if len(decoded) == len(sha256Expected) && hmac.Equal(decoded, sha256Expected) {
-                log.Println("Signature matched decoded sha256 raw length")
-                return true
-            }
-            if hexCandidate := strings.TrimSpace(string(decoded)); len(hexCandidate) == len(sha1Hex) {
-                if b, err := hex.DecodeString(hexCandidate); err == nil && hmac.Equal(b, sha1Expected) {
-                    log.Println("Signature matched ascii hex sha1")
-                    return true
-                }
-            }
-            if hexCandidate := strings.TrimSpace(string(decoded)); len(hexCandidate) == len(sha256Hex) {
-                if b, err := hex.DecodeString(hexCandidate); err == nil && hmac.Equal(b, sha256Expected) {
-                    log.Println("Signature matched ascii hex sha256")
-                    return true
-                }
-            }
-        }
-    }
+		if strings.EqualFold(sig, sha1Base64) {
+			log.Println("Signature matched legacy sha1 base64")
+			return true
+		}
 
-        log.Printf("Signature mismatch. Provided header: %s | Expected sha256=%s or sha1=%s", header, sha256Hex, sha1Base64)
-    return false
+		if decoded, err := base64.StdEncoding.DecodeString(sig); err == nil {
+			if hmac.Equal(decoded, sha1Expected) {
+				log.Println("Signature matched decoded sha1 bytes")
+				return true
+			}
+			if hmac.Equal(decoded, sha256Expected) {
+				log.Println("Signature matched decoded sha256 bytes")
+				return true
+			}
+			if len(decoded) == len(sha1Expected) && hmac.Equal(decoded, sha1Expected) {
+				log.Println("Signature matched decoded sha1 raw length")
+				return true
+			}
+			if len(decoded) == len(sha256Expected) && hmac.Equal(decoded, sha256Expected) {
+				log.Println("Signature matched decoded sha256 raw length")
+				return true
+			}
+			if hexCandidate := strings.TrimSpace(string(decoded)); len(hexCandidate) == len(sha1Hex) {
+				if b, err := hex.DecodeString(hexCandidate); err == nil && hmac.Equal(b, sha1Expected) {
+					log.Println("Signature matched ascii hex sha1")
+					return true
+				}
+			}
+			if hexCandidate := strings.TrimSpace(string(decoded)); len(hexCandidate) == len(sha256Hex) {
+				if b, err := hex.DecodeString(hexCandidate); err == nil && hmac.Equal(b, sha256Expected) {
+					log.Println("Signature matched ascii hex sha256")
+					return true
+				}
+			}
+		}
+	}
+
+	log.Printf("Signature mismatch. Provided header: %s | Expected sha256=%s or sha1=%s", header, sha256Hex, sha1Base64)
+	return false
 }

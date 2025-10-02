@@ -16,18 +16,30 @@ import "time"
 
 // AnchorWebhookEvent represents the top-level structure of a webhook payload from Anchor.
 type AnchorWebhookEvent struct {
-	Event     string        `json:"event"` // e.g., "customer.identification.approved"
-	Data      EventResource `json:"data"`
-	CreatedAt time.Time     `json:"created_at"`
+	Event     string          `json:"event"` // e.g., "customer.identification.approved"
+	Data      EventResource   `json:"data"`
+	Included  []EventResource `json:"included,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
 }
 
 // EventResource represents the `data` object within the webhook payload,
 // which contains information about the resource that the event pertains to.
 type EventResource struct {
-	ID            string                 `json:"id"`   // The ID of the resource (e.g., the customer ID).
-	Type          string                 `json:"type"` // The type of the resource (e.g., "IndividualCustomer").
-	Attributes    map[string]interface{} `json:"attributes,omitempty"`
-	Relationships map[string]interface{} `json:"relationships,omitempty"`
+	ID            string                  `json:"id"`   // The ID of the resource (e.g., the customer ID).
+	Type          string                  `json:"type"` // The type of the resource (e.g., "IndividualCustomer").
+	Attributes    map[string]interface{}  `json:"attributes,omitempty"`
+	Relationships map[string]Relationship `json:"relationships,omitempty"`
+}
+
+// Relationship captures the nested objects within the `relationships` field.
+type Relationship struct {
+	Data *RelationshipData `json:"data,omitempty"`
+}
+
+// RelationshipData represents the data node inside a relationship.
+type RelationshipData struct {
+	ID   string `json:"id"`
+	Type string `json:"type"`
 }
 
 // CustomerVerifiedEvent is the internal event payload published to RabbitMQ
@@ -37,7 +49,7 @@ type CustomerVerifiedEvent struct {
 }
 
 type CustomerTierStatusEvent struct {
-    AnchorCustomerID string `json:"anchor_customer_id"`
-    Status           string `json:"status"`
-    Reason           string `json:"reason,omitempty"`
+	AnchorCustomerID string `json:"anchor_customer_id"`
+	Status           string `json:"status"`
+	Reason           string `json:"reason,omitempty"`
 }
