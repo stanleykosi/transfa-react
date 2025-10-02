@@ -117,7 +117,6 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 4. Process the event based on its type.
 	ctx := r.Context()
-	var processingError error
 
 	eventRouting := map[string]string{
 		"customer.identification.approved":     "customer.verified",
