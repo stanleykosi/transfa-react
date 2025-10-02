@@ -161,8 +161,19 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func extractAnchorCustomerID(event domain.AnchorWebhookEvent) string {
 	if rel, ok := event.Data.Relationships["customer"]; ok {
-		if rel.Data != nil && rel.Data.ID != "" {
-			return rel.Data.ID
+		if len(rel.Data) > 0 {
+			var single domain.RelationshipData
+			if err := json.Unmarshal(rel.Data, &single); err == nil && single.ID != "" {
+				return single.ID
+			}
+			var list []domain.RelationshipData
+			if err := json.Unmarshal(rel.Data, &list); err == nil {
+				for _, item := range list {
+					if item.ID != "" {
+						return item.ID
+					}
+				}
+			}
 		}
 	}
 	for _, included := range event.Included {

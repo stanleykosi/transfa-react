@@ -12,7 +12,10 @@
  */
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // AnchorWebhookEvent represents the top-level structure of a webhook payload from Anchor.
 type AnchorWebhookEvent struct {
@@ -33,7 +36,7 @@ type EventResource struct {
 
 // Relationship captures the nested objects within the `relationships` field.
 type Relationship struct {
-	Data *RelationshipData `json:"data,omitempty"`
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 // RelationshipData represents the data node inside a relationship.
