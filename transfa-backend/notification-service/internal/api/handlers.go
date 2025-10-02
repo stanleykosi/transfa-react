@@ -19,20 +19,20 @@
 package api
 
 import (
-	"bytes"
-	"crypto/hmac"
-	"crypto/sha1"
+    "bytes"
+    "crypto/hmac"
+    "crypto/sha1"
     "crypto/sha256"
-	"encoding/base64"
+    "encoding/base64"
     "encoding/hex"
-	"encoding/json"
-	"io"
-	"log"
-	"net/http"
+    "encoding/json"
+    "io"
+    "log"
+    "net/http"
     "strings"
 
-	"github.com/transfa/notification-service/internal/domain"
-	"github.com/transfa/notification-service/pkg/rabbitmq"
+    "github.com/transfa/notification-service/internal/domain"
+    "github.com/transfa/notification-service/pkg/rabbitmq"
 )
 
 // WebhookHandler processes incoming webhooks from Anchor.
@@ -180,7 +180,7 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
     sha256Expected := sha256Mac.Sum(nil)
     sha256Hex := hex.EncodeToString(sha256Expected)
 
-    parts := strings.Split(header, ",")
+	parts := strings.Split(header, ",")
     for _, part := range parts {
         sig := strings.TrimSpace(part)
         lower := strings.ToLower(sig)
