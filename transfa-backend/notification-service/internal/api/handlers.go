@@ -156,9 +156,9 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Webhook received"))
-}
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Webhook received"))
+	}
 
 func nullableString(v string) *string {
 	if v == "" {
