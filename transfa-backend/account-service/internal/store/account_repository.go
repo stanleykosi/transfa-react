@@ -60,8 +60,8 @@ func (r *PostgresAccountRepository) FindUserIDByAnchorCustomerID(ctx context.Con
 // CreateAccount inserts a new account record into the database.
 func (r *PostgresAccountRepository) CreateAccount(ctx context.Context, account *domain.Account) (string, error) {
 	query := `
-        INSERT INTO accounts (user_id, anchor_account_id, virtual_nuban, account_type)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO accounts (user_id, anchor_account_id, virtual_nuban, bank_name, account_type)
+        VALUES ($1, $2, $3, $4, $5)
         RETURNING id
     `
 	var accountID string
@@ -69,6 +69,7 @@ func (r *PostgresAccountRepository) CreateAccount(ctx context.Context, account *
 		account.UserID,
 		account.AnchorAccountID,
 		account.VirtualNUBAN,
+		account.BankName,
 		account.Type,
 	).Scan(&accountID)
 

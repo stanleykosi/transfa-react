@@ -59,23 +59,26 @@ func (c *Client) CreateDepositAccount(ctx context.Context, req domain.CreateDepo
 	return &resp, nil
 }
 
-// GetVirtualNUBANForAccount fetches the virtual account number (NUBAN) for a given deposit account ID.
-func (c *Client) GetVirtualNUBANForAccount(ctx context.Context, depositAccountID string) (string, error) {
+// GetVirtualNUBANForAccount fetches the virtual account number (NUBAN) and bank name for a given deposit account ID.
+func (c *Client) GetVirtualNUBANForAccount(ctx context.Context, depositAccountID string) (*domain.VirtualNUBANInfo, error) {
 	url := fmt.Sprintf("%s/api/v1/accounts/%s?include=AccountNumber", c.baseURL, depositAccountID)
 	var resp domain.GetDepositAccountResponse
 
 	err := c.do(ctx, http.MethodGet, url, nil, &resp)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	for _, included := range resp.Included {
 		if strings.EqualFold(included.Type, "AccountNumber") && included.Attributes.AccountNumber != "" {
-			return included.Attributes.AccountNumber, nil
+			return &domain.VirtualNUBANInfo{
+				AccountNumber: included.Attributes.AccountNumber,
+				BankName:      included.Attributes.BankName,
+			}, nil
 		}
 	}
 
-	return "", fmt.Errorf("no virtual account number found for deposit account %s", depositAccountID)
+	return nil, fmt.Errorf("no virtual account number found for deposit account %s", depositAccountID)
 }
 
 // do is a helper function to make HTTP requests to the Anchor API.

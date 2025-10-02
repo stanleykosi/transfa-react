@@ -19,13 +19,14 @@ const HomeScreen = () => {
   const { user } = useUser();
   const [loading, setLoading] = useState(true);
   const [nuban, setNuban] = useState<string | null>(null);
+  const [bankName, setBankName] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
         const token = await getToken().catch(() => undefined);
-        const { data } = await apiClient.get<{ accountNumber?: string }>('/me/primary-account', {
+        const { data } = await apiClient.get<{ accountNumber?: string; bankName?: string }>('/me/primary-account', {
           headers: {
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
             'X-Clerk-User-Id': user?.id || '',
@@ -35,11 +36,13 @@ const HomeScreen = () => {
           return;
         }
         setNuban(data?.accountNumber || null);
+        setBankName(data?.bankName || null);
       } catch (e) {
         if (!mounted) {
           return;
         }
         setNuban(null);
+        setBankName(null);
       } finally {
         if (mounted) {
           setLoading(false);
@@ -60,6 +63,9 @@ const HomeScreen = () => {
           <>
             <Text style={styles.title}>Your Account</Text>
             <Text style={styles.subtitle}>Virtual NUBAN: {nuban}</Text>
+            {bankName && (
+              <Text style={styles.bankName}>Bank: {bankName}</Text>
+            )}
           </>
         ) : (
           <>
@@ -87,6 +93,12 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSizes.base,
     color: theme.colors.textSecondary,
     marginTop: theme.spacing.s8,
+  },
+  bankName: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.textSecondary,
+    marginTop: theme.spacing.s4,
+    fontStyle: 'italic',
   },
 });
 

@@ -70,3 +70,9 @@ type GetDepositAccountResponse struct {
 		} `json:"attributes"`
 	} `json:"included"`
 }
+
+// VirtualNUBANInfo contains both the Virtual NUBAN and associated bank name.
+type VirtualNUBANInfo struct {
+	AccountNumber string `json:"accountNumber"`
+	BankName      string `json:"bankName"`
+}

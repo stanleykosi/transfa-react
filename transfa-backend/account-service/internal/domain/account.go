@@ -26,6 +26,7 @@ type Account struct {
 	UserID          string      `json:"user_id"`
 	AnchorAccountID string      `json:"anchor_account_id"`
 	VirtualNUBAN    string      `json:"virtual_nuban"`
+	BankName        string      `json:"bank_name"`
 	Type            AccountType `json:"account_type"`
 	Balance         int64       `json:"balance"` // Stored in kobo
 	Status          string      `json:"status"`

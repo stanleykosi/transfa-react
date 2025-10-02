@@ -97,19 +97,20 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 	}
 	log.Printf("Successfully created Anchor DepositAccount %s", anchorAccount.Data.ID)
 
-	nuban, err := h.anchorClient.GetVirtualNUBANForAccount(ctx, anchorAccount.Data.ID)
+	nubanInfo, err := h.anchorClient.GetVirtualNUBANForAccount(ctx, anchorAccount.Data.ID)
 	if err != nil {
 		log.Printf("ERROR: Failed to fetch VirtualNUBAN for AnchorAccountID %s: %v", anchorAccount.Data.ID, err)
 		reason := fmt.Sprintf("Failed to fetch virtual account number: %v", err)
 		_ = h.repo.UpdateTierStatus(ctx, userID, "tier2", "failed", ptr(reason))
 		return true // Ack to prevent hot-looping; manual retry can be triggered later.
 	}
-	log.Printf("Successfully fetched VirtualNUBAN: %s", nuban)
+	log.Printf("Successfully fetched VirtualNUBAN: %s, Bank: %s", nubanInfo.AccountNumber, nubanInfo.BankName)
 
 	newAccount := &domain.Account{
 		UserID:          userID,
 		AnchorAccountID: anchorAccount.Data.ID,
-		VirtualNUBAN:    nuban,
+		VirtualNUBAN:    nubanInfo.AccountNumber,
+		BankName:        nubanInfo.BankName,
 		Type:            domain.PrimaryAccount,
 	}
 	if _, err = h.repo.CreateAccount(ctx, newAccount); err != nil {

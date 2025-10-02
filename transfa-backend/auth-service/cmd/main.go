@@ -197,7 +197,7 @@ func main() {
 		w.Write([]byte("Auth service is healthy"))
 	})
 
-    // Lightweight helper to fetch the user's primary account number (NUBAN)
+    // Lightweight helper to fetch the user's primary account number (NUBAN) and bank name
     r.Get("/me/primary-account", func(w http.ResponseWriter, r *http.Request) {
         clerkUserID := r.Header.Get("X-Clerk-User-Id")
         if clerkUserID == "" {
@@ -211,15 +211,21 @@ func main() {
             w.Write([]byte("User not found"))
             return
         }
-        var accountNumber *string
+        var accountNumber, bankName *string
         if conn, err := dbpool.Acquire(r.Context()); err == nil {
             defer conn.Release()
-            _ = conn.QueryRow(r.Context(), `SELECT virtual_nuban FROM accounts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, existing.ID).Scan(&accountNumber)
+            _ = conn.QueryRow(r.Context(), `SELECT virtual_nuban, bank_name FROM accounts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, existing.ID).Scan(&accountNumber, &bankName)
         }
         w.Header().Set("Content-Type", "application/json")
         w.WriteHeader(http.StatusOK)
         if accountNumber != nil {
-            w.Write([]byte("{\"accountNumber\": \"" + *accountNumber + "\"}"))
+            response := map[string]interface{}{
+                "accountNumber": *accountNumber,
+            }
+            if bankName != nil && *bankName != "" {
+                response["bankName"] = *bankName
+            }
+            json.NewEncoder(w).Encode(response)
         } else {
             w.Write([]byte("{}"))
         }
