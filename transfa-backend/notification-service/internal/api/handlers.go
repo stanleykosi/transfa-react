@@ -19,20 +19,20 @@
 package api
 
 import (
-    "bytes"
-    "crypto/hmac"
-    "crypto/sha1"
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha1"
     "crypto/sha256"
-    "encoding/base64"
+	"encoding/base64"
     "encoding/hex"
-    "encoding/json"
-    "io"
-    "log"
-    "net/http"
+	"encoding/json"
+	"io"
+	"log"
+	"net/http"
     "strings"
 
-    "github.com/transfa/notification-service/internal/domain"
-    "github.com/transfa/notification-service/pkg/rabbitmq"
+	"github.com/transfa/notification-service/internal/domain"
+	"github.com/transfa/notification-service/pkg/rabbitmq"
 )
 
 // WebhookHandler processes incoming webhooks from Anchor.
@@ -158,8 +158,8 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // isValidSignature validates the HMAC-SHA1 signature of the webhook.
 // signature = Base64(HMAC_SHA1(request_body, secret_token))
 func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) bool {
-    if h.secret == "" {
-        log.Println("Warning: ANCHOR_WEBHOOK_SECRET is not set. Skipping signature validation.")
+	if h.secret == "" {
+		log.Println("Warning: ANCHOR_WEBHOOK_SECRET is not set. Skipping signature validation.")
         return true
     }
 
@@ -173,6 +173,7 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
     sha1Mac.Write(body)
     sha1Expected := sha1Mac.Sum(nil)
     sha1Base64 := base64.StdEncoding.EncodeToString(sha1Expected)
+    sha1Hex := hex.EncodeToString(sha1Expected)
 
     sha256Mac := hmac.New(sha256.New, []byte(h.secret))
     sha256Mac.Write(body)
@@ -197,15 +198,39 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
         }
 
         if strings.HasPrefix(lower, "sha1=") {
-            if strings.EqualFold(sig[5:], sha1Base64) {
+            candidate := strings.TrimSpace(sig[5:])
+            if strings.EqualFold(candidate, sha1Base64) {
                 return true
+            }
+            // Anchor sometimes base64-encodes the raw sha1 bytes (without prefix)
+            if decoded, err := base64.StdEncoding.DecodeString(candidate); err == nil {
+                if hmac.Equal(decoded, sha1Expected) {
+                    return true
+                }
             }
             continue
         }
 
         // Legacy plain SHA1 base64 without prefix
         if strings.EqualFold(sig, sha1Base64) {
-            return true
+		return true
+	}
+
+        if decoded, err := base64.StdEncoding.DecodeString(sig); err == nil {
+            if hmac.Equal(decoded, sha1Expected) || hmac.Equal(decoded, sha256Expected) {
+                return true
+            }
+            // Some integrators send base64-encoded ASCII hex
+            if hexCandidate := strings.TrimSpace(string(decoded)); len(hexCandidate) == len(sha1Hex) {
+                if b, err := hex.DecodeString(hexCandidate); err == nil && hmac.Equal(b, sha1Expected) {
+                    return true
+                }
+            }
+            if hexCandidate := strings.TrimSpace(string(decoded)); len(hexCandidate) == len(sha256Hex) {
+                if b, err := hex.DecodeString(hexCandidate); err == nil && hmac.Equal(b, sha256Expected) {
+                    return true
+                }
+            }
         }
     }
 
