@@ -128,6 +128,8 @@ const CreateAccountScreen = () => {
     setSubmitting(true);
     try {
       const token = await getToken().catch(() => undefined);
+      console.log('🚀 Submitting Tier 2 details...');
+
       // Submit Tier 2 details to backend
       await apiClient.post(
         '/onboarding/tier2',
@@ -135,21 +137,27 @@ const CreateAccountScreen = () => {
         { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers } }
       );
 
-      // Poll for completion (Anchor webhook -> account-service creates account -> status: completed)
-      const maxMs = 20000; // up to 20s
+      console.log('✅ Tier 2 submitted successfully, checking status...');
+
+      // Poll briefly for completion, then navigate to let HomeScreen handle the polling
+      const maxMs = 5000; // up to 5s
       const stepMs = 1000;
       const started = Date.now();
       while (Date.now() - started < maxMs) {
         const { data } = await apiClient.get<{ status: string }>('/onboarding/status', {
           headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
         });
+        console.log('🔍 Status check response:', data?.status);
         if (data?.status === 'completed') {
+          console.log('🎉 Account completed, navigating to app...');
           navigation.navigate('AppTabs' as never);
           return;
         }
         await new Promise((res) => setTimeout(res, stepMs));
       }
-      // Fallback: navigate; the app tabs can lazy-load account details
+
+      console.log('⏰ Timeout reached, navigating to HomeScreen for polling...');
+      // Navigate to HomeScreen which will handle account polling
       navigation.navigate('AppTabs' as never);
     } catch (e) {
       console.error('Error submitting Tier 1:', e);
@@ -212,7 +220,11 @@ const CreateAccountScreen = () => {
               placeholder="male or female"
             />
 
-            <PrimaryButton title="Submit" onPress={handleSubmitTier2} isLoading={submitting} />
+            <PrimaryButton
+              title={submitting ? "Processing..." : "Submit"}
+              onPress={handleSubmitTier2}
+              isLoading={submitting}
+            />
             <PrimaryButton
               title="Sign Out (Test Different Account)"
               onPress={handleSignOut}

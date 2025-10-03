@@ -30,7 +30,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -233,11 +232,6 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
 		return true
 	}
 
-	// Temporary bypass for debugging - remove in production
-	if os.Getenv("BYPASS_SIGNATURE_VALIDATION") == "true" {
-		log.Println("Warning: BYPASS_SIGNATURE_VALIDATION is enabled. Skipping signature validation.")
-		return true
-	}
 
 	header := strings.TrimSpace(signatureHeader)
 	if header == "" {
