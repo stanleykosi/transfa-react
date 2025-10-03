@@ -26,10 +26,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/transfa/notification-service/internal/domain"
 	"github.com/transfa/notification-service/pkg/rabbitmq"
@@ -37,8 +40,10 @@ import (
 
 // WebhookHandler processes incoming webhooks from Anchor.
 type WebhookHandler struct {
-	producer *rabbitmq.EventProducer
-	secret   string
+	producer        *rabbitmq.EventProducer
+	secret          string
+	processedEvents map[string]time.Time
+	mutex           sync.RWMutex
 }
 
 func extractReason(attrs map[string]interface{}) string {
@@ -57,18 +62,27 @@ func extractReason(attrs map[string]interface{}) string {
 // NewWebhookHandler creates a new handler for the webhook endpoint.
 func NewWebhookHandler(producer *rabbitmq.EventProducer, secret string) *WebhookHandler {
 	return &WebhookHandler{
-		producer: producer,
-		secret:   secret,
+		producer:        producer,
+		secret:          secret,
+		processedEvents: make(map[string]time.Time),
 	}
 }
 
 // ServeHTTP implements the http.Handler interface.
 func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	startTime := time.Now()
+	requestID := r.Header.Get("X-Request-ID")
+	if requestID == "" {
+		requestID = fmt.Sprintf("req_%d", time.Now().UnixNano())
+	}
+	
+	log.Printf("[%s] Webhook request started from %s", requestID, r.RemoteAddr)
+	
 	// 1. Read the request body. We need to read it once for signature validation
 	// and then again for decoding, so we buffer it.
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("Error reading webhook body: %v", err)
+		log.Printf("[%s] Error reading webhook body: %v", requestID, err)
 		http.Error(w, "Cannot read request body", http.StatusBadRequest)
 		return
 	}
@@ -77,7 +91,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 2. Validate the signature for security.
 	if !h.isValidSignature(r.Header.Get("x-anchor-signature"), body) {
-		log.Println("Error: Invalid webhook signature")
+		log.Printf("[%s] Error: Invalid webhook signature", requestID)
 		http.Error(w, "Invalid signature", http.StatusUnauthorized)
 		return
 	}
@@ -85,7 +99,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 3. Decode the webhook payload.
 	var event domain.AnchorWebhookEvent
 	if err := json.Unmarshal(body, &event); err != nil {
-		log.Printf("Error decoding webhook JSON: %v", err)
+		log.Printf("[%s] Error decoding webhook JSON: %v", requestID, err)
 		http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
 		return
 	}
@@ -104,7 +118,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			event.Event = event.Data.Type
 		}
 		if event.Event == "" {
-			log.Printf("Webhook missing event field. Raw payload: %s", string(body))
+			log.Printf("[%s] Webhook missing event field. Raw payload: %s", requestID, string(body))
 		}
 	}
 
@@ -113,9 +127,17 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		anchorCustomerID = id
 	}
 
-	log.Printf("Received webhook event: %s for resource ID: %s (anchor customer: %s)", event.Event, event.Data.ID, anchorCustomerID)
+	log.Printf("[%s] Received webhook event: %s for resource ID: %s (anchor customer: %s)", requestID, event.Event, event.Data.ID, anchorCustomerID)
 
-	// 4. Process the event based on its type.
+	// 4. Check for duplicate events to prevent reprocessing
+	if h.isDuplicateEvent(event.Data.ID, event.Event) {
+		log.Printf("[%s] Duplicate event detected and ignored: %s for resource ID: %s", requestID, event.Event, event.Data.ID)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("Duplicate event ignored"))
+		return
+	}
+
+	// 5. Process the event based on its type.
 	ctx := r.Context()
 
 	eventRouting := map[string]string{
@@ -124,11 +146,13 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"customer.identification.manualReview": "customer.tier.status",
 		"customer.identification.error":        "customer.tier.status",
 		"customer.created":                     "customer.lifecycle",
+		"account.initiated":                    "account.lifecycle",
+		"account.opened":                       "account.lifecycle",
 	}
 
 	routingKey, known := eventRouting[event.Event]
 	if !known {
-		log.Printf("Unhandled webhook event type: %s", event.Event)
+		log.Printf("[%s] Unhandled webhook event type: %s", requestID, event.Event)
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Webhook received"))
 		return
@@ -148,17 +172,24 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_error", Reason: nullableString(reason)}
 	case "customer.created":
 		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_customer_created"}
+	case "account.initiated":
+		message = domain.AccountLifecycleEvent{AnchorCustomerID: anchorCustomerID, EventType: "account_initiated", ResourceID: event.Data.ID}
+	case "account.opened":
+		message = domain.AccountLifecycleEvent{AnchorCustomerID: anchorCustomerID, EventType: "account_opened", ResourceID: event.Data.ID}
 	}
 
 	if err := h.producer.Publish(ctx, "customer_events", routingKey, message); err != nil {
-		log.Printf("Failed to publish %s: %v", routingKey, err)
+		log.Printf("[%s] Failed to publish %s: %v", requestID, routingKey, err)
 		http.Error(w, "Internal server error during event processing", http.StatusInternalServerError)
 		return
 	}
 
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Webhook received"))
-	}
+	log.Printf("[%s] Published message to exchange 'customer_events' with routing key '%s'", requestID, routingKey)
+	log.Printf("[%s] Webhook processed successfully in %v", requestID, time.Since(startTime))
+	
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Webhook received"))
+}
 
 func nullableString(v string) *string {
 	if v == "" {
@@ -193,8 +224,8 @@ func extractAnchorCustomerID(event domain.AnchorWebhookEvent) string {
 	return ""
 }
 
-// isValidSignature validates the HMAC-SHA1 signature of the webhook.
-// signature = Base64(HMAC_SHA1(request_body, secret_token))
+// isValidSignature validates the HMAC signature of the webhook with improved robustness.
+// This function handles multiple signature formats that Anchor might send.
 func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) bool {
 	if h.secret == "" {
 		log.Println("Warning: ANCHOR_WEBHOOK_SECRET is not set. Skipping signature validation.")
@@ -207,47 +238,65 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
 		return false
 	}
 
+	// Calculate expected signatures
 	sha1Mac := hmac.New(sha1.New, []byte(h.secret))
 	sha1Mac.Write(body)
 	sha1Expected := sha1Mac.Sum(nil)
 	sha1Base64 := base64.StdEncoding.EncodeToString(sha1Expected)
-	sha1Hex := hex.EncodeToString(sha1Expected)
 
 	sha256Mac := hmac.New(sha256.New, []byte(h.secret))
 	sha256Mac.Write(body)
 	sha256Expected := sha256Mac.Sum(nil)
+	sha256Base64 := base64.StdEncoding.EncodeToString(sha256Expected)
 	sha256Hex := hex.EncodeToString(sha256Expected)
 
 	log.Printf("Debug signature check: provided=%s | expected sha1=%s | expected sha256=%s", header, sha1Base64, sha256Hex)
 
+	// 1. Try direct string comparison first (most common cases)
+	if header == sha1Base64 {
+		log.Println("Signature matched sha1 base64 (primary)")
+		return true
+	}
+	if header == sha256Hex {
+		log.Println("Signature matched sha256 hex (primary)")
+		return true
+	}
+	if header == sha256Base64 {
+		log.Println("Signature matched sha256 base64 (primary)")
+		return true
+	}
+
+	// 2. Try base64 decoding and byte comparison
 	if decoded, err := base64.StdEncoding.DecodeString(header); err == nil {
-		if bytes.Equal(decoded, sha1Expected) {
-			log.Println("Signature matched raw sha1 bytes (primary)")
+		if hmac.Equal(decoded, sha1Expected) {
+			log.Println("Signature matched decoded sha1 bytes")
 			return true
 		}
-		if bytes.Equal(decoded, sha256Expected) {
-			log.Println("Signature matched raw sha256 bytes (primary)")
+		if hmac.Equal(decoded, sha256Expected) {
+			log.Println("Signature matched decoded sha256 bytes")
 			return true
-		}
-		if len(decoded) == len(sha1Expected)*2 {
-			if hexCandidate, err := hex.DecodeString(string(decoded)); err == nil && bytes.Equal(hexCandidate, sha1Expected) {
-				log.Println("Signature matched base64-encoded sha1 hex (primary)")
-				return true
-			}
-		}
-		if len(decoded) == len(sha256Expected)*2 {
-			if hexCandidate, err := hex.DecodeString(string(decoded)); err == nil && bytes.Equal(hexCandidate, sha256Expected) {
-				log.Println("Signature matched base64-encoded sha256 hex (primary)")
-				return true
-			}
 		}
 	}
 
+	// 3. Try hex decoding
+	if decoded, err := hex.DecodeString(header); err == nil {
+		if hmac.Equal(decoded, sha1Expected) {
+			log.Println("Signature matched hex decoded sha1")
+			return true
+		}
+		if hmac.Equal(decoded, sha256Expected) {
+			log.Println("Signature matched hex decoded sha256")
+			return true
+		}
+	}
+
+	// 4. Handle comma-separated signatures (multiple signatures in header)
 	parts := strings.Split(header, ",")
 	for _, part := range parts {
 		sig := strings.TrimSpace(part)
 		lower := strings.ToLower(sig)
 
+		// Handle prefixed signatures
 		if strings.HasPrefix(lower, "sha256=") {
 			providedHex := strings.TrimSpace(sig[7:])
 			if providedBytes, err := hex.DecodeString(providedHex); err == nil {
@@ -255,8 +304,6 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
 					log.Println("Signature matched sha256 prefix")
 					return true
 				}
-			} else {
-				log.Printf("Invalid sha256 signature format: %v", err)
 			}
 			continue
 		}
@@ -276,43 +323,66 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
 			continue
 		}
 
+		// Try direct comparison for each part
 		if strings.EqualFold(sig, sha1Base64) {
-			log.Println("Signature matched legacy sha1 base64")
+			log.Println("Signature matched sha1 base64 in parts")
 			return true
 		}
+		if strings.EqualFold(sig, sha256Hex) {
+			log.Println("Signature matched sha256 hex in parts")
+			return true
+		}
+		if strings.EqualFold(sig, sha256Base64) {
+			log.Println("Signature matched sha256 base64 in parts")
+			return true
+		}
+	}
 
-		if decoded, err := base64.StdEncoding.DecodeString(sig); err == nil {
-			if hmac.Equal(decoded, sha1Expected) {
-				log.Println("Signature matched decoded sha1 bytes")
+	// 5. Legacy support for base64-encoded hex strings
+	if decoded, err := base64.StdEncoding.DecodeString(header); err == nil {
+		if len(decoded) == len(sha1Expected)*2 {
+			if hexCandidate, err := hex.DecodeString(string(decoded)); err == nil && hmac.Equal(hexCandidate, sha1Expected) {
+				log.Println("Signature matched base64-encoded sha1 hex")
 				return true
 			}
-			if hmac.Equal(decoded, sha256Expected) {
-				log.Println("Signature matched decoded sha256 bytes")
+		}
+		if len(decoded) == len(sha256Expected)*2 {
+			if hexCandidate, err := hex.DecodeString(string(decoded)); err == nil && hmac.Equal(hexCandidate, sha256Expected) {
+				log.Println("Signature matched base64-encoded sha256 hex")
 				return true
-			}
-			if len(decoded) == len(sha1Expected) && hmac.Equal(decoded, sha1Expected) {
-				log.Println("Signature matched decoded sha1 raw length")
-				return true
-			}
-			if len(decoded) == len(sha256Expected) && hmac.Equal(decoded, sha256Expected) {
-				log.Println("Signature matched decoded sha256 raw length")
-				return true
-			}
-			if hexCandidate := strings.TrimSpace(string(decoded)); len(hexCandidate) == len(sha1Hex) {
-				if b, err := hex.DecodeString(hexCandidate); err == nil && hmac.Equal(b, sha1Expected) {
-					log.Println("Signature matched ascii hex sha1")
-					return true
-				}
-			}
-			if hexCandidate := strings.TrimSpace(string(decoded)); len(hexCandidate) == len(sha256Hex) {
-				if b, err := hex.DecodeString(hexCandidate); err == nil && hmac.Equal(b, sha256Expected) {
-					log.Println("Signature matched ascii hex sha256")
-					return true
-				}
 			}
 		}
 	}
 
-	log.Printf("Signature mismatch. Provided header: %s | Expected sha256=%s or sha1=%s", header, sha256Hex, sha1Base64)
+	log.Printf("Signature mismatch. Provided header: %s | Expected sha1=%s or sha256=%s", header, sha1Base64, sha256Hex)
+	return false
+}
+
+// isDuplicateEvent checks if we've already processed this event recently.
+// This prevents duplicate processing of the same webhook events.
+func (h *WebhookHandler) isDuplicateEvent(eventID, eventType string) bool {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+	
+	// Clean up old entries (older than 1 hour) to prevent memory leaks
+	cutoff := time.Now().Add(-1 * time.Hour)
+	for id, timestamp := range h.processedEvents {
+		if timestamp.Before(cutoff) {
+			delete(h.processedEvents, id)
+		}
+	}
+	
+	// Create a unique key for this event
+	eventKey := fmt.Sprintf("%s:%s", eventID, eventType)
+	
+	// Check if we've seen this event recently (within 5 minutes)
+	if timestamp, exists := h.processedEvents[eventKey]; exists {
+		if time.Since(timestamp) < 5*time.Minute {
+			return true
+		}
+	}
+	
+	// Mark this event as processed
+	h.processedEvents[eventKey] = time.Now()
 	return false
 }

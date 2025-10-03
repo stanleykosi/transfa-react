@@ -26,12 +26,15 @@ const HomeScreen = () => {
     (async () => {
       try {
         const token = await getToken().catch(() => undefined);
-        const { data } = await apiClient.get<{ accountNumber?: string; bankName?: string }>('/me/primary-account', {
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            'X-Clerk-User-Id': user?.id || '',
-          },
-        });
+        const { data } = await apiClient.get<{ accountNumber?: string; bankName?: string }>(
+          '/me/primary-account',
+          {
+            headers: {
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              'X-Clerk-User-Id': user?.id || '',
+            },
+          }
+        );
         if (!mounted) {
           return;
         }
@@ -63,9 +66,7 @@ const HomeScreen = () => {
           <>
             <Text style={styles.title}>Your Account</Text>
             <Text style={styles.subtitle}>Virtual NUBAN: {nuban}</Text>
-            {bankName && (
-              <Text style={styles.bankName}>Bank: {bankName}</Text>
-            )}
+            {bankName && <Text style={styles.bankName}>Bank: {bankName}</Text>}
           </>
         ) : (
           <>

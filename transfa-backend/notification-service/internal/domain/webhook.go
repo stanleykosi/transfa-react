@@ -56,3 +56,10 @@ type CustomerTierStatusEvent struct {
 	Status           string  `json:"status"`
 	Reason           *string `json:"reason,omitempty"`
 }
+
+// AccountLifecycleEvent represents account-related events from Anchor.
+type AccountLifecycleEvent struct {
+	AnchorCustomerID string `json:"anchor_customer_id"`
+	EventType        string `json:"event_type"`
+	ResourceID       string `json:"resource_id"`
+}

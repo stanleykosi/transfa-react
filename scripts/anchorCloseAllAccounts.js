@@ -28,7 +28,9 @@ const PAGE_SIZE = parseInt(process.env.ANCHOR_PAGE_SIZE || '100', 10);
 const CSV_PATH = process.env.ANCHOR_ACCOUNT_CSV;
 
 if (!API_KEY) {
-  console.error('ERROR: Anchor API key is required. Set ANCHOR_API_KEY or CUSTOMER_SERVICE_ANCHOR_API_KEY before running this script.');
+  console.error(
+    'ERROR: Anchor API key is required. Set ANCHOR_API_KEY or CUSTOMER_SERVICE_ANCHOR_API_KEY before running this script.'
+  );
   process.exit(1);
 }
 
@@ -116,7 +118,10 @@ async function closeAllAccounts() {
     try {
       pageResult = await fetchAccountsPage(page, offset);
     } catch (error) {
-      console.error(`❌ Failed to fetch accounts page ${page}:`, error.response?.data || error.message);
+      console.error(
+        `❌ Failed to fetch accounts page ${page}:`,
+        error.response?.data || error.message
+      );
       break;
     }
 
@@ -157,7 +162,9 @@ async function closeAllAccounts() {
     }
 
     if (newAccountsOnPage === 0) {
-      console.log('⚠️  No new accounts returned on this page. Anchor API may not be honoring pagination parameters. Stopping to avoid infinite loop.');
+      console.log(
+        '⚠️  No new accounts returned on this page. Anchor API may not be honoring pagination parameters. Stopping to avoid infinite loop.'
+      );
       break;
     }
 
@@ -191,7 +198,10 @@ async function closeAllAccounts() {
 }
 
 function parseAccountIdsFromCsv(csvContent) {
-  const lines = csvContent.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = csvContent
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   const ids = [];
   for (const line of lines) {
     // naive split on comma; adjust if the CSV has more columns
@@ -207,4 +217,3 @@ closeAllAccounts().catch((error) => {
   console.error('Unexpected error during cleanup:', error);
   process.exit(1);
 });
-
