@@ -120,11 +120,14 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 	// Get bank name from the original account creation response if not available from NUBAN fetch
 	bankName := nubanInfo.BankName
 	if bankName == "" {
-		if bankData, exists := anchorAccount.Data.Attributes["bank"]; exists {
-			if bankMap, ok := bankData.(map[string]interface{}); ok {
-				if name, exists := bankMap["name"]; exists {
-					if nameStr, ok := name.(string); ok {
-						bankName = nameStr
+		// Type assert Attributes to map[string]interface{} before accessing
+		if attributesMap, ok := anchorAccount.Data.Attributes.(map[string]interface{}); ok {
+			if bankData, exists := attributesMap["bank"]; exists {
+				if bankMap, ok := bankData.(map[string]interface{}); ok {
+					if name, exists := bankMap["name"]; exists {
+						if nameStr, ok := name.(string); ok {
+							bankName = nameStr
+						}
 					}
 				}
 			}
