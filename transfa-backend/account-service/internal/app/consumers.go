@@ -64,6 +64,17 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 		return false // Retryable database error.
 	}
 
+	// Check if user already has an account to prevent duplicate creation
+	existingAccount, err := h.repo.FindAccountByUserID(ctx, userID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		log.Printf("ERROR: Failed to check for existing account for user %s: %v", userID, err)
+		return false // Retryable database error
+	}
+	if existingAccount != nil {
+		log.Printf("INFO: User %s already has an account (ID: %s). Skipping account creation.", userID, existingAccount.ID)
+		return true // Acknowledge - no need to create duplicate account
+	}
+
 	approvedReason := ptr("Tier2 approved")
 	if err := h.repo.UpdateTierStatus(ctx, userID, "tier2", "approved", approvedReason); err != nil {
 		log.Printf("WARN: Failed to persist tier2 approved status for user %s: %v", userID, err)
@@ -106,11 +117,25 @@ func (h *AccountEventHandler) HandleCustomerVerifiedEvent(body []byte) bool {
 	}
 	log.Printf("Successfully fetched VirtualNUBAN: %s, Bank: %s", nubanInfo.AccountNumber, nubanInfo.BankName)
 
+	// Get bank name from the original account creation response if not available from NUBAN fetch
+	bankName := nubanInfo.BankName
+	if bankName == "" {
+		if bankData, exists := anchorAccount.Data.Attributes["bank"]; exists {
+			if bankMap, ok := bankData.(map[string]interface{}); ok {
+				if name, exists := bankMap["name"]; exists {
+					if nameStr, ok := name.(string); ok {
+						bankName = nameStr
+					}
+				}
+			}
+		}
+	}
+
 	newAccount := &domain.Account{
 		UserID:          userID,
 		AnchorAccountID: anchorAccount.Data.ID,
 		VirtualNUBAN:    nubanInfo.AccountNumber,
-		BankName:        nubanInfo.BankName,
+		BankName:        bankName,
 		Type:            domain.PrimaryAccount,
 	}
 	if _, err = h.repo.CreateAccount(ctx, newAccount); err != nil {

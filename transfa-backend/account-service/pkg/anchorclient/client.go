@@ -69,17 +69,31 @@ func (c *Client) GetVirtualNUBANForAccount(ctx context.Context, depositAccountID
 		return nil, err
 	}
 
+	// Extract bank name from main account data
+	var bankName string
+	if bankData, exists := resp.Data.Attributes["bank"]; exists {
+		if bankMap, ok := bankData.(map[string]interface{}); ok {
+			if name, exists := bankMap["name"]; exists {
+				if nameStr, ok := name.(string); ok {
+					bankName = nameStr
+				}
+			}
+		}
+	}
+
+	// Extract Virtual NUBAN from included section
 	for _, included := range resp.Included {
 		if strings.EqualFold(included.Type, "AccountNumber") && included.Attributes.AccountNumber != "" {
 			return &domain.VirtualNUBANInfo{
 				AccountNumber: included.Attributes.AccountNumber,
-				BankName:      included.Attributes.BankName,
+				BankName:      bankName,
 			}, nil
 		}
 	}
 
 	return nil, fmt.Errorf("no virtual account number found for deposit account %s", depositAccountID)
 }
+
 
 // do is a helper function to make HTTP requests to the Anchor API.
 func (c *Client) do(ctx context.Context, method, url string, body, target interface{}) error {

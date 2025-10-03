@@ -66,7 +66,6 @@ type GetDepositAccountResponse struct {
 		Type       string `json:"type"`
 		Attributes struct {
 			AccountNumber string `json:"accountNumber"`
-			BankName      string `json:"bankName,omitempty"`
 		} `json:"attributes"`
 	} `json:"included"`
 }

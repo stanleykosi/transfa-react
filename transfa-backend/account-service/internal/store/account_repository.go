@@ -27,6 +27,7 @@ import (
 type AccountRepository interface {
 	CreateAccount(ctx context.Context, account *domain.Account) (string, error)
 	FindUserIDByAnchorCustomerID(ctx context.Context, anchorCustomerID string) (string, error)
+	FindAccountByUserID(ctx context.Context, userID string) (*domain.Account, error)
 	UpdateTierStatus(ctx context.Context, userID, stage, status string, reason *string) error
 }
 
@@ -55,6 +56,37 @@ func (r *PostgresAccountRepository) FindUserIDByAnchorCustomerID(ctx context.Con
 		return "", err
 	}
 	return userID, nil
+}
+
+// FindAccountByUserID retrieves an account by user ID.
+func (r *PostgresAccountRepository) FindAccountByUserID(ctx context.Context, userID string) (*domain.Account, error) {
+	query := `
+		SELECT id, user_id, anchor_account_id, virtual_nuban, bank_name, account_type, balance, status, created_at, updated_at
+		FROM accounts 
+		WHERE user_id = $1 
+		ORDER BY created_at DESC 
+		LIMIT 1
+	`
+	
+	var account domain.Account
+	err := r.db.QueryRow(ctx, query, userID).Scan(
+		&account.ID,
+		&account.UserID,
+		&account.AnchorAccountID,
+		&account.VirtualNUBAN,
+		&account.BankName,
+		&account.Type,
+		&account.Balance,
+		&account.Status,
+		&account.CreatedAt,
+		&account.UpdatedAt,
+	)
+	
+	if err != nil {
+		return nil, err
+	}
+	
+	return &account, nil
 }
 
 // CreateAccount inserts a new account record into the database.
