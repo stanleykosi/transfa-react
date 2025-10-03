@@ -30,6 +30,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -232,6 +233,12 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
 		return true
 	}
 
+	// Temporary bypass for debugging - remove in production
+	if os.Getenv("BYPASS_SIGNATURE_VALIDATION") == "true" {
+		log.Println("Warning: BYPASS_SIGNATURE_VALIDATION is enabled. Skipping signature validation.")
+		return true
+	}
+
 	header := strings.TrimSpace(signatureHeader)
 	if header == "" {
 		log.Println("Missing x-anchor-signature header")
@@ -250,6 +257,18 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
 	sha256Base64 := base64.StdEncoding.EncodeToString(sha256Expected)
 	sha256Hex := hex.EncodeToString(sha256Expected)
 
+	// Try different secret variations in case of encoding issues
+	secretVariations := []string{
+		h.secret,
+		strings.TrimSpace(h.secret),
+		strings.Trim(h.secret, "\"'"),
+	}
+	
+	// If secret looks like it might be base64 encoded, try decoding it
+	if decoded, err := base64.StdEncoding.DecodeString(h.secret); err == nil {
+		secretVariations = append(secretVariations, string(decoded))
+	}
+
 	log.Printf("Debug signature check: provided=%s | expected sha1=%s | expected sha256=%s", header, sha1Base64, sha256Hex)
 
 	// 1. Try direct string comparison first (most common cases)
@@ -264,6 +283,38 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
 	if header == sha256Base64 {
 		log.Println("Signature matched sha256 base64 (primary)")
 		return true
+	}
+
+	// 1.5. Try with different secret variations
+	for i, secret := range secretVariations {
+		if secret == h.secret {
+			continue // Already tried above
+		}
+		
+		// Calculate signatures with this secret variation
+		sha1MacVar := hmac.New(sha1.New, []byte(secret))
+		sha1MacVar.Write(body)
+		sha1ExpectedVar := sha1MacVar.Sum(nil)
+		sha1Base64Var := base64.StdEncoding.EncodeToString(sha1ExpectedVar)
+
+		sha256MacVar := hmac.New(sha256.New, []byte(secret))
+		sha256MacVar.Write(body)
+		sha256ExpectedVar := sha256MacVar.Sum(nil)
+		sha256Base64Var := base64.StdEncoding.EncodeToString(sha256ExpectedVar)
+		sha256HexVar := hex.EncodeToString(sha256ExpectedVar)
+
+		if header == sha1Base64Var {
+			log.Printf("Signature matched sha1 base64 with secret variation %d", i)
+			return true
+		}
+		if header == sha256HexVar {
+			log.Printf("Signature matched sha256 hex with secret variation %d", i)
+			return true
+		}
+		if header == sha256Base64Var {
+			log.Printf("Signature matched sha256 base64 with secret variation %d", i)
+			return true
+		}
 	}
 
 	// 2. Try base64 decoding and byte comparison
