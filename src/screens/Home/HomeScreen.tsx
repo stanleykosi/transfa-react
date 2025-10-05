@@ -7,7 +7,7 @@
  * - react-native: For Text component.
  * - @/components/ScreenWrapper: For consistent screen layout and safe area handling.
  */
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { Text, View, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import PrimaryButton from '@/components/PrimaryButton';
@@ -24,7 +24,7 @@ const HomeScreen = () => {
   const [polling, setPolling] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const fetchAccountData = async () => {
+  const fetchAccountData = useCallback(async () => {
     try {
       const token = await getToken().catch(() => undefined);
       console.log('Fetching account data with token:', token ? 'present' : 'missing');
@@ -46,7 +46,7 @@ const HomeScreen = () => {
       console.error('Error fetching account data:', e);
       return null;
     }
-  };
+  }, [getToken, user?.id]);
 
   useEffect(() => {
     let mounted = true;
@@ -54,7 +54,9 @@ const HomeScreen = () => {
 
     const loadAccountData = async () => {
       const data = await fetchAccountData();
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
 
       if (data?.accountNumber) {
         // Account data found, stop polling
@@ -76,7 +78,9 @@ const HomeScreen = () => {
 
         pollInterval = setInterval(async () => {
           if (!mounted || pollCount >= maxPolls) {
-            if (pollInterval) clearInterval(pollInterval);
+            if (pollInterval) {
+              clearInterval(pollInterval);
+            }
             setPolling(false);
             return;
           }
@@ -84,15 +88,21 @@ const HomeScreen = () => {
           pollCount++;
           console.log(`Polling attempt ${pollCount}/${maxPolls} for account data...`);
           const pollData = await fetchAccountData();
-          if (!mounted) return;
+          if (!mounted) {
+            return;
+          }
 
           if (pollData?.accountNumber) {
             // Account data found, stop polling
-            console.log(`Account found! NUBAN: ${pollData.accountNumber}, Bank: ${pollData.bankName}`);
+            console.log(
+              `Account found! NUBAN: ${pollData.accountNumber}, Bank: ${pollData.bankName}`
+            );
             setNuban(pollData.accountNumber);
             setBankName(pollData.bankName || null);
             setPolling(false);
-            if (pollInterval) clearInterval(pollInterval);
+            if (pollInterval) {
+              clearInterval(pollInterval);
+            }
           } else {
             console.log(`No account data yet (attempt ${pollCount}/${maxPolls})`);
           }
@@ -104,9 +114,11 @@ const HomeScreen = () => {
 
     return () => {
       mounted = false;
-      if (pollInterval) clearInterval(pollInterval);
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
     };
-  }, [getToken, user?.id]);
+  }, [getToken, user?.id, fetchAccountData]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -156,7 +168,7 @@ const HomeScreen = () => {
             <Text style={styles.title}>Home</Text>
             <Text style={styles.subtitle}>No account found yet.</Text>
             <PrimaryButton
-              title={refreshing ? "Checking..." : "Refresh"}
+              title={refreshing ? 'Checking...' : 'Refresh'}
               onPress={handleRefresh}
               isLoading={refreshing}
               style={styles.refreshButton}

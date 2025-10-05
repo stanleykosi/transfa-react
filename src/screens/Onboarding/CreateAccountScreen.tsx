@@ -221,7 +221,7 @@ const CreateAccountScreen = () => {
             />
 
             <PrimaryButton
-              title={submitting ? "Processing..." : "Submit"}
+              title={submitting ? 'Processing...' : 'Submit'}
               onPress={handleSubmitTier2}
               isLoading={submitting}
             />

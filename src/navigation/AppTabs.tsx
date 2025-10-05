@@ -21,15 +21,16 @@ import { Ionicons } from '@expo/vector-icons';
 import HomeScreen from '@/screens/Home/HomeScreen';
 import PaymentsScreen from '@/screens/Payments/PaymentsScreen';
 import AnalyticsScreen from '@/screens/Analytics/AnalyticsScreen';
-import ProfileScreen from '@/screens/Profile/ProfileScreen';
 import { theme } from '@/constants/theme';
+import ProfileStack, { ProfileStackParamList } from './ProfileStack';
+import { NavigatorScreenParams } from '@react-navigation/native';
 
 // Define the parameter list for the AppTabs routes for type safety.
 export type AppTabsParamList = {
   Home: undefined;
   Payments: undefined;
   Analytics: undefined;
-  Profile: undefined;
+  Profile: NavigatorScreenParams<ProfileStackParamList>;
 };
 
 const Tab = createBottomTabNavigator<AppTabsParamList>();
@@ -84,7 +85,7 @@ const AppTabs = () => {
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Payments" component={PaymentsScreen} />
       <Tab.Screen name="Analytics" component={AnalyticsScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen name="Profile" component={ProfileStack} />
     </Tab.Navigator>
   );
 };
