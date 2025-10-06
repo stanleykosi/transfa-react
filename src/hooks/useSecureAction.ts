@@ -40,7 +40,7 @@ import { useSecurityStore } from '@/store/useSecurityStore';
 const rnBiometrics = new ReactNativeBiometrics();
 
 export const useSecureAction = () => {
-  const { isPinSet, verifyPin } = useSecurityStore.getState();
+  const { isPinSet, biometricsEnabled, verifyPin } = useSecurityStore.getState();
   const [isModalVisible, setModalVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionToExecute, setActionToExecute] = useState<(() => void) | null>(null);
@@ -79,22 +79,28 @@ export const useSecureAction = () => {
       setActionToExecute(() => action);
 
       try {
-        const { available, biometryType } = await rnBiometrics.isSensorAvailable();
+        // Check if user has enabled biometrics in app settings
+        if (biometricsEnabled) {
+          const { available, biometryType } = await rnBiometrics.isSensorAvailable();
 
-        if (available && biometryType) {
-          const { success } = await rnBiometrics.simplePrompt({
-            promptMessage: 'Confirm your identity to proceed',
-            cancelButtonText: 'Use PIN Instead',
-          });
+          if (available && biometryType) {
+            const { success } = await rnBiometrics.simplePrompt({
+              promptMessage: 'Confirm your identity to proceed',
+              cancelButtonText: 'Use PIN Instead',
+            });
 
-          if (success) {
-            executeAction();
+            if (success) {
+              executeAction();
+            } else {
+              // User cancelled or biometric failed, fall back to PIN
+              setModalVisible(true);
+            }
           } else {
-            // User cancelled or biometric failed, fall back to PIN
+            // Biometrics not available, go directly to PIN
             setModalVisible(true);
           }
         } else {
-          // Biometrics not available, go directly to PIN
+          // User has disabled biometrics in app settings, go directly to PIN
           setModalVisible(true);
         }
       } catch (biometricError) {
@@ -103,7 +109,7 @@ export const useSecureAction = () => {
         setModalVisible(true);
       }
     },
-    [isPinSet, executeAction]
+    [isPinSet, biometricsEnabled, executeAction]
   );
 
   return {

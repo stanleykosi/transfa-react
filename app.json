@@ -6,7 +6,9 @@
     "orientation": "portrait",
     "userInterfaceStyle": "light",
     "main": "index.js",
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.transfaapp"
@@ -14,6 +16,13 @@
     "android": {
       "package": "com.transfaapp"
     },
-    "plugins": ["expo-secure-store"]
+    "plugins": [
+      "expo-secure-store"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "c7c4c27f-4418-47fd-b61c-c481a1f37af1"
+      }
+    }
   }
 }

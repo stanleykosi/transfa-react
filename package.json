@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
     "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
@@ -24,6 +24,7 @@
     "babel-preset-expo": "~54.0.0",
     "expo": "~54.0.0",
     "expo-constants": "~18.0.9",
+    "expo-dev-client": "~6.0.13",
     "expo-secure-store": "~15.0.7",
     "expo-splash-screen": "~31.0.10",
     "expo-status-bar": "~3.0.8",

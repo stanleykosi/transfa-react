@@ -20,7 +20,7 @@
  * - All secure storage operations are handled by the `useSecurityStore` hook.
  */
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Alert, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Alert, ScrollView, Switch } from 'react-native';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import FormInput from '@/components/FormInput';
 import PrimaryButton from '@/components/PrimaryButton';
@@ -32,7 +32,7 @@ import { TouchableOpacity } from 'react-native';
 
 const SecuritySettingsScreen = () => {
   const navigation = useNavigation();
-  const { isPinSet, setPin, clearPin } = useSecurityStore();
+  const { isPinSet, biometricsEnabled, setPin, clearPin, setBiometricsEnabled } = useSecurityStore();
   const [pin, setPinValue] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -99,6 +99,23 @@ const SecuritySettingsScreen = () => {
           >
             {isPinSet ? 'Active' : 'Not Set'}
           </Text>
+        </View>
+
+        <View style={styles.biometricSection}>
+          <View style={styles.biometricRow}>
+            <View style={styles.biometricInfo}>
+              <Text style={styles.biometricTitle}>Use Biometrics</Text>
+              <Text style={styles.biometricSubtitle}>
+                Use Face ID, Touch ID, or fingerprint for quick authentication
+              </Text>
+            </View>
+            <Switch
+              value={biometricsEnabled}
+              onValueChange={setBiometricsEnabled}
+              trackColor={{ false: theme.colors.border, true: theme.colors.primary }}
+              thumbColor={biometricsEnabled ? theme.colors.surface : theme.colors.textSecondary}
+            />
+          </View>
         </View>
 
         <Text style={styles.sectionTitle}>{isPinSet ? 'Change Your PIN' : 'Set a New PIN'}</Text>
@@ -191,6 +208,32 @@ const styles = StyleSheet.create({
     color: theme.colors.error,
     fontSize: theme.fontSizes.base,
     fontWeight: theme.fontWeights.medium,
+  },
+  biometricSection: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radii.md,
+    padding: theme.spacing.s16,
+    marginBottom: theme.spacing.s24,
+  },
+  biometricRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  biometricInfo: {
+    flex: 1,
+    marginRight: theme.spacing.s16,
+  },
+  biometricTitle: {
+    fontSize: theme.fontSizes.lg,
+    fontWeight: theme.fontWeights.semibold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.s4,
+  },
+  biometricSubtitle: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.textSecondary,
+    lineHeight: 20,
   },
 });
 

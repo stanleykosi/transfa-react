@@ -31,14 +31,17 @@ const PIN_SERVICE_NAME = 'com.transfaapp.pin';
 
 interface SecurityState {
   isPinSet: boolean;
+  biometricsEnabled: boolean;
   checkPinStatus: () => Promise<void>;
   setPin: (pin: string) => Promise<void>;
   clearPin: () => Promise<void>;
   verifyPin: (pin: string) => Promise<boolean>;
+  setBiometricsEnabled: (enabled: boolean) => void;
 }
 
 export const useSecurityStore = create<SecurityState>((set) => ({
   isPinSet: false,
+  biometricsEnabled: true, // Default to enabled
 
   /**
    * Checks the device's secure storage to see if a PIN has been set.
@@ -84,6 +87,14 @@ export const useSecurityStore = create<SecurityState>((set) => ({
       console.error('Failed to verify PIN:', error);
       return false;
     }
+  },
+
+  /**
+   * Toggles biometric authentication preference.
+   * @param enabled Whether biometrics should be used for authentication.
+   */
+  setBiometricsEnabled: (enabled: boolean) => {
+    set({ biometricsEnabled: enabled });
   },
 }));
 
