@@ -78,6 +78,17 @@ func (s *AccountService) CreateBeneficiary(ctx context.Context, input CreateBene
 		return nil, fmt.Errorf("failed to verify bank account with provider: %w", err)
 	}
 	accountName := verifyResp.Data.Attributes.AccountName
+	
+	// Debug: Log the account verification response
+	fmt.Printf("DEBUG: Account verification response: %+v\n", verifyResp)
+	fmt.Printf("DEBUG: Extracted account name: '%s'\n", accountName)
+	
+	// Handle cases where account name is empty or generic
+	if accountName == "" || accountName == "N/A" || accountName == "Unknown" {
+		// Use a more user-friendly fallback
+		accountName = fmt.Sprintf("Account ending in %s", input.AccountNumber[len(input.AccountNumber)-4:])
+		fmt.Printf("DEBUG: Using fallback account name: '%s'\n", accountName)
+	}
 
 	// 3. Create CounterParty on Anchor.
 	counterpartyReq := domain.CreateCounterPartyRequest{}

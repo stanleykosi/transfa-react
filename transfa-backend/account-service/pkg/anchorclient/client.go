@@ -169,6 +169,16 @@ func (c *Client) do(ctx context.Context, method, url string, body, target interf
 		return fmt.Errorf("anchor API error: status %d, body: %s", resp.StatusCode, string(respBody))
 	}
 
+	// Debug: Log the raw response for account verification
+	if strings.Contains(url, "verify-account") {
+		log.Printf("DEBUG: Raw Anchor verify-account response: %s", string(respBody))
+	}
+	
+	// Debug: Log the raw response for banks
+	if strings.Contains(url, "/banks") {
+		log.Printf("DEBUG: Raw Anchor banks response: %s", string(respBody))
+	}
+
 	if target != nil {
 		if err := json.Unmarshal(respBody, target); err != nil {
 			return fmt.Errorf("failed to unmarshal response body: %w", err)

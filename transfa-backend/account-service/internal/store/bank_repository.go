@@ -35,10 +35,28 @@ func NewPostgresBankRepository(db *pgxpool.Pool) *PostgresBankRepository {
 
 // CacheBanks stores the list of banks in the database for caching.
 func (r *PostgresBankRepository) CacheBanks(ctx context.Context, banks []domain.Bank) error {
+	// Debug: Log the banks data before marshaling
+	log.Printf("DEBUG: Attempting to cache %d banks", len(banks))
+	if len(banks) > 0 {
+		log.Printf("DEBUG: First bank: %+v", banks[0])
+	} else {
+		log.Printf("WARNING: No banks to cache - empty array received from Anchor API")
+		// Don't cache empty data, but don't return error to avoid breaking the main flow
+		return nil
+	}
+	
 	// Serialize banks to JSON
 	banksJSON, err := json.Marshal(banks)
 	if err != nil {
 		return fmt.Errorf("failed to marshal banks: %w", err)
+	}
+	
+	// Debug: Log the JSON being stored
+	log.Printf("DEBUG: JSON to store: %s", string(banksJSON))
+	
+	// Validate JSON before storing
+	if !json.Valid(banksJSON) {
+		return fmt.Errorf("generated JSON is invalid")
 	}
 
 	// Delete existing cached banks
