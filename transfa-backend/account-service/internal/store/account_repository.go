@@ -15,7 +15,6 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 
 	"github.com/jackc/pgx/v5"
