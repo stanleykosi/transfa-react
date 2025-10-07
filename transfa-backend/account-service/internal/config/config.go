@@ -21,6 +21,7 @@ type Config struct {
 	RabbitMQURL      string `mapstructure:"RABBITMQ_URL"`
 	AnchorAPIKey     string `mapstructure:"ANCHOR_API_KEY"`
 	AnchorAPIBaseURL string `mapstructure:"ANCHOR_API_BASE_URL"`
+	ServerPort       string `mapstructure:"SERVER_PORT"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -32,11 +33,15 @@ func LoadConfig() (config Config, err error) {
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
+	// Set default values
+	viper.SetDefault("SERVER_PORT", "8082")
+
 	// Bind envs explicitly so containers pick them up reliably
 	_ = viper.BindEnv("DATABASE_URL")
 	_ = viper.BindEnv("RABBITMQ_URL")
 	_ = viper.BindEnv("ANCHOR_API_KEY")
 	_ = viper.BindEnv("ANCHOR_API_BASE_URL")
+	_ = viper.BindEnv("SERVER_PORT")
 
 	if err = viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {

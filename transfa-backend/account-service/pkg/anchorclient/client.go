@@ -94,6 +94,45 @@ func (c *Client) GetVirtualNUBANForAccount(ctx context.Context, depositAccountID
 	return nil, fmt.Errorf("no virtual account number found for deposit account %s", depositAccountID)
 }
 
+// VerifyBankAccount verifies the details of an external bank account.
+func (c *Client) VerifyBankAccount(ctx context.Context, bankCode, accountNumber string) (*domain.VerifyAccountResponse, error) {
+	var resp domain.VerifyAccountResponse
+	url := fmt.Sprintf("%s/api/v1/payments/verify-account/%s/%s", c.baseURL, bankCode, accountNumber)
+	err := c.do(ctx, http.MethodGet, url, nil, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// CreateCounterParty creates a new counterparty (beneficiary) on Anchor.
+func (c *Client) CreateCounterParty(ctx context.Context, req domain.CreateCounterPartyRequest) (*domain.CreateCounterPartyResponse, error) {
+	var resp domain.CreateCounterPartyResponse
+	url := fmt.Sprintf("%s/api/v1/counterparties", c.baseURL)
+	err := c.do(ctx, http.MethodPost, url, req, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// DeleteCounterParty deletes a counterparty from Anchor.
+func (c *Client) DeleteCounterParty(ctx context.Context, counterpartyID string) error {
+	url := fmt.Sprintf("%s/api/v1/counterparties/%s", c.baseURL, counterpartyID)
+	return c.do(ctx, http.MethodDelete, url, nil, nil)
+}
+
+// ListBanks fetches the list of supported banks from Anchor.
+func (c *Client) ListBanks(ctx context.Context) (*domain.ListBanksResponse, error) {
+	var resp domain.ListBanksResponse
+	url := fmt.Sprintf("%s/api/v1/banks", c.baseURL)
+	err := c.do(ctx, http.MethodGet, url, nil, &resp)
+	if err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
 
 // do is a helper function to make HTTP requests to the Anchor API.
 func (c *Client) do(ctx context.Context, method, url string, body, target interface{}) error {

@@ -19,7 +19,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -28,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
+	"github.com/transfa/account-service/internal/api"
 	"github.com/transfa/account-service/internal/app"
 	"github.com/transfa/account-service/internal/config"
 	"github.com/transfa/account-service/internal/store"
@@ -70,36 +73,60 @@ func main() {
 	log.Println("Database connection established")
 
 	// Set up dependencies.
-	accountRepo := store.NewPostgresAccountRepository(dbpool)
+	repo := store.NewPostgresAccountRepository(dbpool)
 	anchorClient := anchorclient.NewClient(cfg.AnchorAPIBaseURL, cfg.AnchorAPIKey)
-	eventHandler := app.NewAccountEventHandler(accountRepo, anchorClient)
-
-	// Set up and start RabbitMQ consumer.
+	
+	// Setup services
+	accountService := app.NewAccountService(repo, anchorClient)
+	eventHandler := app.NewAccountEventHandler(repo, anchorClient)
+	
+	// Setup RabbitMQ consumer.
 	consumer, err := rabbitmq.NewConsumer(cfg.RabbitMQURL)
 	if err != nil {
 		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
 	}
 	defer consumer.Close()
 
-	// Define consumer parameterss.
-	exchangeName := "customer_events"
-	queueName := "account_service_customer_verified"
-	routingKey := "customer.verified"
-
-	// Start consuming messages in a separate goroutine.
+	// Start consuming messages in a goroutine.
 	go func() {
-		log.Printf("Starting consumer for queue '%s'...", queueName)
-		err := consumer.Consume(exchangeName, queueName, routingKey, eventHandler.HandleCustomerVerifiedEvent)
+		log.Printf("Starting consumer for event 'customer.verified'...")
+		err := consumer.Consume("customer_events", "account_service_customer_verified", "customer.verified", eventHandler.HandleCustomerVerifiedEvent)
 		if err != nil {
-			log.Fatalf("Consumer error: %v", err)
+			log.Printf("Consumer error: %v", err) // Log as non-fatal
 		}
 	}()
 
-	log.Println("Account service is running. Waiting for events.")
+	// Setup and start HTTP server.
+	router := api.NewRouter(cfg, accountService)
+	server := &http.Server{
+		Addr:    fmt.Sprintf(":%s", cfg.ServerPort),
+		Handler: router,
+	}
+
+	go func() {
+		log.Printf("Starting HTTP server on port %s", cfg.ServerPort)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Could not start server: %s\n", err)
+		}
+	}()
+
+	log.Println("Account service is running with API and event consumer.")
 
 	// Wait for termination signal for graceful shutdown.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
+	
 	log.Println("Shutting down account-service...")
+
+	// Create a context with a timeout for shutdown.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Shutdown the HTTP server.
+	if err := server.Shutdown(ctx); err != nil {
+		log.Fatalf("Server shutdown failed: %v", err)
+	}
+
+	log.Println("Server gracefully stopped")
 }

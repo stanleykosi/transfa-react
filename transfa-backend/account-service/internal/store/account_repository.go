@@ -15,6 +15,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 
 	"github.com/jackc/pgx/v5"
@@ -131,4 +132,91 @@ func (r *PostgresAccountRepository) UpdateTierStatus(ctx context.Context, userID
 		return err
 	}
 	return nil
+}
+
+// CreateBeneficiary inserts a new beneficiary record into the database.
+func (r *PostgresAccountRepository) CreateBeneficiary(ctx context.Context, beneficiary *domain.Beneficiary) (*domain.Beneficiary, error) {
+	query := `
+        INSERT INTO beneficiaries (user_id, anchor_counterparty_id, account_name, account_number_masked, bank_name)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, created_at, updated_at
+    `
+	err := r.db.QueryRow(ctx, query,
+		beneficiary.UserID,
+		beneficiary.AnchorCounterpartyID,
+		beneficiary.AccountName,
+		beneficiary.AccountNumberMasked,
+		beneficiary.BankName,
+	).Scan(&beneficiary.ID, &beneficiary.CreatedAt, &beneficiary.UpdatedAt)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create beneficiary: %w", err)
+	}
+	return beneficiary, nil
+}
+
+// GetBeneficiariesByUserID retrieves all beneficiaries for a given user.
+func (r *PostgresAccountRepository) GetBeneficiariesByUserID(ctx context.Context, userID string) ([]domain.Beneficiary, error) {
+	var beneficiaries []domain.Beneficiary
+	query := `
+        SELECT id, user_id, anchor_counterparty_id, account_name, account_number_masked, bank_name, created_at, updated_at
+        FROM beneficiaries
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+    `
+	rows, err := r.db.Query(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query beneficiaries: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var b domain.Beneficiary
+		err := rows.Scan(&b.ID, &b.UserID, &b.AnchorCounterpartyID, &b.AccountName, &b.AccountNumberMasked, &b.BankName, &b.CreatedAt, &b.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan beneficiary row: %w", err)
+		}
+		beneficiaries = append(beneficiaries, b)
+	}
+
+	return beneficiaries, nil
+}
+
+// DeleteBeneficiary removes a beneficiary record from the database.
+func (r *PostgresAccountRepository) DeleteBeneficiary(ctx context.Context, beneficiaryID string, userID string) error {
+	query := `DELETE FROM beneficiaries WHERE id = $1 AND user_id = $2`
+	cmdTag, err := r.db.Exec(ctx, query, beneficiaryID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to delete beneficiary: %w", err)
+	}
+	if cmdTag.RowsAffected() == 0 {
+		return fmt.Errorf("beneficiary not found or not owned by user")
+	}
+	return nil
+}
+
+// CountBeneficiariesByUserID counts the number of beneficiaries for a user.
+func (r *PostgresAccountRepository) CountBeneficiariesByUserID(ctx context.Context, userID string) (int, error) {
+	var count int
+	query := `SELECT count(*) FROM beneficiaries WHERE user_id = $1`
+	err := r.db.QueryRow(ctx, query, userID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count beneficiaries: %w", err)
+	}
+	return count, nil
+}
+
+// GetUserSubscriptionStatus retrieves the subscription status for a user.
+func (r *PostgresAccountRepository) GetUserSubscriptionStatus(ctx context.Context, userID string) (domain.SubscriptionStatus, error) {
+	var status string
+	query := `SELECT status FROM subscriptions WHERE user_id = $1`
+	err := r.db.QueryRow(ctx, query, userID).Scan(&status)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			// If no record exists, the user is on the free tier (inactive subscription)
+			return domain.SubscriptionStatusInactive, nil
+		}
+		return "", fmt.Errorf("failed to get user subscription status: %w", err)
+	}
+	return domain.SubscriptionStatus(status), nil
 }
