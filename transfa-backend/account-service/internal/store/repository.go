@@ -21,7 +21,7 @@ type AccountRepository interface {
 	CreateAccount(ctx context.Context, account *domain.Account) (string, error)
 	FindUserIDByAnchorCustomerID(ctx context.Context, anchorID string) (string, error)
 	FindAccountByUserID(ctx context.Context, userID string) (*domain.Account, error)
-	UpdateTierStatus(ctx context.Context, userID string, tier string, status string, reason *string) error
+	UpdateTierStatus(ctx context.Context, userID, stage, status string, reason *string) error
 }
 
 // BeneficiaryRepository defines the contract for database operations related to beneficiaries.

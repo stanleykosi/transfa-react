@@ -13,7 +13,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/transfa/account-service/internal/domain"
 	"github.com/transfa/account-service/internal/store"

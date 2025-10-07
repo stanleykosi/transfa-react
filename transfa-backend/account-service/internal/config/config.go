@@ -25,7 +25,7 @@ type Config struct {
 }
 
 // LoadConfig reads configuration from file or environment variables.
-func LoadConfig() (config Config, err error) {
+func LoadConfig() (*Config, error) {
 	viper.AddConfigPath(".")
 	viper.SetConfigName(".env")
 	viper.SetConfigType("env")
@@ -43,15 +43,16 @@ func LoadConfig() (config Config, err error) {
 	_ = viper.BindEnv("ANCHOR_API_BASE_URL")
 	_ = viper.BindEnv("SERVER_PORT")
 
-	if err = viper.ReadInConfig(); err != nil {
+	if err := viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			log.Fatalf("Error reading config file: %s", err)
+			log.Printf("Warning: Error reading config file: %s", err)
 		}
 	}
 
-	if err = viper.Unmarshal(&config); err != nil {
-		log.Fatalf("Unable to decode config into struct: %v", err)
+	var config Config
+	if err := viper.Unmarshal(&config); err != nil {
+		return nil, err
 	}
 
-	return
+	return &config, nil
 }

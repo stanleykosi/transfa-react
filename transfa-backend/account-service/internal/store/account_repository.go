@@ -24,13 +24,6 @@ import (
 	"github.com/transfa/account-service/internal/domain"
 )
 
-// AccountRepository defines the interface for account data storage.
-type AccountRepository interface {
-	CreateAccount(ctx context.Context, account *domain.Account) (string, error)
-	FindUserIDByAnchorCustomerID(ctx context.Context, anchorCustomerID string) (string, error)
-	FindAccountByUserID(ctx context.Context, userID string) (*domain.Account, error)
-	UpdateTierStatus(ctx context.Context, userID, stage, status string, reason *string) error
-}
 
 // PostgresAccountRepository is the PostgreSQL implementation of the AccountRepository.
 type PostgresAccountRepository struct {
