@@ -25,9 +25,19 @@ type BeneficiaryHandler struct {
 	service *app.AccountService
 }
 
+// BankHandler holds the dependencies for bank-related handlers.
+type BankHandler struct {
+	service *app.AccountService
+}
+
 // NewBeneficiaryHandler creates a new BeneficiaryHandler.
 func NewBeneficiaryHandler(service *app.AccountService) *BeneficiaryHandler {
 	return &BeneficiaryHandler{service: service}
+}
+
+// NewBankHandler creates a new BankHandler.
+func NewBankHandler(service *app.AccountService) *BankHandler {
+	return &BankHandler{service: service}
 }
 
 // CreateBeneficiaryRequest defines the expected JSON body for creating a beneficiary.
@@ -103,6 +113,17 @@ func (h *BeneficiaryHandler) DeleteBeneficiary(w http.ResponseWriter, r *http.Re
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListBanks handles listing all supported banks.
+func (h *BankHandler) ListBanks(w http.ResponseWriter, r *http.Request) {
+	banks, err := h.service.ListBanks(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, banks)
 }
 
 // writeJSON is a helper to write JSON responses.

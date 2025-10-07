@@ -20,6 +20,7 @@ import (
 type AccountRepository interface {
 	CreateAccount(ctx context.Context, account *domain.Account) (string, error)
 	FindUserIDByAnchorCustomerID(ctx context.Context, anchorID string) (string, error)
+	FindUserIDByClerkUserID(ctx context.Context, clerkUserID string) (string, error)
 	FindAccountByUserID(ctx context.Context, userID string) (*domain.Account, error)
 	UpdateTierStatus(ctx context.Context, userID, stage, status string, reason *string) error
 }

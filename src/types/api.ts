@@ -39,3 +39,38 @@ export interface OnboardingResponse {
   status: string;
   anchor_customer_id?: string;
 }
+
+// Represents a single beneficiary (external bank account).
+// This shape matches the response from the GET /beneficiaries endpoint.
+export interface Beneficiary {
+  id: string;
+  user_id: string;
+  anchor_counterparty_id: string;
+  account_name: string;
+  account_number_masked: string;
+  bank_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Payload for the POST /beneficiaries endpoint to add a new beneficiary.
+// Note: The backend handles verification internally, so we only need these fields.
+export interface AddBeneficiaryPayload {
+  account_number: string;
+  bank_code: string;
+}
+
+// Represents a single bank from the banks list.
+export interface Bank {
+  id: string;
+  type: string;
+  attributes: {
+    name: string;
+    nipCode: string;
+  };
+}
+
+// Response from the GET /banks endpoint.
+export interface BanksResponse {
+  data: Bank[];
+}

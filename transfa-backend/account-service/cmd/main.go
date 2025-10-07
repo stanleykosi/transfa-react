@@ -73,12 +73,14 @@ func main() {
 	log.Println("Database connection established")
 
 	// Set up dependencies.
-	repo := store.NewPostgresAccountRepository(dbpool)
+	accountRepo := store.NewPostgresAccountRepository(dbpool)
+	beneficiaryRepo := store.NewPostgresBeneficiaryRepository(dbpool)
+	bankRepo := store.NewPostgresBankRepository(dbpool)
 	anchorClient := anchorclient.NewClient(cfg.AnchorAPIBaseURL, cfg.AnchorAPIKey)
 	
 	// Setup services
-	accountService := app.NewAccountService(repo, anchorClient)
-	eventHandler := app.NewAccountEventHandler(repo, anchorClient)
+	accountService := app.NewAccountService(accountRepo, beneficiaryRepo, bankRepo, anchorClient)
+	eventHandler := app.NewAccountEventHandler(accountRepo, anchorClient)
 	
 	// Setup RabbitMQ consumer.
 	consumer, err := rabbitmq.NewConsumer(cfg.RabbitMQURL)

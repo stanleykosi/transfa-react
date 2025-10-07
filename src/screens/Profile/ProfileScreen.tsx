@@ -33,6 +33,11 @@ const ProfileScreen = () => {
 
   const menuItems = [
     {
+      title: 'Linked Accounts',
+      icon: 'link-outline' as const,
+      action: () => navigation.navigate('Beneficiaries'),
+    },
+    {
       title: 'Security',
       icon: 'shield-checkmark-outline' as const,
       action: () => navigation.navigate('SecuritySettings'),

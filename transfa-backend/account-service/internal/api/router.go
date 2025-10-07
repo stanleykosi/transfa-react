@@ -29,6 +29,7 @@ func NewRouter(cfg *config.Config, service *app.AccountService) http.Handler {
 	})
 
 	beneficiaryHandler := NewBeneficiaryHandler(service)
+	bankHandler := NewBankHandler(service)
 
 	// Group routes that require authentication
 	r.Group(func(r chi.Router) {
@@ -38,6 +39,10 @@ func NewRouter(cfg *config.Config, service *app.AccountService) http.Handler {
 			r.Post("/", beneficiaryHandler.CreateBeneficiary)
 			r.Get("/", beneficiaryHandler.ListBeneficiaries)
 			r.Delete("/{id}", beneficiaryHandler.DeleteBeneficiary)
+		})
+
+		r.Route("/banks", func(r chi.Router) {
+			r.Get("/", bankHandler.ListBanks)
 		})
 	})
 

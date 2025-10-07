@@ -32,7 +32,8 @@ import { TouchableOpacity } from 'react-native';
 
 const SecuritySettingsScreen = () => {
   const navigation = useNavigation();
-  const { isPinSet, biometricsEnabled, setPin, clearPin, setBiometricsEnabled } = useSecurityStore();
+  const { isPinSet, biometricsEnabled, setPin, clearPin, setBiometricsEnabled } =
+    useSecurityStore();
   const [pin, setPinValue] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
   const [isLoading, setIsLoading] = useState(false);
