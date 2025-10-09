@@ -12,6 +12,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -45,11 +46,17 @@ func (r *PostgresBankRepository) CacheBanks(ctx context.Context, banks []domain.
 		return nil
 	}
 	
-	// Serialize banks to JSON
-	banksJSON, err := json.Marshal(banks)
-	if err != nil {
+	// Serialize banks to JSON with proper encoding
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	encoder.SetEscapeHTML(false) // Don't escape HTML characters like &
+	encoder.SetIndent("", "")    // No indentation for compact JSON
+	
+	if err := encoder.Encode(banks); err != nil {
 		return fmt.Errorf("failed to marshal banks: %w", err)
 	}
+	
+	banksJSON := buf.Bytes()
 	
 	// Debug: Log the JSON being stored
 	log.Printf("DEBUG: JSON to store: %s", string(banksJSON))
@@ -61,7 +68,7 @@ func (r *PostgresBankRepository) CacheBanks(ctx context.Context, banks []domain.
 
 	// Delete existing cached banks
 	deleteQuery := `DELETE FROM cached_banks`
-	_, err = r.db.Exec(ctx, deleteQuery)
+	_, err := r.db.Exec(ctx, deleteQuery)
 	if err != nil {
 		log.Printf("Warning: failed to delete existing cached banks: %v", err)
 		// Continue with insert - this is not critical
