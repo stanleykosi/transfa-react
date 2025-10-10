@@ -14,6 +14,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/transfa/account-service/internal/app"
@@ -68,6 +69,12 @@ func (h *BeneficiaryHandler) CreateBeneficiary(w http.ResponseWriter, r *http.Re
 
 	beneficiary, err := h.service.CreateBeneficiary(r.Context(), input)
 	if err != nil {
+		// Check if it's a linked account limit error (should be 400, not 500)
+		if strings.Contains(err.Error(), "You can only add 1 linked account on free tier") {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		// All other errors remain as 500
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

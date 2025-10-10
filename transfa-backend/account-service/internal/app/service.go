@@ -72,7 +72,7 @@ func (s *AccountService) CreateBeneficiary(ctx context.Context, input CreateBene
 			return nil, fmt.Errorf("could not count existing beneficiaries: %w", err)
 		}
 		if count >= maxBeneficiariesFreeTier {
-			return nil, fmt.Errorf("free tier users can only add %d beneficiary. Please subscribe for unlimited beneficiaries", maxBeneficiariesFreeTier)
+			return nil, fmt.Errorf("You can only add 1 linked account on free tier. Please upgrade your subscription to add more linked accounts")
 		}
 	}
 
