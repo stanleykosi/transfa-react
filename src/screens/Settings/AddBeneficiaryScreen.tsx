@@ -50,11 +50,6 @@ const AddBeneficiaryScreen = () => {
       navigation.goBack();
     },
     onError: (error: any) => {
-      console.log('Full error object:', error);
-      console.log('Error response:', error.response);
-      console.log('Error response data:', error.response?.data);
-      console.log('Error message:', error.message);
-
       // Extract the actual error message from the response
       let errorMessage = 'Failed to add beneficiary.';
 
