@@ -12,7 +12,6 @@
 package store
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -68,7 +67,7 @@ func (r *PostgresBankRepository) CacheBanks(ctx context.Context, banks []domain.
 
 	// Delete existing cached banks
 	deleteQuery := `DELETE FROM cached_banks`
-	_, err := r.db.Exec(ctx, deleteQuery)
+	_, err = r.db.Exec(ctx, deleteQuery)
 	if err != nil {
 		log.Printf("Warning: failed to delete existing cached banks: %v", err)
 		// Continue with insert - this is not critical
