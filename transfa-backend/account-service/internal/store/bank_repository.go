@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -39,6 +40,15 @@ func (r *PostgresBankRepository) CacheBanks(ctx context.Context, banks []domain.
 	log.Printf("DEBUG: Attempting to cache %d banks", len(banks))
 	if len(banks) > 0 {
 		log.Printf("DEBUG: First bank: %+v", banks[0])
+		
+		// Test with a small sample first to validate JSON structure
+		testBanks := banks[:1] // Just the first bank
+		testJSON, testErr := json.Marshal(testBanks)
+		if testErr != nil {
+			log.Printf("ERROR: Failed to marshal test bank sample: %v", testErr)
+			return fmt.Errorf("failed to marshal test bank sample: %w", testErr)
+		}
+		log.Printf("DEBUG: Test JSON sample (first bank): %s", string(testJSON))
 	} else {
 		log.Printf("WARNING: No banks to cache - empty array received from Anchor API")
 		// Don't cache empty data, but don't return error to avoid breaking the main flow
@@ -64,6 +74,23 @@ func (r *PostgresBankRepository) CacheBanks(ctx context.Context, banks []domain.
 		log.Printf("ERROR: Generated JSON is invalid: %s", jsonStr)
 		return fmt.Errorf("generated JSON is invalid")
 	}
+	
+	// Additional validation: try to unmarshal and remarshal to ensure consistency
+	var testBanks []domain.Bank
+	if err := json.Unmarshal(banksJSON, &testBanks); err != nil {
+		log.Printf("ERROR: Failed to unmarshal generated JSON: %v", err)
+		return fmt.Errorf("generated JSON cannot be unmarshaled: %w", err)
+	}
+	
+	// Remarshal to ensure consistency
+	validatedJSON, err := json.Marshal(testBanks)
+	if err != nil {
+		log.Printf("ERROR: Failed to remarshal JSON: %v", err)
+		return fmt.Errorf("failed to remarshal JSON: %w", err)
+	}
+	
+	// Use the validated JSON
+	banksJSON = validatedJSON
 
 	// Delete existing cached banks
 	deleteQuery := `DELETE FROM cached_banks`
@@ -76,7 +103,7 @@ func (r *PostgresBankRepository) CacheBanks(ctx context.Context, banks []domain.
 	// Insert new cached banks
 	insertQuery := `
 		INSERT INTO cached_banks (banks_data, cached_at, expires_at)
-		VALUES ($1, $2, $3)
+		VALUES ($1::jsonb, $2, $3)
 	`
 	
 	now := time.Now()
@@ -85,10 +112,41 @@ func (r *PostgresBankRepository) CacheBanks(ctx context.Context, banks []domain.
 	// Debug: Log the parameters being inserted
 	log.Printf("DEBUG: Inserting banks with JSON length: %d, cached_at: %v, expires_at: %v", len(banksJSON), now, expiresAt)
 	
-	_, err = r.db.Exec(ctx, insertQuery, banksJSON, now, expiresAt)
+	// Convert JSON bytes to string and clean it
+	jsonString := string(banksJSON)
+	
+	// Trim any whitespace/newlines that might cause issues
+	jsonString = strings.TrimSpace(jsonString)
+	
+	// Debug: Log first and last few characters of JSON to check for issues
+	if len(jsonString) > 100 {
+		log.Printf("DEBUG: JSON starts with: %s", jsonString[:50])
+		log.Printf("DEBUG: JSON ends with: %s", jsonString[len(jsonString)-50:])
+	}
+	
+	// Final validation: ensure the trimmed JSON is still valid
+	if !json.Valid([]byte(jsonString)) {
+		log.Printf("ERROR: Trimmed JSON is invalid: %s", jsonString)
+		return fmt.Errorf("trimmed JSON is invalid")
+	}
+	
+	// Try inserting with the cleaned JSON string
+	_, err = r.db.Exec(ctx, insertQuery, jsonString, now, expiresAt)
 	if err != nil {
-		log.Printf("ERROR: Failed to insert banks into database. JSON length: %d, Error: %v", len(banksJSON), err)
-		return fmt.Errorf("failed to cache banks: %w", err)
+		log.Printf("ERROR: Failed to insert banks with string method. JSON length: %d, Error: %v", len(banksJSON), err)
+		
+		// Fallback: try with byte slice directly
+		log.Printf("DEBUG: Attempting fallback insertion with byte slice")
+		fallbackQuery := `
+			INSERT INTO cached_banks (banks_data, cached_at, expires_at)
+			VALUES ($1, $2, $3)
+		`
+		_, err = r.db.Exec(ctx, fallbackQuery, banksJSON, now, expiresAt)
+		if err != nil {
+			log.Printf("ERROR: Failed to insert banks with byte slice method. JSON length: %d, Error: %v", len(banksJSON), err)
+			return fmt.Errorf("failed to cache banks with both methods: %w", err)
+		}
+		log.Printf("DEBUG: Successfully inserted banks using byte slice fallback method")
 	}
 
 	log.Printf("Successfully cached %d banks until %v", len(banks), expiresAt)
