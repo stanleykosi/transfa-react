@@ -50,14 +50,31 @@ const AddBeneficiaryScreen = () => {
       navigation.goBack();
     },
     onError: (error: any) => {
-      // Handle specific error for free-tier limit
-      if (error.response?.status === 403) {
-        Alert.alert(
-          'Limit Reached',
-          'You can only add one external account on the free plan. Please upgrade to add more.'
-        );
+      console.log('Full error object:', error);
+      console.log('Error response:', error.response);
+      console.log('Error response data:', error.response?.data);
+      console.log('Error message:', error.message);
+
+      // Extract the actual error message from the response
+      let errorMessage = 'Failed to add beneficiary.';
+
+      if (error.response?.data) {
+        // If response.data is a string, use it directly
+        if (typeof error.response.data === 'string') {
+          errorMessage = error.response.data;
+        } else if (error.response.data.message) {
+          // If response.data is an object with a message property
+          errorMessage = error.response.data.message;
+        }
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+
+      // Handle specific error for free-tier limit (now returns 400 status)
+      if (error.response?.status === 400 && errorMessage.includes('linked account on free tier')) {
+        Alert.alert('Limit Reached', errorMessage);
       } else {
-        Alert.alert('Error', error.message || 'Failed to add beneficiary.');
+        Alert.alert('Error', errorMessage);
       }
     },
   });
