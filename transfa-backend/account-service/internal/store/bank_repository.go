@@ -206,3 +206,36 @@ func (r *PostgresBankRepository) ClearExpiredBanks(ctx context.Context) error {
 	
 	return nil
 }
+
+// GetCacheExpiryTime returns the expiry time of the current cache
+func (r *PostgresBankRepository) GetCacheExpiryTime(ctx context.Context) (time.Time, error) {
+	query := `
+		SELECT expires_at
+		FROM cached_banks
+		WHERE expires_at > NOW()
+		ORDER BY cached_at DESC
+		LIMIT 1
+	`
+	
+	var expiresAt time.Time
+	err := r.db.QueryRow(ctx, query).Scan(&expiresAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return time.Time{}, fmt.Errorf("no valid cached banks found")
+		}
+		return time.Time{}, fmt.Errorf("failed to get cache expiry time: %w", err)
+	}
+	
+	return expiresAt, nil
+}
+
+// IsCacheExpiringSoon checks if the cache will expire within the specified duration
+func (r *PostgresBankRepository) IsCacheExpiringSoon(ctx context.Context, duration time.Duration) (bool, error) {
+	expiresAt, err := r.GetCacheExpiryTime(ctx)
+	if err != nil {
+		return false, err
+	}
+	
+	// Check if cache expires within the specified duration
+	return time.Now().Add(duration).After(expiresAt), nil
+}

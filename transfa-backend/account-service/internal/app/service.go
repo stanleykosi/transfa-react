@@ -13,6 +13,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"log"
+	"sync"
+	"time"
 
 	"github.com/transfa/account-service/internal/domain"
 	"github.com/transfa/account-service/internal/store"
@@ -29,6 +32,7 @@ type AccountService struct {
 	beneficiaryRepo store.BeneficiaryRepository
 	bankRepo        store.BankRepository
 	anchorClient    *anchorclient.Client
+	cacheWarmingMutex sync.Mutex // Prevents multiple cache warming operations
 }
 
 // NewAccountService creates a new instance of AccountService.
@@ -147,6 +151,8 @@ func (s *AccountService) ListBanks(ctx context.Context) (*domain.ListBanksRespon
 	// Try to get from cache first
 	cachedBanks, err := s.bankRepo.GetCachedBanks(ctx)
 	if err == nil && len(cachedBanks) > 0 {
+		// Check if cache is expiring soon and warm it in background
+		go s.checkAndWarmCache()
 		return &domain.ListBanksResponse{Data: cachedBanks}, nil
 	}
 
@@ -166,6 +172,57 @@ func (s *AccountService) ListBanks(ctx context.Context) (*domain.ListBanksRespon
 	}()
 
 	return banksResp, nil
+}
+
+// checkAndWarmCache checks if cache is expiring soon and warms it if needed
+func (s *AccountService) checkAndWarmCache() {
+	ctx := context.Background()
+	
+	// Check if cache expires within 1 hour
+	expiringSoon, err := s.bankRepo.IsCacheExpiringSoon(ctx, time.Hour)
+	if err != nil {
+		// If we can't check, don't warm (cache might not exist)
+		return
+	}
+	
+	if expiringSoon {
+		log.Printf("Cache is expiring soon, warming cache in background...")
+		s.warmCacheInBackground()
+	}
+}
+
+// warmCacheInBackground refreshes the cache before it expires
+func (s *AccountService) warmCacheInBackground() {
+	// Prevent multiple cache warming operations
+	if !s.cacheWarmingMutex.TryLock() {
+		log.Printf("Cache warming already in progress, skipping...")
+		return
+	}
+	defer s.cacheWarmingMutex.Unlock()
+	
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	
+	// Fetch fresh data from Anchor API
+	banksResp, err := s.anchorClient.ListBanks(ctx)
+	if err != nil {
+		log.Printf("Warning: failed to warm cache - could not fetch from Anchor: %v", err)
+		return
+	}
+	
+	// Validate we got data
+	if len(banksResp.Data) == 0 {
+		log.Printf("Warning: failed to warm cache - received empty bank list from Anchor")
+		return
+	}
+	
+	// Cache the fresh data
+	if err := s.bankRepo.CacheBanks(ctx, banksResp.Data); err != nil {
+		log.Printf("Warning: failed to warm cache - could not store in database: %v", err)
+		return
+	}
+	
+	log.Printf("Successfully warmed cache with %d banks", len(banksResp.Data))
 }
 
 // getBankNameFromCode retrieves the bank name from the cached bank list using the bank code.

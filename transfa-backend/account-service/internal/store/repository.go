@@ -12,6 +12,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/transfa/account-service/internal/domain"
 )
@@ -38,4 +39,7 @@ type BeneficiaryRepository interface {
 type BankRepository interface {
     CacheBanks(ctx context.Context, banks []domain.Bank) error
     GetCachedBanks(ctx context.Context) ([]domain.Bank, error)
+    ClearExpiredBanks(ctx context.Context) error
+    GetCacheExpiryTime(ctx context.Context) (time.Time, error)
+    IsCacheExpiringSoon(ctx context.Context, duration time.Duration) (bool, error)
 }

@@ -56,9 +56,10 @@ func main() {
 		log.Fatalf("Unable to parse database URL: %v\n", err)
 	}
 	
-	// Configure connection pool to prevent prepared statement conflicts
-	dbConfig.MaxConns = 10
-	dbConfig.MinConns = 2
+	// Configure connection pool for high-traffic scenarios
+	// Increased from 10 to 100 to handle 100k+ concurrent users
+	dbConfig.MaxConns = 100
+	dbConfig.MinConns = 20
 	dbConfig.MaxConnLifetime = 30 * time.Minute
 	dbConfig.MaxConnIdleTime = 5 * time.Minute
 	
@@ -95,6 +96,25 @@ func main() {
 		err := consumer.Consume("customer_events", "account_service_customer_verified", "customer.verified", eventHandler.HandleCustomerVerifiedEvent)
 		if err != nil {
 			log.Printf("Consumer error: %v", err) // Log as non-fatal
+		}
+	}()
+
+	// Start periodic cache cleanup job
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour) // Run every hour
+		defer ticker.Stop()
+		
+		log.Printf("Starting periodic cache cleanup job...")
+		for {
+			select {
+			case <-ticker.C:
+				ctx := context.Background()
+				if err := bankRepo.ClearExpiredBanks(ctx); err != nil {
+					log.Printf("Cache cleanup error: %v", err)
+				} else {
+					log.Printf("Cache cleanup completed successfully")
+				}
+			}
 		}
 	}()
 

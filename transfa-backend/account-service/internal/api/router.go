@@ -33,6 +33,8 @@ func NewRouter(cfg *config.Config, service *app.AccountService) http.Handler {
 
 	// Group routes that require authentication
 	r.Group(func(r chi.Router) {
+		// Apply rate limiting first (1000 requests per minute per IP)
+		r.Use(middleware.RateLimitMiddleware(1000))
 		r.Use(middleware.AuthMiddleware(cfg))
 
 		r.Route("/beneficiaries", func(r chi.Router) {
