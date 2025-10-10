@@ -47,22 +47,22 @@ func (r *PostgresBankRepository) CacheBanks(ctx context.Context, banks []domain.
 	}
 	
 	// Serialize banks to JSON with proper encoding
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	encoder.SetEscapeHTML(false) // Don't escape HTML characters like &
-	encoder.SetIndent("", "")    // No indentation for compact JSON
-	
-	if err := encoder.Encode(banks); err != nil {
+	banksJSON, err := json.Marshal(banks)
+	if err != nil {
 		return fmt.Errorf("failed to marshal banks: %w", err)
 	}
 	
-	banksJSON := buf.Bytes()
-	
-	// Debug: Log the JSON being stored
-	log.Printf("DEBUG: JSON to store: %s", string(banksJSON))
+	// Debug: Log the JSON being stored (truncated for readability)
+	jsonStr := string(banksJSON)
+	if len(jsonStr) > 500 {
+		log.Printf("DEBUG: JSON to store (truncated): %s...", jsonStr[:500])
+	} else {
+		log.Printf("DEBUG: JSON to store: %s", jsonStr)
+	}
 	
 	// Validate JSON before storing
 	if !json.Valid(banksJSON) {
+		log.Printf("ERROR: Generated JSON is invalid: %s", jsonStr)
 		return fmt.Errorf("generated JSON is invalid")
 	}
 
@@ -83,8 +83,12 @@ func (r *PostgresBankRepository) CacheBanks(ctx context.Context, banks []domain.
 	now := time.Now()
 	expiresAt := now.Add(24 * time.Hour) // Cache for 24 hours
 	
+	// Debug: Log the parameters being inserted
+	log.Printf("DEBUG: Inserting banks with JSON length: %d, cached_at: %v, expires_at: %v", len(banksJSON), now, expiresAt)
+	
 	_, err = r.db.Exec(ctx, insertQuery, banksJSON, now, expiresAt)
 	if err != nil {
+		log.Printf("ERROR: Failed to insert banks into database. JSON length: %d, Error: %v", len(banksJSON), err)
 		return fmt.Errorf("failed to cache banks: %w", err)
 	}
 
