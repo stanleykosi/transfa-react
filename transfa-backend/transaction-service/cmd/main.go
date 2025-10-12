@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -37,6 +38,15 @@ func main() {
 	cfg, err := config.LoadConfig(".")
 	if err != nil {
 		log.Fatalf("could not load config: %v", err)
+	}
+
+	// If a platform-provided PORT is set (e.g., Railway/Render), prefer it
+	if port := os.Getenv("PORT"); port != "" {
+		cfg.ServerPort = port
+	}
+	// Ensure we have a port fallback if neither env is set
+	if cfg.ServerPort == "" {
+		cfg.ServerPort = "8083"
 	}
 
 	// Establish a connection pool to the PostgreSQL database.

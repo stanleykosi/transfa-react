@@ -11,6 +11,9 @@
 package config
 
 import (
+	"log"
+	"strings"
+
 	"github.com/spf13/viper"
 )
 
@@ -34,15 +37,26 @@ func LoadConfig(path string) (config Config, err error) {
 	viper.SetConfigType("env")
 
 	// Enable automatic binding of environment variables.
-	// This means viper will check for an env var if a key is not found in the config file.
 	viper.AutomaticEnv()
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+
+	// Set default values
+	viper.SetDefault("SERVER_PORT", "8083")
+
+	// Bind environment variables explicitly to ensure they appear in Unmarshal
+	_ = viper.BindEnv("SERVER_PORT")
+	_ = viper.BindEnv("DATABASE_URL")
+	_ = viper.BindEnv("RABBITMQ_URL")
+	_ = viper.BindEnv("ANCHOR_API_BASE_URL")
+	_ = viper.BindEnv("ANCHOR_API_KEY")
+	_ = viper.BindEnv("CLERK_JWKS_URL")
 
 	// Attempt to read the config file. It's okay if it doesn't exist.
 	if err = viper.ReadInConfig(); err != nil {
 		// If the config file is not found, we can ignore the error.
 		// For other errors, we should return them.
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			return
+			log.Printf("Warning: Error reading config file: %s", err)
 		}
 	}
 
