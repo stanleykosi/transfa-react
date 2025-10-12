@@ -45,10 +45,8 @@ func main() {
 		log.Fatalf("cannot load config: %v", err)
 	}
 
-	// Allow platform-provided PORT to override the config.
-	if port := os.Getenv("PORT"); port != "" {
-		cfg.ServerPort = port
-	}
+	// Use configured SERVER_PORT, ignore Railway's PORT env var to avoid conflicts
+	// Railway will still route traffic correctly based on service configuration
 
 	// Set up RabbitMQ producer.
 	producer, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL)
