@@ -33,6 +33,9 @@ func LoadConfig() (config Config, err error) {
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
+	// Set default values
+	viper.SetDefault("SERVER_PORT", "8081")
+
 	// Bind env vars explicitly
 	_ = viper.BindEnv("SERVER_PORT")
 	_ = viper.BindEnv("RABBITMQ_URL")

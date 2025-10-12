@@ -45,8 +45,13 @@ func main() {
 		log.Fatalf("cannot load config: %v", err)
 	}
 
-	// Use configured SERVER_PORT, ignore Railway's PORT env var to avoid conflicts
-	// Railway will still route traffic correctly based on service configuration
+	// Use Railway's PORT env var if set, otherwise use configured SERVER_PORT
+	// This ensures Railway can properly health check the service
+	if port := os.Getenv("PORT"); port != "" {
+		cfg.ServerPort = port
+	} else if cfg.ServerPort == "" {
+		cfg.ServerPort = "8081"
+	}
 
 	// Set up RabbitMQ producer.
 	producer, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL)
