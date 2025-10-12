@@ -1,0 +1,13 @@
+{
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "transfa-backend/transaction-service/Dockerfile"
+  },
+  "deploy": {
+    "startCommand": "./transaction-service",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10,
+    "healthcheckPath": "/transactions/health",
+    "healthcheckTimeout": 300
+  }
+}
