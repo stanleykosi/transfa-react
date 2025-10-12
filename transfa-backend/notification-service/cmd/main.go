@@ -20,7 +20,6 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -45,13 +44,12 @@ func main() {
 		log.Fatalf("cannot load config: %v", err)
 	}
 
-	// Use Railway's PORT env var if set, otherwise use configured SERVER_PORT
-	// This ensures Railway can properly health check the service
-	if port := os.Getenv("PORT"); port != "" {
-		cfg.ServerPort = port
-	} else if cfg.ServerPort == "" {
+	// Prioritize SERVER_PORT configuration over Railway's PORT env var
+	// This ensures we use the correct port (8081) for notification service
+	if cfg.ServerPort == "" {
 		cfg.ServerPort = "8081"
 	}
+	// Note: Railway will still route traffic correctly based on service configuration
 
 	// Set up RabbitMQ producer.
 	producer, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL)

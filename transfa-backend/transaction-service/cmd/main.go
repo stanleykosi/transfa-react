@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,13 +39,12 @@ func main() {
 		log.Fatalf("could not load config: %v", err)
 	}
 
-	// Use Railway's PORT env var if set, otherwise use configured SERVER_PORT
-	// This ensures Railway can properly health check the service
-	if port := os.Getenv("PORT"); port != "" {
-		cfg.ServerPort = port
-	} else if cfg.ServerPort == "" {
+	// Prioritize SERVER_PORT configuration over Railway's PORT env var
+	// This ensures we use the correct port (8083) for transaction service
+	if cfg.ServerPort == "" {
 		cfg.ServerPort = "8083"
 	}
+	// Note: Railway will still route traffic correctly based on service configuration
 
 	// Establish a connection pool to the PostgreSQL database.
 	dbpool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
