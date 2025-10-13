@@ -336,10 +336,10 @@ func (s *Service) GetAccountBalance(ctx context.Context, userID uuid.UUID) (*dom
 
 	// Convert Anchor balance to our domain model
 	balance := &domain.AccountBalance{
-		AvailableBalance: anchorBalance.AvailableBalance,
-		LedgerBalance:    anchorBalance.LedgerBalance,
-		Hold:             anchorBalance.Hold,
-		Pending:          anchorBalance.Pending,
+		AvailableBalance: anchorBalance.Data.AvailableBalance,
+		LedgerBalance:    anchorBalance.Data.LedgerBalance,
+		Hold:             anchorBalance.Data.Hold,
+		Pending:          anchorBalance.Data.Pending,
 	}
 
 	return balance, nil
