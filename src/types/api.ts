@@ -49,6 +49,7 @@ export interface Beneficiary {
   account_name: string;
   account_number_masked: string;
   bank_name: string;
+  is_default: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -73,4 +74,48 @@ export interface Bank {
 // Response from the GET /banks endpoint.
 export interface BanksResponse {
   data: Bank[];
+}
+
+// Payload for POST /transactions/p2p
+export interface P2PTransferPayload {
+  recipient_username: string;
+  amount: number; // in kobo
+  description?: string;
+}
+
+// Payload for POST /transactions/self-transfer
+export interface SelfTransferPayload {
+  beneficiary_id: string;
+  amount: number; // in kobo
+  description?: string;
+}
+
+// Generic response for a transaction initiation
+export interface TransactionResponse {
+  transaction_id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+  message: string;
+  amount?: number; // in kobo
+  fee?: number; // in kobo
+  timestamp?: string;
+}
+
+// User's receiving preference for incoming transfers
+export interface ReceivingPreference {
+  user_id: string;
+  use_external_account: boolean; // true = use beneficiary, false = use internal wallet
+  default_beneficiary_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Payload for updating receiving preference
+export interface UpdateReceivingPreferencePayload {
+  use_external_account: boolean;
+  default_beneficiary_id?: string;
+}
+
+// Payload for setting default beneficiary
+export interface SetDefaultBeneficiaryPayload {
+  beneficiary_id: string;
 }

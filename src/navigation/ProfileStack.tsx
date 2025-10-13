@@ -22,6 +22,7 @@ import ProfileScreen from '@/screens/Profile/ProfileScreen';
 import SecuritySettingsScreen from '@/screens/Settings/SecuritySettingsScreen';
 import BeneficiariesScreen from '@/screens/Settings/BeneficiariesScreen';
 import AddBeneficiaryScreen from '@/screens/Settings/AddBeneficiaryScreen';
+import ReceivingPreferencesScreen from '@/screens/Settings/ReceivingPreferencesScreen';
 
 // Type definition for the routes and their parameters within this stack.
 export type ProfileStackParamList = {
@@ -29,6 +30,7 @@ export type ProfileStackParamList = {
   SecuritySettings: undefined;
   Beneficiaries: undefined;
   AddBeneficiary: undefined;
+  ReceivingPreferences: undefined;
 };
 
 const Stack = createNativeStackNavigator<ProfileStackParamList>();
@@ -45,6 +47,7 @@ const ProfileStack = () => {
       <Stack.Screen name="SecuritySettings" component={SecuritySettingsScreen} />
       <Stack.Screen name="Beneficiaries" component={BeneficiariesScreen} />
       <Stack.Screen name="AddBeneficiary" component={AddBeneficiaryScreen} />
+      <Stack.Screen name="ReceivingPreferences" component={ReceivingPreferencesScreen} />
     </Stack.Navigator>
   );
 };

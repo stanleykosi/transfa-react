@@ -9,6 +9,7 @@
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import { Text, View, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import PrimaryButton from '@/components/PrimaryButton';
 import { theme } from '@/constants/theme';
@@ -16,6 +17,7 @@ import apiClient from '@/api/apiClient';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 
 const HomeScreen = () => {
+  const navigation = useNavigation();
   const { getToken, signOut } = useAuth();
   const { user } = useUser();
   const [loading, setLoading] = useState(true);
@@ -155,6 +157,20 @@ const HomeScreen = () => {
             <Text style={styles.title}>Your Account</Text>
             <Text style={styles.subtitle}>Virtual NUBAN: {nuban}</Text>
             {bankName && <Text style={styles.bankName}>Bank: {bankName}</Text>}
+
+            {/* Temporary navigation buttons for testing payment flows */}
+            <View style={styles.paymentButtons}>
+              <PrimaryButton
+                title="Pay Someone"
+                onPress={() => navigation.navigate('PayUser' as never)}
+                style={styles.paymentButton}
+              />
+              <PrimaryButton
+                title="Self Transfer"
+                onPress={() => navigation.navigate('SelfTransfer' as never)}
+                style={styles.paymentButton}
+              />
+            </View>
           </>
         ) : polling ? (
           <>
@@ -242,6 +258,17 @@ const styles = StyleSheet.create({
     marginTop: theme.spacing.s8,
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+  paymentButtons: {
+    marginTop: theme.spacing.s24,
+    width: '100%',
+    gap: theme.spacing.s12,
+  },
+  paymentButton: {
+    backgroundColor: theme.colors.primary,
+    paddingVertical: theme.spacing.s12,
+    paddingHorizontal: theme.spacing.s24,
+    borderRadius: theme.radii.md,
   },
 });
 

@@ -38,6 +38,11 @@ const ProfileScreen = () => {
       action: () => navigation.navigate('Beneficiaries'),
     },
     {
+      title: 'Receiving Preferences',
+      icon: 'wallet-outline' as const,
+      action: () => navigation.navigate('ReceivingPreferences'),
+    },
+    {
       title: 'Security',
       icon: 'shield-checkmark-outline' as const,
       action: () => navigation.navigate('SecuritySettings'),

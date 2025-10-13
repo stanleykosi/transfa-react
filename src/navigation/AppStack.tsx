@@ -21,6 +21,8 @@ import React, { useEffect, useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import AppTabs, { AppTabsParamList } from './AppTabs';
 import OnboardingFormScreen from '@/screens/Onboarding/OnboardingFormScreen';
+import PayUserScreen from '@/screens/PaymentFlow/PayUserScreen';
+import SelfTransferScreen from '@/screens/PaymentFlow/SelfTransferScreen';
 import { NavigatorScreenParams } from '@react-navigation/native';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import apiClient from '@/api/apiClient';
@@ -33,6 +35,8 @@ export type AppStackParamList = {
   AppTabs: NavigatorScreenParams<AppTabsParamList>; // Nested navigator
   OnboardingForm: undefined;
   CreateAccount: undefined;
+  PayUser: undefined;
+  SelfTransfer: undefined;
 };
 
 const Stack = createNativeStackNavigator<AppStackParamList>();
@@ -123,6 +127,12 @@ const AppStack = () => {
           headerBackVisible: false,
           gestureEnabled: false,
         }}
+      />
+      <Stack.Screen name="PayUser" component={PayUserScreen} options={{ headerShown: false }} />
+      <Stack.Screen
+        name="SelfTransfer"
+        component={SelfTransferScreen}
+        options={{ headerShown: false }}
       />
     </Stack.Navigator>
   );
