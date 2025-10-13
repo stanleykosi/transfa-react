@@ -325,14 +325,20 @@ func (s *Service) GetAccountBalance(ctx context.Context, userID uuid.UUID) (*dom
 	// Get the user's account from the database
 	account, err := s.repo.FindAccountByUserID(ctx, userID)
 	if err != nil {
+		log.Printf("Failed to find account for user %s: %v", userID, err)
 		return nil, err
 	}
+
+	log.Printf("Fetching balance for account %s (Anchor ID: %s)", account.ID, account.AnchorAccountID)
 
 	// Fetch the balance from Anchor API
 	anchorBalance, err := s.anchorClient.GetAccountBalance(ctx, account.AnchorAccountID)
 	if err != nil {
+		log.Printf("Failed to fetch balance from Anchor for account %s: %v", account.AnchorAccountID, err)
 		return nil, fmt.Errorf("failed to fetch balance from Anchor: %w", err)
 	}
+
+	log.Printf("Successfully fetched balance from Anchor: %+v", anchorBalance)
 
 	// Convert Anchor balance to our domain model
 	balance := &domain.AccountBalance{
@@ -342,5 +348,6 @@ func (s *Service) GetAccountBalance(ctx context.Context, userID uuid.UUID) (*dom
 		Pending:          anchorBalance.Data.Pending,
 	}
 
+	log.Printf("Converted balance: %+v", balance)
 	return balance, nil
 }

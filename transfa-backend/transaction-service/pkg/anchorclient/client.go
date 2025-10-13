@@ -196,7 +196,10 @@ func (c *Client) doTransfer(ctx context.Context, payload interface{}) (*Transfer
 
 // GetAccountBalance fetches the balance for a specific account from Anchor API.
 func (c *Client) GetAccountBalance(ctx context.Context, accountID string) (*BalanceResponse, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+"/api/v1/accounts/balance/"+accountID, nil)
+	url := c.BaseURL + "/api/v1/accounts/balance/" + accountID
+	fmt.Printf("Making Anchor API request to: %s\n", url)
+	
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create balance request: %w", err)
 	}
@@ -204,17 +207,22 @@ func (c *Client) GetAccountBalance(ctx context.Context, accountID string) (*Bala
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("x-anchor-key", c.APIKey)
 
+	fmt.Printf("Request headers: Accept=%s, x-anchor-key=%s\n", req.Header.Get("Accept"), req.Header.Get("x-anchor-key"))
+
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute balance request: %w", err)
 	}
 	defer resp.Body.Close()
 
+	fmt.Printf("Anchor API response status: %d\n", resp.StatusCode)
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var errResp ErrorResponse
 		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
 			return nil, fmt.Errorf("failed to decode error response (status %d)", resp.StatusCode)
 		}
+		fmt.Printf("Anchor API error response: %+v\n", errResp)
 		return nil, &errResp
 	}
 
@@ -223,5 +231,6 @@ func (c *Client) GetAccountBalance(ctx context.Context, accountID string) (*Bala
 		return nil, fmt.Errorf("failed to decode balance response: %w", err)
 	}
 
+	fmt.Printf("Anchor API success response: %+v\n", balanceResp)
 	return &balanceResp, nil
 }

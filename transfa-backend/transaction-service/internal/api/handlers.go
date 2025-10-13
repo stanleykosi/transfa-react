@@ -305,24 +305,33 @@ func (h *TransactionHandlers) UpdateReceivingPreferenceHandler(w http.ResponseWr
 
 // GetAccountBalanceHandler handles requests to get user's account balance.
 func (h *TransactionHandlers) GetAccountBalanceHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("GetAccountBalanceHandler called")
+	
 	// Retrieve the authenticated user's ID from the context.
 	userIDStr, ok := GetClerkUserID(r.Context())
 	if !ok {
+		log.Printf("Could not get user ID from context")
 		http.Error(w, "Could not get user ID from context", http.StatusInternalServerError)
 		return
 	}
 
+	log.Printf("User ID from context: %s", userIDStr)
+
 	// Parse the user ID as UUID
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {
+		log.Printf("Invalid user ID format: %s, error: %v", userIDStr, err)
 		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
 		return
 	}
+
+	log.Printf("Parsed user ID: %s", userID)
 
 	// Get user's account balance
 	balance, err := h.service.GetAccountBalance(r.Context(), userID)
 	if err != nil {
 		if errors.Is(err, store.ErrAccountNotFound) {
+			log.Printf("Account not found for user %s", userID)
 			http.Error(w, "Account not found", http.StatusNotFound)
 			return
 		}
@@ -330,6 +339,8 @@ func (h *TransactionHandlers) GetAccountBalanceHandler(w http.ResponseWriter, r 
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
+
+	log.Printf("Successfully retrieved balance for user %s: %+v", userID, balance)
 
 	// Respond with the account balance
 	w.Header().Set("Content-Type", "application/json")

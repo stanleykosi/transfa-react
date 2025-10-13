@@ -29,7 +29,11 @@ const HomeScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
 
   // Fetch account balance
-  const { data: accountBalance, isLoading: isLoadingBalance, error: balanceError } = useAccountBalance();
+  const {
+    data: accountBalance,
+    isLoading: isLoadingBalance,
+    error: balanceError,
+  } = useAccountBalance();
 
   const fetchAccountData = useCallback(async () => {
     try {

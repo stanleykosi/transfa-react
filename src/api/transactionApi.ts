@@ -204,10 +204,17 @@ export const useSetDefaultBeneficiary = (
  */
 export const useAccountBalance = () => {
   const fetchAccountBalance = async (): Promise<AccountBalance> => {
-    const { data } = await apiClient.get<AccountBalance>('/account/balance', {
-      baseURL: TRANSACTION_SERVICE_URL,
-    });
-    return data;
+    console.log('Fetching account balance from:', `${TRANSACTION_SERVICE_URL}/account/balance`);
+    try {
+      const { data } = await apiClient.get<AccountBalance>('/account/balance', {
+        baseURL: TRANSACTION_SERVICE_URL,
+      });
+      console.log('Account balance response:', data);
+      return data;
+    } catch (error) {
+      console.error('Error fetching account balance:', error);
+      throw error;
+    }
   };
 
   return useQuery<AccountBalance, Error>({
