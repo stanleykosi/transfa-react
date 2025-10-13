@@ -116,6 +116,16 @@ func (e *ErrorResponse) Error() string {
 	return "unknown anchor api error"
 }
 
+// BalanceResponse represents the balance response from Anchor API.
+type BalanceResponse struct {
+	Data struct {
+		AvailableBalance int64 `json:"availableBalance"`
+		LedgerBalance    int64 `json:"ledgerBalance"`
+		Hold             int64 `json:"hold"`
+		Pending          int64 `json:"pending"`
+	} `json:"data"`
+}
+
 // InitiateBookTransfer sends a request to Anchor to perform a book transfer.
 func (c *Client) InitiateBookTransfer(ctx context.Context, sourceAccountID, destAccountID, reason string, amount int64) (*TransferResponse, error) {
 	reqPayload := BookTransferRequest{}
@@ -182,4 +192,36 @@ func (c *Client) doTransfer(ctx context.Context, payload interface{}) (*Transfer
 	}
 
 	return &successResp, nil
+}
+
+// GetAccountBalance fetches the balance for a specific account from Anchor API.
+func (c *Client) GetAccountBalance(ctx context.Context, accountID string) (*BalanceResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.BaseURL+"/api/v1/accounts/balance/"+accountID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create balance request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("x-anchor-key", c.APIKey)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute balance request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var errResp ErrorResponse
+		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+			return nil, fmt.Errorf("failed to decode error response (status %d)", resp.StatusCode)
+		}
+		return nil, &errResp
+	}
+
+	var balanceResp BalanceResponse
+	if err := json.NewDecoder(resp.Body).Decode(&balanceResp); err != nil {
+		return nil, fmt.Errorf("failed to decode balance response: %w", err)
+	}
+
+	return &balanceResp, nil
 }

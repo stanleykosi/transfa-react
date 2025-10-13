@@ -51,6 +51,9 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 		// Receiving preference endpoints
 		r.Get("/receiving-preference", h.GetReceivingPreferenceHandler)
 		r.Put("/receiving-preference", h.UpdateReceivingPreferenceHandler)
+
+		// Account balance endpoint
+		r.Get("/account/balance", h.GetAccountBalanceHandler)
 	})
 
 	return r

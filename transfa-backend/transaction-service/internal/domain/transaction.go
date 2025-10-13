@@ -112,3 +112,11 @@ type ReroutedInternalPayload struct {
 	Amount      int64     `json:"amount"`
 	Reason      string    `json:"reason"`
 }
+
+// AccountBalance represents the balance information for a user's account.
+type AccountBalance struct {
+	AvailableBalance int64 `json:"available_balance"` // in kobo
+	LedgerBalance    int64 `json:"ledger_balance"`    // in kobo
+	Hold             int64 `json:"hold"`              // in kobo
+	Pending          int64 `json:"pending"`           // in kobo
+}

@@ -119,3 +119,11 @@ export interface UpdateReceivingPreferencePayload {
 export interface SetDefaultBeneficiaryPayload {
   beneficiary_id: string;
 }
+
+// Account balance information
+export interface AccountBalance {
+  available_balance: number; // in kobo
+  ledger_balance: number; // in kobo
+  hold: number; // in kobo
+  pending: number; // in kobo
+}

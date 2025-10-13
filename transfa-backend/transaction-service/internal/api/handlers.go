@@ -302,3 +302,37 @@ func (h *TransactionHandlers) UpdateReceivingPreferenceHandler(w http.ResponseWr
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Receiving preference updated successfully"})
 }
+
+// GetAccountBalanceHandler handles requests to get user's account balance.
+func (h *TransactionHandlers) GetAccountBalanceHandler(w http.ResponseWriter, r *http.Request) {
+	// Retrieve the authenticated user's ID from the context.
+	userIDStr, ok := GetClerkUserID(r.Context())
+	if !ok {
+		http.Error(w, "Could not get user ID from context", http.StatusInternalServerError)
+		return
+	}
+
+	// Parse the user ID as UUID
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+		return
+	}
+
+	// Get user's account balance
+	balance, err := h.service.GetAccountBalance(r.Context(), userID)
+	if err != nil {
+		if errors.Is(err, store.ErrAccountNotFound) {
+			http.Error(w, "Account not found", http.StatusNotFound)
+			return
+		}
+		log.Printf("Failed to get account balance for user %s: %v", userID, err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Respond with the account balance
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(balance)
+}

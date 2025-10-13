@@ -37,7 +37,7 @@ import FormInput from '@/components/FormInput';
 import PrimaryButton from '@/components/PrimaryButton';
 import { theme } from '@/constants/theme';
 import { useSecureAction } from '@/hooks/useSecureAction';
-import { useSelfTransfer } from '@/api/transactionApi';
+import { useSelfTransfer, useAccountBalance } from '@/api/transactionApi';
 import { useListBeneficiaries } from '@/api/accountApi';
 import PinInputModal from '@/components/PinInputModal';
 import { Ionicons } from '@expo/vector-icons';
@@ -51,8 +51,9 @@ const SelfTransferScreen = () => {
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
 
-  // TODO: Fetch wallet balance from an API endpoint. Using a placeholder for now.
-  const walletBalanceInKobo = 150000; // Placeholder: ₦1,500.00
+  // Fetch real wallet balance
+  const { data: accountBalance, isLoading: isLoadingBalance } = useAccountBalance();
+  const walletBalanceInKobo = accountBalance?.available_balance || 0;
 
   const {
     data: beneficiaries,
@@ -147,9 +148,13 @@ const SelfTransferScreen = () => {
           <View style={styles.accountCard}>
             <Text style={styles.accountLabel}>From</Text>
             <Text style={styles.accountName}>Transfa Wallet</Text>
-            <Text style={styles.accountBalance}>
-              Balance: {formatCurrency(walletBalanceInKobo)}
-            </Text>
+            {isLoadingBalance ? (
+              <Text style={styles.accountBalance}>Loading balance...</Text>
+            ) : (
+              <Text style={styles.accountBalance}>
+                Balance: {formatCurrency(walletBalanceInKobo)}
+              </Text>
+            )}
           </View>
 
           <BeneficiaryDropdown

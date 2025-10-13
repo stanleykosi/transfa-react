@@ -29,6 +29,7 @@ import {
   ReceivingPreference,
   UpdateReceivingPreferencePayload,
   SetDefaultBeneficiaryPayload,
+  AccountBalance,
 } from '@/types/api';
 
 // Transaction service URL from environment variables with fallback
@@ -40,6 +41,7 @@ const TRANSACTIONS_QUERY_KEY = 'transactions';
 const BENEFICIARIES_QUERY_KEY = 'beneficiaries';
 const RECEIVING_PREFERENCE_QUERY_KEY = 'receiving-preference';
 const DEFAULT_BENEFICIARY_QUERY_KEY = 'default-beneficiary';
+const ACCOUNT_BALANCE_QUERY_KEY = 'account-balance';
 
 /**
  * Custom hook to perform a Peer-to-Peer (P2P) transfer to another Transfa user.
@@ -193,5 +195,25 @@ export const useSetDefaultBeneficiary = (
       queryClient.invalidateQueries({ queryKey: [BENEFICIARIES_QUERY_KEY] });
     },
     ...options,
+  });
+};
+
+/**
+ * Custom hook to fetch the user's account balance.
+ * @returns A TanStack Query object containing the account balance.
+ */
+export const useAccountBalance = () => {
+  const fetchAccountBalance = async (): Promise<AccountBalance> => {
+    const { data } = await apiClient.get<AccountBalance>('/account/balance', {
+      baseURL: TRANSACTION_SERVICE_URL,
+    });
+    return data;
+  };
+
+  return useQuery<AccountBalance, Error>({
+    queryKey: [ACCOUNT_BALANCE_QUERY_KEY],
+    queryFn: fetchAccountBalance,
+    staleTime: 1000 * 60, // 1 minute - balance can change frequently
+    refetchInterval: 1000 * 60 * 5, // Refetch every 5 minutes
   });
 };

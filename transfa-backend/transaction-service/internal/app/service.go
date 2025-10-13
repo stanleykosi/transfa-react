@@ -319,3 +319,28 @@ func (s *Service) GetReceivingPreference(ctx context.Context, userID uuid.UUID) 
 func (s *Service) UpdateReceivingPreference(ctx context.Context, userID uuid.UUID, useExternal bool, beneficiaryID *uuid.UUID) error {
 	return s.repo.UpdateReceivingPreference(ctx, userID, useExternal, beneficiaryID)
 }
+
+// GetAccountBalance retrieves the current balance for a user's account.
+func (s *Service) GetAccountBalance(ctx context.Context, userID uuid.UUID) (*domain.AccountBalance, error) {
+	// Get the user's account from the database
+	account, err := s.repo.FindAccountByUserID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fetch the balance from Anchor API
+	anchorBalance, err := s.anchorClient.GetAccountBalance(ctx, account.AnchorAccountID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch balance from Anchor: %w", err)
+	}
+
+	// Convert Anchor balance to our domain model
+	balance := &domain.AccountBalance{
+		AvailableBalance: anchorBalance.AvailableBalance,
+		LedgerBalance:    anchorBalance.LedgerBalance,
+		Hold:             anchorBalance.Hold,
+		Pending:          anchorBalance.Pending,
+	}
+
+	return balance, nil
+}

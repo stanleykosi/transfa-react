@@ -15,6 +15,8 @@ import PrimaryButton from '@/components/PrimaryButton';
 import { theme } from '@/constants/theme';
 import apiClient from '@/api/apiClient';
 import { useAuth, useUser } from '@clerk/clerk-expo';
+import { useAccountBalance } from '@/api/transactionApi';
+import { formatCurrency } from '@/utils/formatCurrency';
 
 const HomeScreen = () => {
   const navigation = useNavigation();
@@ -25,6 +27,9 @@ const HomeScreen = () => {
   const [bankName, setBankName] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Fetch account balance
+  const { data: accountBalance, isLoading: isLoadingBalance, error: balanceError } = useAccountBalance();
 
   const fetchAccountData = useCallback(async () => {
     try {
@@ -158,6 +163,20 @@ const HomeScreen = () => {
             <Text style={styles.subtitle}>Virtual NUBAN: {nuban}</Text>
             {bankName && <Text style={styles.bankName}>Bank: {bankName}</Text>}
 
+            {/* Account Balance */}
+            <View style={styles.balanceCard}>
+              <Text style={styles.balanceLabel}>Available Balance</Text>
+              {isLoadingBalance ? (
+                <ActivityIndicator size="small" color={theme.colors.primary} />
+              ) : balanceError ? (
+                <Text style={styles.balanceError}>Unable to load balance</Text>
+              ) : (
+                <Text style={styles.balanceAmount}>
+                  {accountBalance ? formatCurrency(accountBalance.available_balance) : '₦0.00'}
+                </Text>
+              )}
+            </View>
+
             {/* Temporary navigation buttons for testing payment flows */}
             <View style={styles.paymentButtons}>
               <PrimaryButton
@@ -269,6 +288,29 @@ const styles = StyleSheet.create({
     paddingVertical: theme.spacing.s12,
     paddingHorizontal: theme.spacing.s24,
     borderRadius: theme.radii.md,
+  },
+  balanceCard: {
+    backgroundColor: theme.colors.surface,
+    borderRadius: theme.radii.lg,
+    padding: theme.spacing.s20,
+    marginVertical: theme.spacing.s16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+  balanceLabel: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.textSecondary,
+    marginBottom: theme.spacing.s8,
+  },
+  balanceAmount: {
+    fontSize: theme.fontSizes['3xl'],
+    fontWeight: theme.fontWeights.bold,
+    color: theme.colors.primary,
+  },
+  balanceError: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.error,
   },
 });
 
