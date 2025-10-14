@@ -40,17 +40,9 @@ func main() {
 		log.Fatalf("could not load config: %v", err)
 	}
 
-	// Use Railway's PORT env var if set, otherwise use configured SERVER_PORT
-	// Railway requires services to listen on the PORT it provides for health checks
-	if port := os.Getenv("PORT"); port != "" {
-		cfg.ServerPort = port
-		log.Printf("Using Railway PORT: %s", port)
-	} else if cfg.ServerPort == "" {
-		cfg.ServerPort = "8083"
-		log.Printf("Using default SERVER_PORT: %s", cfg.ServerPort)
-	} else {
-		log.Printf("Using configured SERVER_PORT: %s", cfg.ServerPort)
-	}
+	// Use the configured SERVER_PORT (defaults to 8083, can be overridden by environment)
+	// This matches the pattern used by account-service
+	log.Printf("Using SERVER_PORT: %s", cfg.ServerPort)
 
 	// Establish a connection pool to the PostgreSQL database.
 	dbpool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
@@ -89,8 +81,8 @@ func main() {
 	router.Mount("/transactions", api.TransactionRoutes(transactionHandlers, cfg.ClerkJWKSURL))
 
 	// Start the HTTP server.
-	// Bind to 0.0.0.0 to allow Railway to access the service from outside the container
-	serverAddr := fmt.Sprintf("0.0.0.0:%s", cfg.ServerPort)
+	// Use the same pattern as account-service - bind to all interfaces
+	serverAddr := fmt.Sprintf(":%s", cfg.ServerPort)
 	log.Printf("Starting server on %s", serverAddr)
 	if err := http.ListenAndServe(serverAddr, router); err != nil {
 		log.Fatalf("could not start server: %v", err)
