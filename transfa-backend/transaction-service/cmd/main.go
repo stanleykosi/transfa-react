@@ -89,7 +89,8 @@ func main() {
 	router.Mount("/transactions", api.TransactionRoutes(transactionHandlers, cfg.ClerkJWKSURL))
 
 	// Start the HTTP server.
-	serverAddr := fmt.Sprintf(":%s", cfg.ServerPort)
+	// Bind to 0.0.0.0 to allow Railway to access the service from outside the container
+	serverAddr := fmt.Sprintf("0.0.0.0:%s", cfg.ServerPort)
 	log.Printf("Starting server on %s", serverAddr)
 	if err := http.ListenAndServe(serverAddr, router); err != nil {
 		log.Fatalf("could not start server: %v", err)
