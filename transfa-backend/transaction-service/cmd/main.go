@@ -44,8 +44,12 @@ func main() {
 	// Railway requires services to listen on the PORT it provides for health checks
 	if port := os.Getenv("PORT"); port != "" {
 		cfg.ServerPort = port
+		log.Printf("Using Railway PORT: %s", port)
 	} else if cfg.ServerPort == "" {
 		cfg.ServerPort = "8083"
+		log.Printf("Using default SERVER_PORT: %s", cfg.ServerPort)
+	} else {
+		log.Printf("Using configured SERVER_PORT: %s", cfg.ServerPort)
 	}
 
 	// Establish a connection pool to the PostgreSQL database.

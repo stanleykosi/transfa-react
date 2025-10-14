@@ -33,6 +33,12 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("healthy"))
 	})
+	
+	// Railway health check endpoint
+	r.Get("/transactions/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("healthy"))
+	})
 
 	// Group routes that require authentication.
 	r.Group(func(r chi.Router) {
