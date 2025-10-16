@@ -41,6 +41,21 @@ func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
+// FindUserIDByClerkUserID resolves the internal UUID from a Clerk user id.
+// This mirrors the approach used in other services (e.g., account-service).
+func (r *PostgresRepository) FindUserIDByClerkUserID(ctx context.Context, clerkUserID string) (string, error) {
+    var id string
+    // users table is expected to have a clerk_user_id column (managed by auth-service during onboarding)
+    err := r.db.QueryRow(ctx, "SELECT id FROM users WHERE clerk_user_id = $1", clerkUserID).Scan(&id)
+    if err != nil {
+        if err == pgx.ErrNoRows {
+            return "", ErrUserNotFound
+        }
+        return "", err
+    }
+    return id, nil
+}
+
 // FindUserByUsername retrieves a user from the database by their username.
 func (r *PostgresRepository) FindUserByUsername(ctx context.Context, username string) (*domain.User, error) {
 	var user domain.User

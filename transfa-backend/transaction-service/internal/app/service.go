@@ -55,6 +55,13 @@ func NewService(repo store.Repository, anchor *anchorclient.Client, producer rab
 	}
 }
 
+// ResolveInternalUserID converts a Clerk user id string (e.g., "user_abc123") into the
+// internal UUID used by our database. This allows handlers to accept Clerk subject ids
+// from validated JWTs while our repositories continue to operate on UUIDs.
+func (s *Service) ResolveInternalUserID(ctx context.Context, clerkUserID string) (string, error) {
+    return s.repo.FindUserIDByClerkUserID(ctx, clerkUserID)
+}
+
 // ProcessP2PTransfer handles the logic for a peer-to-peer transfer.
 func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, req domain.P2PTransferRequest) (*domain.Transaction, error) {
 	// 1. Get sender and recipient details

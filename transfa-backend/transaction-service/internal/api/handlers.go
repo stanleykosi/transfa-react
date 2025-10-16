@@ -131,12 +131,18 @@ func (h *TransactionHandlers) ListBeneficiariesHandler(w http.ResponseWriter, r 
 		return
 	}
 
-	// Parse the user ID as UUID
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
-		return
-	}
+    // Resolve Clerk user id (e.g., user_abc) to internal UUID
+    internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
+    if err != nil {
+        log.Printf("Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+        http.Error(w, "User not found", http.StatusBadRequest)
+        return
+    }
+    userID, err := uuid.Parse(internalIDStr)
+    if err != nil {
+        http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+        return
+    }
 
 	// Get user's beneficiaries
 	beneficiaries, err := h.service.GetUserBeneficiaries(r.Context(), userID)
@@ -161,12 +167,17 @@ func (h *TransactionHandlers) GetDefaultBeneficiaryHandler(w http.ResponseWriter
 		return
 	}
 
-	// Parse the user ID as UUID
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
-		return
-	}
+    internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
+    if err != nil {
+        log.Printf("Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+        http.Error(w, "User not found", http.StatusBadRequest)
+        return
+    }
+    userID, err := uuid.Parse(internalIDStr)
+    if err != nil {
+        http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+        return
+    }
 
 	// Get user's default beneficiary using smart logic
 	beneficiary, err := h.service.GetDefaultBeneficiary(r.Context(), userID)
@@ -195,12 +206,17 @@ func (h *TransactionHandlers) SetDefaultBeneficiaryHandler(w http.ResponseWriter
 		return
 	}
 
-	// Parse the user ID as UUID
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
-		return
-	}
+    internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
+    if err != nil {
+        log.Printf("Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+        http.Error(w, "User not found", http.StatusBadRequest)
+        return
+    }
+    userID, err := uuid.Parse(internalIDStr)
+    if err != nil {
+        http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+        return
+    }
 
 	// Parse the request body to get the beneficiary ID
 	var req struct {
@@ -238,12 +254,17 @@ func (h *TransactionHandlers) GetReceivingPreferenceHandler(w http.ResponseWrite
 		return
 	}
 
-	// Parse the user ID as UUID
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
-		return
-	}
+    internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
+    if err != nil {
+        log.Printf("Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+        http.Error(w, "User not found", http.StatusBadRequest)
+        return
+    }
+    userID, err := uuid.Parse(internalIDStr)
+    if err != nil {
+        http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+        return
+    }
 
 	// Get user's receiving preference
 	preference, err := h.service.GetReceivingPreference(r.Context(), userID)
@@ -268,12 +289,17 @@ func (h *TransactionHandlers) UpdateReceivingPreferenceHandler(w http.ResponseWr
 		return
 	}
 
-	// Parse the user ID as UUID
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
-		return
-	}
+    internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
+    if err != nil {
+        log.Printf("Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+        http.Error(w, "User not found", http.StatusBadRequest)
+        return
+    }
+    userID, err := uuid.Parse(internalIDStr)
+    if err != nil {
+        http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+        return
+    }
 
 	// Parse the request body
 	var req struct {
@@ -317,13 +343,18 @@ func (h *TransactionHandlers) GetAccountBalanceHandler(w http.ResponseWriter, r 
 
 	log.Printf("User ID from context: %s", userIDStr)
 
-	// Parse the user ID as UUID
-	userID, err := uuid.Parse(userIDStr)
-	if err != nil {
-		log.Printf("Invalid user ID format: %s, error: %v", userIDStr, err)
-		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
-		return
-	}
+    internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
+    if err != nil {
+        log.Printf("Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+        http.Error(w, "User not found", http.StatusBadRequest)
+        return
+    }
+    userID, err := uuid.Parse(internalIDStr)
+    if err != nil {
+        log.Printf("Invalid user ID format: %s, error: %v", internalIDStr, err)
+        http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+        return
+    }
 
 	log.Printf("Parsed user ID: %s", userID)
 
