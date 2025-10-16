@@ -111,7 +111,7 @@ export const useSelfTransfer = (
  */
 export const useReceivingPreference = () => {
   const fetchReceivingPreference = async (): Promise<ReceivingPreference> => {
-    const { data } = await apiClient.get<ReceivingPreference>('/receiving-preference', {
+    const { data } = await apiClient.get<ReceivingPreference>('/transactions/receiving-preference', {
       baseURL: TRANSACTION_SERVICE_URL,
     });
     return data;
@@ -136,7 +136,7 @@ export const useUpdateReceivingPreference = (
   const updateReceivingPreferenceMutation = async (
     payload: UpdateReceivingPreferencePayload
   ): Promise<void> => {
-    await apiClient.put('/receiving-preference', payload, {
+    await apiClient.put('/transactions/receiving-preference', payload, {
       baseURL: TRANSACTION_SERVICE_URL,
     });
   };
@@ -157,7 +157,7 @@ export const useUpdateReceivingPreference = (
  */
 export const useDefaultBeneficiary = () => {
   const fetchDefaultBeneficiary = async (): Promise<Beneficiary> => {
-    const { data } = await apiClient.get<Beneficiary>('/beneficiaries/default', {
+    const { data } = await apiClient.get<Beneficiary>('/transactions/beneficiaries/default', {
       baseURL: TRANSACTION_SERVICE_URL,
     });
     return data;
@@ -182,7 +182,7 @@ export const useSetDefaultBeneficiary = (
   const setDefaultBeneficiaryMutation = async (
     payload: SetDefaultBeneficiaryPayload
   ): Promise<void> => {
-    await apiClient.put('/beneficiaries/default', payload, {
+    await apiClient.put('/transactions/beneficiaries/default', payload, {
       baseURL: TRANSACTION_SERVICE_URL,
     });
   };
@@ -204,9 +204,9 @@ export const useSetDefaultBeneficiary = (
  */
 export const useAccountBalance = () => {
   const fetchAccountBalance = async (): Promise<AccountBalance> => {
-    console.log('Fetching account balance from:', `${TRANSACTION_SERVICE_URL}/account/balance`);
+    console.log('Fetching account balance from:', `${TRANSACTION_SERVICE_URL}/transactions/account/balance`);
     try {
-      const { data } = await apiClient.get<AccountBalance>('/account/balance', {
+      const { data } = await apiClient.get<AccountBalance>('/transactions/account/balance', {
         baseURL: TRANSACTION_SERVICE_URL,
       });
       console.log('Account balance response:', data);

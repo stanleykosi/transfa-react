@@ -28,17 +28,11 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 
-	// Health check endpoint
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("healthy"))
-	})
-	
-	// Railway health check endpoint
-	r.Get("/transactions/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("healthy"))
-	})
+    // Health check endpoint (effective path when mounted: /transactions/health)
+    r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+        w.WriteHeader(http.StatusOK)
+        w.Write([]byte("healthy"))
+    })
 
 	// Group routes that require authentication.
 	r.Group(func(r chi.Router) {
