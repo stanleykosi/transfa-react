@@ -32,8 +32,14 @@ apiClient.interceptors.request.use(
       // Get the current active session from Clerk.
       const session = Clerk.session;
       if (session) {
-        // Retrieve the JWT for the current session.
-        const token = await session.getToken();
+        // Retrieve a backend-verifiable JWT using the configured template.
+        // The template must exist in Clerk Dashboard (e.g., "transfa-backend")
+        // and include the expected audience and claims.
+        // IMPORTANT:
+        // - template: must equal the Clerk JWT Template NAME as shown in your dashboard (e.g., "Transfa").
+        // - aud: is set INSIDE that template's claims ("transfa-transaction-service") and will be
+        //   validated by the backend via CLERK_AUDIENCE.
+        const token = await session.getToken({ template: 'Transfa' });
         if (token) {
           // Add the JWT to the Authorization header.
           config.headers.Authorization = `Bearer ${token}`;
