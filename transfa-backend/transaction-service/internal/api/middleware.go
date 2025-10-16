@@ -14,7 +14,6 @@ import (
     "context"
     "crypto/rsa"
     "encoding/base64"
-    "encoding/binary"
     "encoding/json"
     "fmt"
     "math/big"
