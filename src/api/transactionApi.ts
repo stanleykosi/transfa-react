@@ -63,8 +63,9 @@ export const useP2PTransfer = (
   return useMutation<TransactionResponse, Error, P2PTransferPayload>({
     mutationFn: p2pTransferMutation,
     onSuccess: () => {
-      // Invalidate transactions list to refresh the UI
+      // Invalidate transactions list and account balance to refresh the UI
       queryClient.invalidateQueries({ queryKey: [TRANSACTIONS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
     },
     ...options,
   });
@@ -97,9 +98,10 @@ export const useSelfTransfer = (
   return useMutation<TransactionResponse, Error, SelfTransferPayload>({
     mutationFn: selfTransferMutation,
     onSuccess: () => {
-      // Invalidate both transactions and beneficiaries lists
+      // Invalidate transactions, beneficiaries, and account balance
       queryClient.invalidateQueries({ queryKey: [TRANSACTIONS_QUERY_KEY] });
       queryClient.invalidateQueries({ queryKey: [BENEFICIARIES_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
     },
     ...options,
   });
@@ -220,7 +222,12 @@ export const useAccountBalance = () => {
   return useQuery<AccountBalance, Error>({
     queryKey: [ACCOUNT_BALANCE_QUERY_KEY],
     queryFn: fetchAccountBalance,
-    staleTime: 1000 * 60, // 1 minute - balance can change frequently
-    refetchInterval: 1000 * 60 * 5, // Refetch every 5 minutes
+    staleTime: 1000 * 60 * 2, // 2 minutes - balance is considered fresh for 2 minutes
+    gcTime: 1000 * 60 * 10, // Keep in cache for 10 minutes after last use
+    refetchOnWindowFocus: false, // Don't refetch when switching screens
+    refetchOnMount: false, // Don't refetch when component mounts if data is fresh
+    refetchInterval: false, // Disable automatic refetching
+    retry: 3, // Retry failed requests 3 times
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
   });
 };

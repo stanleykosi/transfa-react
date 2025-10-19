@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/transfa/transaction-service/internal/api"
 	"github.com/transfa/transaction-service/internal/app"
@@ -43,8 +45,23 @@ func main() {
 	// This matches the pattern used by account-service
 	log.Printf("Using SERVER_PORT: %s", cfg.ServerPort)
 
-	// Establish a connection pool to the PostgreSQL database.
-	dbpool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	// Establish a connection pool to the PostgreSQL database with retry logic.
+	config, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("unable to parse database URL: %v", err)
+	}
+	
+	// Configure connection pool for high-traffic scenarios (100k+ users)
+	// Align with account-service configuration for consistency
+	config.MaxConns = 100
+	config.MinConns = 20
+	config.MaxConnLifetime = 30 * time.Minute
+	config.MaxConnIdleTime = 5 * time.Minute
+	
+	// Disable prepared statement caching to prevent conflicts
+	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+	
+	dbpool, err := pgxpool.NewWithConfig(context.Background(), config)
 	if err != nil {
 		log.Fatalf("unable to connect to database: %v", err)
 	}

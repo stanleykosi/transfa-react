@@ -28,11 +28,12 @@ const HomeScreen = () => {
   const [polling, setPolling] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Fetch account balance
+  // Fetch account balance with caching
   const {
     data: accountBalance,
     isLoading: isLoadingBalance,
     error: balanceError,
+    refetch: refetchBalance,
   } = useAccountBalance();
 
   const fetchAccountData = useCallback(async () => {
@@ -133,7 +134,9 @@ const HomeScreen = () => {
 
   const handleRefresh = async () => {
     setRefreshing(true);
+    // Refresh both account data and balance
     const data = await fetchAccountData();
+    await refetchBalance(); // Force refresh the cached balance
     if (data?.accountNumber) {
       setNuban(data.accountNumber);
       setBankName(data.bankName || null);
