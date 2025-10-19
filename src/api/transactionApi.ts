@@ -113,9 +113,12 @@ export const useSelfTransfer = (
  */
 export const useReceivingPreference = () => {
   const fetchReceivingPreference = async (): Promise<ReceivingPreference> => {
-    const { data } = await apiClient.get<ReceivingPreference>('/transactions/receiving-preference', {
-      baseURL: TRANSACTION_SERVICE_URL,
-    });
+    const { data } = await apiClient.get<ReceivingPreference>(
+      '/transactions/receiving-preference',
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
     return data;
   };
 
@@ -206,7 +209,10 @@ export const useSetDefaultBeneficiary = (
  */
 export const useAccountBalance = () => {
   const fetchAccountBalance = async (): Promise<AccountBalance> => {
-    console.log('Fetching account balance from:', `${TRANSACTION_SERVICE_URL}/transactions/account/balance`);
+    console.log(
+      'Fetching account balance from:',
+      `${TRANSACTION_SERVICE_URL}/transactions/account/balance`
+    );
     try {
       const { data } = await apiClient.get<AccountBalance>('/transactions/account/balance', {
         baseURL: TRANSACTION_SERVICE_URL,

@@ -84,7 +84,7 @@ func (r *Repository) ResetAllMonthlyUsageCounts(ctx context.Context) (int64, err
 	// It ensures that every user has a usage record for the current month, set to 0.
 	query := `
         INSERT INTO monthly_transfer_usage (user_id, period, external_receipt_count)
-        SELECT id, DATE_TRUNC('month', NOW()), 0 FROM users
+        SELECT id, DATE_TRUNC('month', NOW())::DATE, 0 FROM users
         ON CONFLICT (user_id, period) DO UPDATE
         SET external_receipt_count = 0,
             updated_at = NOW();

@@ -65,6 +65,9 @@ func main() {
 	defer dbpool.Close()
 	logger.Info("database connection established")
 
+	// Database tables are already created via Supabase migrations
+	// No need to create tables here - they exist in the database
+
 	// Initialize application layers
 	repository := store.NewRepository(dbpool)
 	service := app.NewService(repository)

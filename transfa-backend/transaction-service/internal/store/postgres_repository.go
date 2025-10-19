@@ -187,7 +187,7 @@ func (r *PostgresRepository) FindOrCreateMonthlyUsage(ctx context.Context, userI
 	// Use an `INSERT ... ON CONFLICT ... DO NOTHING` followed by a SELECT to ensure atomicity.
 	insertQuery := `
 		INSERT INTO monthly_transfer_usage (user_id, period, external_receipt_count)
-		VALUES ($1, $2, 0)
+		VALUES ($1, $2::DATE, 0)
 		ON CONFLICT (user_id, period) DO NOTHING
 	`
 	_, err := r.db.Exec(ctx, insertQuery, userID, period)
@@ -209,7 +209,7 @@ func (r *PostgresRepository) IncrementMonthlyUsage(ctx context.Context, userID u
 	query := `
 		UPDATE monthly_transfer_usage
 		SET external_receipt_count = external_receipt_count + 1
-		WHERE user_id = $1 AND period = $2
+		WHERE user_id = $1 AND period = $2::DATE
 	`
 	_, err := r.db.Exec(ctx, query, userID, period)
 	return err

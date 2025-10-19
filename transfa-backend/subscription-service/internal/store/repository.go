@@ -14,6 +14,9 @@ import (
 	"github.com/transfa/subscription-service/internal/domain"
 )
 
+// Define error constants
+var ErrSubscriptionNotFound = errors.New("subscription not found")
+
 // Repository handles database operations for subscriptions.
 type Repository struct {
 	db *pgxpool.Pool
@@ -42,7 +45,7 @@ func (r *Repository) GetSubscriptionByUserID(ctx context.Context, userID string)
 	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, errors.New("subscription not found")
+			return nil, ErrSubscriptionNotFound
 		}
 		return nil, err
 	}
@@ -97,7 +100,7 @@ func (r *Repository) GetMonthlyTransferUsage(ctx context.Context, userID string)
 	query := `
         SELECT external_receipt_count
         FROM monthly_transfer_usage
-        WHERE user_id = $1 AND period = DATE_TRUNC('month', NOW())
+        WHERE user_id = $1 AND period = DATE_TRUNC('month', NOW())::DATE
     `
 	err := r.db.QueryRow(ctx, query, userID).Scan(&count)
 	if err != nil {

@@ -77,7 +77,10 @@ const ReceivingPreferencesScreen = () => {
   }, [defaultBeneficiary]);
 
   // Check if user has exhausted their external transfer limits
-  const isExhausted = subscriptionStatus && !subscriptionStatus.is_active && subscriptionStatus.transfers_remaining <= 0;
+  const isExhausted =
+    subscriptionStatus &&
+    !subscriptionStatus.is_active &&
+    subscriptionStatus.transfers_remaining <= 0;
   const isSubscribed = subscriptionStatus?.is_active || false;
 
   const handleToggleReceivingPreference = (value: boolean) => {
@@ -119,7 +122,6 @@ const ReceivingPreferencesScreen = () => {
   };
 
   const isLoading = isLoadingPreference || isLoadingDefault || isLoadingBeneficiaries;
-  const isSubscribed = beneficiaries && beneficiaries.length > 1; // Simple logic: multiple accounts = subscribed
 
   return (
     <ScreenWrapper>
@@ -184,15 +186,12 @@ const ReceivingPreferencesScreen = () => {
                     style={[styles.toggleLabel, useExternalAccount && styles.activeToggleLabel]}
                   >
                     External Account
-                    {isExhausted && (
-                      <Text style={styles.limitExceededText}> (Limit Exceeded)</Text>
-                    )}
+                    {isExhausted && <Text style={styles.limitExceededText}> (Limit Exceeded)</Text>}
                   </Text>
                   <Text style={styles.toggleDescription}>
                     {isExhausted
                       ? 'You have used all 5 monthly free external transfers. Upgrade to Premium for unlimited transfers.'
-                      : 'Receive transfers directly to your bank account'
-                    }
+                      : 'Receive transfers directly to your bank account'}
                   </Text>
                 </View>
               </View>

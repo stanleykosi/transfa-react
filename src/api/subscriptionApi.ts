@@ -14,7 +14,12 @@
  * - @/api/apiClient: The configured Axios instance for authenticated requests.
  * - @/types/api: For subscription-related type definitions.
  */
-import { useMutation, useQuery, useQueryClient, type UseMutationOptions } from '@tanstack/react-query';
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseMutationOptions,
+} from '@tanstack/react-query';
 import apiClient from './apiClient';
 import { SubscriptionStatus } from '@/types/api';
 
@@ -101,9 +106,13 @@ export const useToggleAutoRenew = (options?: UseMutationOptions<void, Error, boo
   const queryClient = useQueryClient();
 
   const toggleAutoRenewMutation = async (enable: boolean): Promise<void> => {
-    await apiClient.put('/auto-renew', { auto_renew: enable }, {
-      baseURL: SUBSCRIPTION_SERVICE_URL,
-    });
+    await apiClient.put(
+      '/auto-renew',
+      { auto_renew: enable },
+      {
+        baseURL: SUBSCRIPTION_SERVICE_URL,
+      }
+    );
   };
 
   return useMutation<void, Error, boolean>({

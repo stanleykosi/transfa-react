@@ -8,9 +8,11 @@ package app
 import (
 	"context"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/transfa/subscription-service/internal/domain"
+	"github.com/transfa/subscription-service/internal/store"
 )
 
 // Repository defines the interface for database operations that the service needs.
@@ -39,28 +41,44 @@ func (s Service) GetStatus(ctx context.Context, userID string) (*domain.Subscrip
 
 	sub, err := s.repo.GetSubscriptionByUserID(ctx, userID)
 	if err != nil {
-		// If no subscription exists, treat as inactive (free tier)
-		if errors.Is(err, errors.New("subscription not found")) {
-			usage, err := s.repo.GetMonthlyTransferUsage(ctx, userID)
-			if err != nil {
-				// If usage query fails, assume 0 usage for new users
-				usage = 0
-			}
-			
-			// Handle edge case: usage > 5 (over-limit scenario)
-			transfersRemaining := 5 - usage
-			if transfersRemaining < 0 {
-				transfersRemaining = 0 // Cap at 0, don't go negative
-			}
-			
-			return &domain.SubscriptionStatus{
+		// If no subscription exists, create a free tier subscription record
+		if errors.Is(err, store.ErrSubscriptionNotFound) {
+			// Create a free tier subscription record for the user
+			freeTierSub := &domain.Subscription{
+				UserID:             userID,
 				Status:             "inactive",
-				AutoRenew:          false,
-				IsActive:           false,
-				TransfersRemaining: transfersRemaining,
-			}, nil
+				CurrentPeriodStart: time.Now(),
+				CurrentPeriodEnd:   time.Now().AddDate(0, 1, 0), // 1 month from now
+				AutoRenew:          true, // Database defaults to true
+			}
+			
+			createdSub, createErr := s.repo.CreateOrUpdateSubscription(ctx, freeTierSub)
+			if createErr != nil {
+				// If creation fails, fall back to in-memory response
+				log.Printf("WARN: Failed to create free tier subscription for user %s: %v", userID, createErr)
+				usage, err := s.repo.GetMonthlyTransferUsage(ctx, userID)
+				if err != nil {
+					usage = 0
+				}
+				
+				transfersRemaining := 5 - usage
+				if transfersRemaining < 0 {
+					transfersRemaining = 0
+				}
+				
+				return &domain.SubscriptionStatus{
+					Status:             "inactive",
+					AutoRenew:          false,
+					IsActive:           false,
+					TransfersRemaining: transfersRemaining,
+				}, nil
+			}
+			
+			// Use the created subscription
+			sub = createdSub
+		} else {
+			return nil, err
 		}
-		return nil, err
 	}
 
 	status := &domain.SubscriptionStatus{

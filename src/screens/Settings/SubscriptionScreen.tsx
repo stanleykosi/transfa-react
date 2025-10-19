@@ -35,7 +35,6 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   useSubscriptionStatus,
   useUpgradeSubscription,
-  useCancelSubscription,
   useToggleAutoRenew,
 } from '@/api/subscriptionApi';
 import PrimaryButton from '@/components/PrimaryButton';
@@ -50,14 +49,6 @@ const SubscriptionScreen = () => {
     },
     onError: (err) => {
       Alert.alert('Upgrade Failed', err.message || 'Could not process your upgrade.');
-    },
-  });
-  const { mutate: cancelSubscription, isPending: isCancelling } = useCancelSubscription({
-    onSuccess: () => {
-      Alert.alert('Success', 'Your subscription auto-renewal has been cancelled.');
-    },
-    onError: (err) => {
-      Alert.alert('Error', err.message || 'Could not cancel your subscription.');
     },
   });
   const { mutate: toggleAutoRenew, isPending: isToggling } = useToggleAutoRenew({
@@ -110,17 +101,11 @@ const SubscriptionScreen = () => {
       );
     }
 
-    const {
-      status: planStatus,
-      auto_renew,
-      is_active,
-      transfers_remaining,
-    } = status;
+    const { status: planStatus, auto_renew, is_active, transfers_remaining } = status;
 
     // Handle all possible subscription statuses
     const isPremium = is_active;
     const isLapsed = planStatus === 'lapsed';
-    const isInactive = planStatus === 'inactive';
 
     // Validate data integrity
     if (typeof transfers_remaining !== 'number') {
@@ -187,7 +172,8 @@ const SubscriptionScreen = () => {
             </View>
             {transfers_remaining < 0 && (
               <Text style={styles.overLimitText}>
-                ⚠️ You've exceeded your monthly limit. Transfers will automatically use your internal wallet until next month or upgrade to Premium.
+                ⚠️ You've exceeded your monthly limit. Transfers will automatically use your
+                internal wallet until next month or upgrade to Premium.
               </Text>
             )}
           </Card>
