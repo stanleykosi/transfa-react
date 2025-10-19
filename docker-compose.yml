@@ -144,6 +144,48 @@ services:
       timeout: 10s
       retries: 3
 
+  # Subscription Service
+  subscription-service:
+    build:
+      context: ./transfa-backend/subscription-service
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://transfa_user:transfa_password@postgres:5432/transfa?sslmode=disable
+      SERVER_PORT: 8085
+      CLERK_JWKS_URL: https://your-clerk-instance/.well-known/jwks.json
+    ports:
+      - "8085:8085"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8085/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Scheduler Service
+  scheduler-service:
+    build:
+      context: ./transfa-backend/scheduler-service
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql://transfa_user:transfa_password@postgres:5432/transfa?sslmode=disable
+      TRANSACTION_SERVICE_URL: http://transaction-service:8083
+      SUBSCRIPTION_FEE_KOBO: 1000
+      BILLING_JOB_SCHEDULE: "0 2 1 * *"
+      RESET_USAGE_JOB_SCHEDULE: "0 1 1 * *"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      transaction-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pgrep", "scheduler-service"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # Frontend (React Native Web)
   frontend:
     build:

@@ -1,0 +1,12 @@
+{
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "transfa-backend/subscription-service/Dockerfile"
+  },
+  "deploy": {
+    "startCommand": "./subscription-service",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10,
+    "healthcheckTimeout": 300
+  }
+}

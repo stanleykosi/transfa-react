@@ -358,3 +358,63 @@ func (s *Service) GetAccountBalance(ctx context.Context, userID uuid.UUID) (*dom
 	log.Printf("Converted balance: %+v", balance)
 	return balance, nil
 }
+
+// ProcessSubscriptionFee handles the logic for debiting subscription fees.
+// This is called by the scheduler-service for monthly billing.
+func (s *Service) ProcessSubscriptionFee(ctx context.Context, userID uuid.UUID, amount int64, reason string) (*domain.Transaction, error) {
+	// 1. Get user details
+	user, err := s.repo.FindUserByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find user: %w", err)
+	}
+
+	// 2. Validate user permissions and funds
+	if !user.AllowSending {
+		return nil, errors.New("user account is not permitted to send funds")
+	}
+	userAccount, err := s.repo.FindAccountByUserID(ctx, user.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find user account: %w", err)
+	}
+	if userAccount.Balance < amount {
+		return nil, store.ErrInsufficientFunds
+	}
+
+	// 3. Debit the user's wallet immediately to lock funds
+	if err := s.repo.DebitWallet(ctx, user.ID, amount); err != nil {
+		return nil, fmt.Errorf("failed to debit user wallet: %w", err)
+	}
+
+	// 4. Create transaction record for subscription fee
+	txRecord := &domain.Transaction{
+		ID:              uuid.New(),
+		SenderID:        user.ID,
+		SourceAccountID: userAccount.ID,
+		Type:            "subscription_fee",
+		Status:          "completed", // Subscription fees are immediately completed
+		Amount:          amount,
+		Fee:             0, // No additional fee for subscription billing
+		Description:     reason,
+	}
+	if err := s.repo.CreateTransaction(ctx, txRecord); err != nil {
+		// Refund the debited amount since transaction creation failed
+		if refundErr := s.repo.CreditWallet(ctx, user.ID, amount); refundErr != nil {
+			log.Printf("CRITICAL: Failed to refund debited amount for user %s after subscription fee transaction creation failure: %v", user.ID, refundErr)
+		}
+		return nil, fmt.Errorf("failed to create subscription fee transaction record: %w", err)
+	}
+
+	// 5. Publish subscription fee event to RabbitMQ for other services
+	event := rabbitmq.SubscriptionFeeEvent{
+		UserID:    user.ID,
+		Amount:    amount,
+		Reason:    reason,
+		Timestamp: time.Now(),
+	}
+	if err := s.eventProducer.PublishSubscriptionFeeEvent(ctx, event); err != nil {
+		log.Printf("WARN: Failed to publish subscription fee event for user %s: %v", user.ID, err)
+		// Don't fail the transaction for this, as the fee was successfully debited
+	}
+
+	return txRecord, nil
+}

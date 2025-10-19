@@ -378,3 +378,41 @@ func (h *TransactionHandlers) GetAccountBalanceHandler(w http.ResponseWriter, r 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(balance)
 }
+
+// SubscriptionFeeHandler handles internal requests to debit subscription fees.
+// This is called by the scheduler-service for monthly billing.
+func (h *TransactionHandlers) SubscriptionFeeHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID string `json:"user_id"`
+		Amount int64  `json:"amount"`
+		Reason string `json:"reason"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Parse the user ID as UUID
+	userID, err := uuid.Parse(req.UserID)
+	if err != nil {
+		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+		return
+	}
+
+	// Call the core service logic to debit the subscription fee
+	tx, err := h.service.ProcessSubscriptionFee(r.Context(), userID, req.Amount, req.Reason)
+	if err != nil {
+		log.Printf("Subscription fee debit failed for user %s: %v", userID, err)
+		if errors.Is(err, store.ErrInsufficientFunds) {
+			http.Error(w, err.Error(), http.StatusPaymentRequired)
+			return
+		}
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Respond with the created transaction
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(tx)
+}

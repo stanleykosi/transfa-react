@@ -1,0 +1,12 @@
+{
+  "build": {
+    "builder": "DOCKERFILE",
+    "dockerfilePath": "transfa-backend/scheduler-service/Dockerfile"
+  },
+  "deploy": {
+    "startCommand": "./scheduler-service",
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10,
+    "healthcheckTimeout": 300
+  }
+}

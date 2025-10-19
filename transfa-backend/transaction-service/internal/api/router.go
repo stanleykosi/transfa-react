@@ -56,5 +56,8 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 		r.Get("/account/balance", h.GetAccountBalanceHandler)
 	})
 
+	// Internal endpoints (no authentication required for service-to-service communication)
+	r.Post("/subscription-fee", h.SubscriptionFeeHandler)
+
 	return r
 }
