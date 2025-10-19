@@ -43,6 +43,11 @@ const ProfileScreen = () => {
       action: () => navigation.navigate('ReceivingPreferences'),
     },
     {
+      title: 'Subscription',
+      icon: 'card-outline' as const,
+      action: () => navigation.navigate('Subscription'),
+    },
+    {
       title: 'Security',
       icon: 'shield-checkmark-outline' as const,
       action: () => navigation.navigate('SecuritySettings'),

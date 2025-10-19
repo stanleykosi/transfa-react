@@ -26,6 +26,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useReceivingPreference, useUpdateReceivingPreference } from '@/api/transactionApi';
 import { useDefaultBeneficiary, useSetDefaultBeneficiary } from '@/api/transactionApi';
 import { useListBeneficiaries } from '@/api/accountApi';
+import { useSubscriptionStatus } from '@/api/subscriptionApi';
 import { Beneficiary } from '@/types/api';
 import BeneficiaryDropdown from '@/components/BeneficiaryDropdown';
 
@@ -40,6 +41,7 @@ const ReceivingPreferencesScreen = () => {
   const { data: receivingPreference, isLoading: isLoadingPreference } = useReceivingPreference();
   const { data: defaultBeneficiary, isLoading: isLoadingDefault } = useDefaultBeneficiary();
   const { data: beneficiaries, isLoading: isLoadingBeneficiaries } = useListBeneficiaries();
+  const { data: subscriptionStatus } = useSubscriptionStatus();
 
   // Mutations for updating preferences
   const { mutate: updateReceivingPreference, isPending: isUpdatingPreference } =
@@ -74,7 +76,24 @@ const ReceivingPreferencesScreen = () => {
     }
   }, [defaultBeneficiary]);
 
+  // Check if user has exhausted their external transfer limits
+  const isExhausted = subscriptionStatus && !subscriptionStatus.is_active && subscriptionStatus.transfers_remaining <= 0;
+  const isSubscribed = subscriptionStatus?.is_active || false;
+
   const handleToggleReceivingPreference = (value: boolean) => {
+    // Prevent free users from setting external account if they've exhausted their limits
+    if (value && isExhausted) {
+      Alert.alert(
+        'External Transfer Limit Exceeded',
+        'You have used all 5 of your monthly free external transfers. You can either:\n\n• Upgrade to Premium for unlimited transfers\n• Wait until next month for your limit to reset\n• Use your internal wallet for receiving transfers',
+        [
+          { text: 'Upgrade to Premium', onPress: () => navigation.navigate('Subscription') },
+          { text: 'Use Internal Wallet', style: 'cancel' },
+        ]
+      );
+      return;
+    }
+
     setUseExternalAccount(value);
 
     // If switching to external account and no default beneficiary is set,
@@ -165,9 +184,15 @@ const ReceivingPreferencesScreen = () => {
                     style={[styles.toggleLabel, useExternalAccount && styles.activeToggleLabel]}
                   >
                     External Account
+                    {isExhausted && (
+                      <Text style={styles.limitExceededText}> (Limit Exceeded)</Text>
+                    )}
                   </Text>
                   <Text style={styles.toggleDescription}>
-                    Receive transfers directly to your bank account
+                    {isExhausted
+                      ? 'You have used all 5 monthly free external transfers. Upgrade to Premium for unlimited transfers.'
+                      : 'Receive transfers directly to your bank account'
+                    }
                   </Text>
                 </View>
               </View>
@@ -366,6 +391,11 @@ const styles = StyleSheet.create({
     fontWeight: theme.fontWeights.medium,
     flex: 1,
     textAlign: 'right',
+  },
+  limitExceededText: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.error,
+    fontWeight: theme.fontWeights.semibold,
   },
 });
 

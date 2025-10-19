@@ -86,6 +86,11 @@ func (r *Repository) CreateOrUpdateSubscription(ctx context.Context, sub *domain
 
 // GetMonthlyTransferUsage retrieves the count of external transfers for a user in the current month.
 func (r *Repository) GetMonthlyTransferUsage(ctx context.Context, userID string) (int, error) {
+	// Validate userID
+	if userID == "" {
+		return 0, errors.New("user ID cannot be empty")
+	}
+
 	var count int
 	// The 'period' is the first day of the month.
 	// DATE_TRUNC('month', NOW()) calculates the first day of the current month.
@@ -102,5 +107,11 @@ func (r *Repository) GetMonthlyTransferUsage(ctx context.Context, userID string)
 		}
 		return 0, err
 	}
+	
+	// Ensure count is never negative (data integrity)
+	if count < 0 {
+		count = 0
+	}
+	
 	return count, nil
 }

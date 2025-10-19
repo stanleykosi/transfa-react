@@ -127,3 +127,16 @@ export interface AccountBalance {
   hold: number; // in kobo
   pending: number; // in kobo
 }
+
+// =================================================================
+// Subscription Types
+// =================================================================
+
+// Represents the user's subscription status as returned by the backend.
+export interface SubscriptionStatus {
+  status: 'active' | 'inactive' | 'lapsed';
+  current_period_end?: string; // ISO 8601 date string
+  auto_renew: boolean;
+  is_active: boolean;
+  transfers_remaining: number; // -1 for unlimited (premium), 0-5 for free tier
+}

@@ -45,6 +45,7 @@ func NewRouter(h *Handler, jwksURL string) *chi.Mux {
 		r.Get("/status", h.handleGetStatus)
 		r.Post("/upgrade", h.handleUpgrade)
 		r.Post("/cancel", h.handleCancel)
+		r.Put("/auto-renew", h.handleToggleAutoRenew)
 	})
 
 	return r

@@ -79,6 +79,33 @@ func (h *Handler) handleCancel(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, subscription)
 }
 
+// handleToggleAutoRenew handles the request to toggle a user's auto-renewal setting.
+func (h *Handler) handleToggleAutoRenew(w http.ResponseWriter, r *http.Request) {
+	userID, ok := UserFromContext(r.Context())
+	if !ok {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Parse the request body
+	var req struct {
+		AutoRenew bool `json:"auto_renew"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Call the service to set the auto-renewal setting
+	subscription, err := h.service.SetAutoRenew(r.Context(), userID, req.AutoRenew)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, subscription)
+}
+
 // respondWithJSON is a helper function to write JSON responses.
 func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	response, err := json.Marshal(payload)

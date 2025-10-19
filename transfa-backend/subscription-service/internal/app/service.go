@@ -32,19 +32,32 @@ func NewService(repo Repository) Service {
 
 // GetStatus retrieves the subscription status for a user, including remaining free transfers.
 func (s Service) GetStatus(ctx context.Context, userID string) (*domain.SubscriptionStatus, error) {
+	// Validate userID
+	if userID == "" {
+		return nil, errors.New("user ID cannot be empty")
+	}
+
 	sub, err := s.repo.GetSubscriptionByUserID(ctx, userID)
 	if err != nil {
 		// If no subscription exists, treat as inactive (free tier)
-		if errors.Is(err, errors.New("subscription not found")) { // Assuming repository returns a specific error
+		if errors.Is(err, errors.New("subscription not found")) {
 			usage, err := s.repo.GetMonthlyTransferUsage(ctx, userID)
 			if err != nil {
-				return nil, err
+				// If usage query fails, assume 0 usage for new users
+				usage = 0
 			}
+			
+			// Handle edge case: usage > 5 (over-limit scenario)
+			transfersRemaining := 5 - usage
+			if transfersRemaining < 0 {
+				transfersRemaining = 0 // Cap at 0, don't go negative
+			}
+			
 			return &domain.SubscriptionStatus{
 				Status:             "inactive",
 				AutoRenew:          false,
 				IsActive:           false,
-				TransfersRemaining: 5 - usage,
+				TransfersRemaining: transfersRemaining,
 			}, nil
 		}
 		return nil, err
@@ -64,9 +77,16 @@ func (s Service) GetStatus(ctx context.Context, userID string) (*domain.Subscrip
 		// Non-active subscribers are on the free tier
 		usage, err := s.repo.GetMonthlyTransferUsage(ctx, userID)
 		if err != nil {
-			return nil, err
+			// If usage query fails, assume 0 usage
+			usage = 0
 		}
-		status.TransfersRemaining = 5 - usage
+		
+		// Handle edge case: usage > 5 (over-limit scenario)
+		transfersRemaining := 5 - usage
+		if transfersRemaining < 0 {
+			transfersRemaining = 0 // Cap at 0, don't go negative
+		}
+		status.TransfersRemaining = transfersRemaining
 	}
 
 	return status, nil
@@ -98,5 +118,16 @@ func (s Service) Cancel(ctx context.Context, userID string) (*domain.Subscriptio
 	}
 
 	sub.AutoRenew = false
+	return s.repo.CreateOrUpdateSubscription(ctx, sub)
+}
+
+// SetAutoRenew toggles the auto-renewal setting for a user's subscription.
+func (s Service) SetAutoRenew(ctx context.Context, userID string, autoRenew bool) (*domain.Subscription, error) {
+	sub, err := s.repo.GetSubscriptionByUserID(ctx, userID)
+	if err != nil {
+		return nil, err // Can't modify a non-existent subscription
+	}
+
+	sub.AutoRenew = autoRenew
 	return s.repo.CreateOrUpdateSubscription(ctx, sub)
 }
