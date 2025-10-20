@@ -23,6 +23,8 @@ import AppTabs, { AppTabsParamList } from './AppTabs';
 import OnboardingFormScreen from '@/screens/Onboarding/OnboardingFormScreen';
 import PayUserScreen from '@/screens/PaymentFlow/PayUserScreen';
 import SelfTransferScreen from '@/screens/PaymentFlow/SelfTransferScreen';
+import CreateRequestScreen from '@/screens/PaymentRequests/CreateRequestScreen';
+import PaymentRequestSuccessScreen from '@/screens/PaymentRequests/PaymentRequestSuccessScreen';
 import { NavigatorScreenParams } from '@react-navigation/native';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import apiClient from '@/api/apiClient';
@@ -37,6 +39,8 @@ export type AppStackParamList = {
   CreateAccount: undefined;
   PayUser: undefined;
   SelfTransfer: undefined;
+  CreatePaymentRequest: undefined;
+  PaymentRequestSuccess: { requestId: string };
 };
 
 const Stack = createNativeStackNavigator<AppStackParamList>();
@@ -133,6 +137,16 @@ const AppStack = () => {
         name="SelfTransfer"
         component={SelfTransferScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="CreatePaymentRequest"
+        component={CreateRequestScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PaymentRequestSuccess"
+        component={PaymentRequestSuccessScreen}
+        options={{ headerShown: false, gestureEnabled: false }}
       />
     </Stack.Navigator>
   );

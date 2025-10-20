@@ -30,6 +30,8 @@ import {
   UpdateReceivingPreferencePayload,
   SetDefaultBeneficiaryPayload,
   AccountBalance,
+  PaymentRequest,
+  CreatePaymentRequestPayload,
 } from '@/types/api';
 
 // Transaction service URL from environment variables with fallback
@@ -42,6 +44,7 @@ const BENEFICIARIES_QUERY_KEY = 'beneficiaries';
 const RECEIVING_PREFERENCE_QUERY_KEY = 'receiving-preference';
 const DEFAULT_BENEFICIARY_QUERY_KEY = 'default-beneficiary';
 const ACCOUNT_BALANCE_QUERY_KEY = 'account-balance';
+const PAYMENT_REQUESTS_QUERY_KEY = 'paymentRequests';
 
 /**
  * Custom hook to perform a Peer-to-Peer (P2P) transfer to another Transfa user.
@@ -235,5 +238,72 @@ export const useAccountBalance = () => {
     refetchInterval: false, // Disable automatic refetching
     retry: 3, // Retry failed requests 3 times
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
+  });
+};
+
+/**
+ * Custom hook to list all payment requests for the authenticated user.
+ * @returns A TanStack Query object containing the list of payment requests.
+ */
+export const useListPaymentRequests = () => {
+  const fetchPaymentRequests = async (): Promise<PaymentRequest[]> => {
+    const { data } = await apiClient.get<PaymentRequest[]>('/payment-requests', {
+      baseURL: TRANSACTION_SERVICE_URL,
+    });
+    return data;
+  };
+
+  return useQuery<PaymentRequest[], Error>({
+    queryKey: [PAYMENT_REQUESTS_QUERY_KEY],
+    queryFn: fetchPaymentRequests,
+  });
+};
+
+/**
+ * Custom hook to create a new payment request.
+ * @param options Optional mutation options.
+ * @returns A TanStack Mutation object for the creation action.
+ */
+export const useCreatePaymentRequest = (
+  options?: UseMutationOptions<PaymentRequest, Error, CreatePaymentRequestPayload>
+) => {
+  const queryClient = useQueryClient();
+
+  const createPaymentRequestMutation = async (
+    payload: CreatePaymentRequestPayload
+  ): Promise<PaymentRequest> => {
+    const { data } = await apiClient.post<PaymentRequest>('/payment-requests', payload, {
+      baseURL: TRANSACTION_SERVICE_URL,
+    });
+    return data;
+  };
+
+  return useMutation<PaymentRequest, Error, CreatePaymentRequestPayload>({
+    mutationFn: createPaymentRequestMutation,
+    onSuccess: () => {
+      // After creating a request, invalidate the list to update the UI.
+      queryClient.invalidateQueries({ queryKey: [PAYMENT_REQUESTS_QUERY_KEY] });
+    },
+    ...options,
+  });
+};
+
+/**
+ * Custom hook to fetch a single payment request by its ID.
+ * @param requestId The ID of the payment request to fetch.
+ * @returns A TanStack Query object containing the payment request details.
+ */
+export const useGetPaymentRequest = (requestId: string) => {
+  const fetchPaymentRequest = async (): Promise<PaymentRequest> => {
+    const { data } = await apiClient.get<PaymentRequest>(`/payment-requests/${requestId}`, {
+      baseURL: TRANSACTION_SERVICE_URL,
+    });
+    return data;
+  };
+
+  return useQuery<PaymentRequest, Error>({
+    queryKey: [PAYMENT_REQUESTS_QUERY_KEY, requestId],
+    queryFn: fetchPaymentRequest,
+    enabled: !!requestId, // Only run the query if requestId is available.
   });
 };

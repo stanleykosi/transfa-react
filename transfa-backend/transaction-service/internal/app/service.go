@@ -418,3 +418,29 @@ func (s *Service) ProcessSubscriptionFee(ctx context.Context, userID uuid.UUID, 
 
 	return txRecord, nil
 }
+
+// CreatePaymentRequest handles the business logic for creating a new payment request.
+func (s *Service) CreatePaymentRequest(ctx context.Context, creatorID uuid.UUID, payload domain.CreatePaymentRequestPayload) (*domain.PaymentRequest, error) {
+	// Create the domain object for the new request.
+	newRequest := &domain.PaymentRequest{
+		ID:          uuid.New(),
+		CreatorID:   creatorID,
+		Status:      "pending", // Initial status is always pending.
+		Amount:      payload.Amount,
+		Description: payload.Description,
+		ImageURL:    payload.ImageURL,
+	}
+
+	// Persist the new request to the database via the repository.
+	return s.repo.CreatePaymentRequest(ctx, newRequest)
+}
+
+// ListPaymentRequests retrieves all payment requests for a given user.
+func (s *Service) ListPaymentRequests(ctx context.Context, creatorID uuid.UUID) ([]domain.PaymentRequest, error) {
+	return s.repo.ListPaymentRequestsByCreator(ctx, creatorID)
+}
+
+// GetPaymentRequestByID retrieves a single payment request by its ID.
+func (s *Service) GetPaymentRequestByID(ctx context.Context, requestID uuid.UUID) (*domain.PaymentRequest, error) {
+	return s.repo.GetPaymentRequestByID(ctx, requestID)
+}

@@ -1,43 +1,43 @@
 /**
  * @description
- * Placeholder screen for the Payments tab. This section will likely contain
- * transaction history, payment requests, and other payment-related features.
+ * This screen acts as a container for a top tab navigator that separates
+ * Transaction History and Payment Requests, fulfilling the "Persistent Payment
+ * Requests Tab" requirement from the specification.
  *
  * @dependencies
- * - react-native: For Text component.
- * - @/components/ScreenWrapper: For consistent screen layout and safe area handling.
+ * - react-native: For core components.
+ * - @/navigation/PaymentsTabNavigator: The actual tab navigator component.
+ * - @/components/ScreenWrapper: To provide a consistent safe area and background.
  */
 import React from 'react';
-import { Text, View, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import ScreenWrapper from '@/components/ScreenWrapper';
+import PaymentsTabNavigator from '@/navigation/PaymentsTabNavigator';
 import { theme } from '@/constants/theme';
 
 const PaymentsScreen = () => {
   return (
-    <ScreenWrapper>
-      <View style={styles.container}>
-        <Text style={styles.title}>Payments Screen</Text>
-        <Text style={styles.subtitle}>Transaction history will be displayed here.</Text>
+    <ScreenWrapper style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Payments</Text>
       </View>
+      <PaymentsTabNavigator />
     </ScreenWrapper>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    paddingHorizontal: 0, // Let the tab navigator handle its own padding
+  },
+  header: {
+    paddingHorizontal: theme.spacing.s24,
+    paddingBottom: theme.spacing.s16,
   },
   title: {
-    fontSize: theme.fontSizes['2xl'],
+    fontSize: theme.fontSizes['3xl'],
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
-  },
-  subtitle: {
-    fontSize: theme.fontSizes.base,
-    color: theme.colors.textSecondary,
-    marginTop: theme.spacing.s8,
   },
 });
 

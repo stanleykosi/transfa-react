@@ -50,4 +50,9 @@ type Repository interface {
 	UpdateTransactionStatusAndFee(ctx context.Context, transactionID uuid.UUID, anchorTransferID, status string, fee int64) error
 	DebitWallet(ctx context.Context, userID uuid.UUID, amount int64) error
 	CreditWallet(ctx context.Context, userID uuid.UUID, amount int64) error
+
+	// Payment Request methods
+	CreatePaymentRequest(ctx context.Context, req *domain.PaymentRequest) (*domain.PaymentRequest, error)
+	ListPaymentRequestsByCreator(ctx context.Context, creatorID uuid.UUID) ([]domain.PaymentRequest, error)
+	GetPaymentRequestByID(ctx context.Context, requestID uuid.UUID) (*domain.PaymentRequest, error)
 }

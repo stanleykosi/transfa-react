@@ -120,3 +120,23 @@ type AccountBalance struct {
 	Hold             int64 `json:"hold"`              // in kobo
 	Pending          int64 `json:"pending"`           // in kobo
 }
+
+// PaymentRequest represents a payment request record in the database.
+// It aligns with the `payment_requests` table schema.
+type PaymentRequest struct {
+	ID          uuid.UUID `json:"id" db:"id"`
+	CreatorID   uuid.UUID `json:"creator_id" db:"creator_id"`
+	Status      string    `json:"status" db:"status"`
+	Amount      int64     `json:"amount" db:"amount"`
+	Description *string   `json:"description,omitempty" db:"description"`
+	ImageURL    *string   `json:"image_url,omitempty" db:"image_url"`
+	CreatedAt   time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+}
+
+// CreatePaymentRequestPayload defines the structure for creating a new payment request.
+type CreatePaymentRequestPayload struct {
+	Amount      int64   `json:"amount" validate:"required,gt=0"`
+	Description *string `json:"description,omitempty"`
+	ImageURL    *string `json:"image_url,omitempty"`
+}

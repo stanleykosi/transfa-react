@@ -54,6 +54,13 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 
 		// Account balance endpoint
 		r.Get("/account/balance", h.GetAccountBalanceHandler)
+
+		// Payment Request routes
+		r.Route("/payment-requests", func(r chi.Router) {
+			r.Post("/", h.CreatePaymentRequestHandler)    // Create a new payment request
+			r.Get("/", h.ListPaymentRequestsHandler)     // List all of user's payment requests
+			r.Get("/{id}", h.GetPaymentRequestByIDHandler) // Get a specific payment request
+		})
 	})
 
 	// Internal endpoints (no authentication required for service-to-service communication)

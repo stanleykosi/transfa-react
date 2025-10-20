@@ -432,3 +432,68 @@ func (r *PostgresRepository) UpdateReceivingPreference(ctx context.Context, user
 	_, err := r.db.Exec(ctx, query, userID, useExternal, beneficiaryID)
 	return err
 }
+
+// CreatePaymentRequest inserts a new payment request record into the database.
+func (r *PostgresRepository) CreatePaymentRequest(ctx context.Context, req *domain.PaymentRequest) (*domain.PaymentRequest, error) {
+	query := `
+        INSERT INTO payment_requests (id, creator_id, status, amount, description, image_url)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, creator_id, status, amount, description, image_url, created_at, updated_at
+    `
+	var createdRequest domain.PaymentRequest
+	err := r.db.QueryRow(ctx, query, req.ID, req.CreatorID, req.Status, req.Amount, req.Description, req.ImageURL).Scan(
+		&createdRequest.ID, &createdRequest.CreatorID, &createdRequest.Status, &createdRequest.Amount,
+		&createdRequest.Description, &createdRequest.ImageURL, &createdRequest.CreatedAt, &createdRequest.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &createdRequest, nil
+}
+
+// ListPaymentRequestsByCreator retrieves all payment requests created by a specific user.
+func (r *PostgresRepository) ListPaymentRequestsByCreator(ctx context.Context, creatorID uuid.UUID) ([]domain.PaymentRequest, error) {
+	query := `
+        SELECT id, creator_id, status, amount, description, image_url, created_at, updated_at
+        FROM payment_requests
+        WHERE creator_id = $1
+        ORDER BY created_at DESC
+    `
+	rows, err := r.db.Query(ctx, query, creatorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var requests []domain.PaymentRequest
+	for rows.Next() {
+		var request domain.PaymentRequest
+		err := rows.Scan(&request.ID, &request.CreatorID, &request.Status, &request.Amount,
+			&request.Description, &request.ImageURL, &request.CreatedAt, &request.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, request)
+	}
+
+	return requests, nil
+}
+
+// GetPaymentRequestByID retrieves a single payment request by its unique ID.
+func (r *PostgresRepository) GetPaymentRequestByID(ctx context.Context, requestID uuid.UUID) (*domain.PaymentRequest, error) {
+	query := `
+        SELECT id, creator_id, status, amount, description, image_url, created_at, updated_at
+        FROM payment_requests
+        WHERE id = $1
+    `
+	var request domain.PaymentRequest
+	err := r.db.QueryRow(ctx, query, requestID).Scan(
+		&request.ID, &request.CreatorID, &request.Status, &request.Amount,
+		&request.Description, &request.ImageURL, &request.CreatedAt, &request.UpdatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil // Return nil, nil if not found
+		}
+		return nil, err
+	}
+	return &request, nil
+}

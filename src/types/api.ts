@@ -140,3 +140,22 @@ export interface SubscriptionStatus {
   is_active: boolean;
   transfers_remaining: number; // -1 for unlimited (premium), 0-5 for free tier
 }
+
+// Structure for a payment request object from the API.
+export interface PaymentRequest {
+  id: string;
+  creator_id: string;
+  status: 'pending' | 'fulfilled';
+  amount: number; // in kobo
+  description?: string;
+  image_url?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Payload for creating a new payment request.
+export interface CreatePaymentRequestPayload {
+  amount: number; // in kobo
+  description?: string;
+  image_url?: string;
+}

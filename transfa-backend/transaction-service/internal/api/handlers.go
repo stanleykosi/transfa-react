@@ -416,3 +416,17 @@ func (h *TransactionHandlers) SubscriptionFeeHandler(w http.ResponseWriter, r *h
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(tx)
 }
+
+// writeJSON is a helper for writing JSON responses.
+func (h *TransactionHandlers) writeJSON(w http.ResponseWriter, status int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if data != nil {
+		json.NewEncoder(w).Encode(data)
+	}
+}
+
+// writeError is a helper for writing JSON error responses.
+func (h *TransactionHandlers) writeError(w http.ResponseWriter, status int, message string) {
+	h.writeJSON(w, status, map[string]string{"error": message})
+}
