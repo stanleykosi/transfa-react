@@ -15,9 +15,11 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/transfa/transaction-service/internal/app"
 	"github.com/transfa/transaction-service/internal/domain"
@@ -52,7 +54,9 @@ func (h *TransactionHandlers) P2PTransferHandler(w http.ResponseWriter, r *http.
 
 	var req domain.P2PTransferRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		log.Printf("P2P Transfer JSON decode error: %v", err)
+		log.Printf("Request headers: %v", r.Header)
+		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
 

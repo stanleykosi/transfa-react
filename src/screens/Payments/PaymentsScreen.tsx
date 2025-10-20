@@ -28,7 +28,8 @@ const PaymentsScreen = () => {
 
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: 0, // Let the tab navigator handle its own padding
+    flex: 1,
+    paddingHorizontal: 0,
   },
   header: {
     paddingHorizontal: theme.spacing.s24,
