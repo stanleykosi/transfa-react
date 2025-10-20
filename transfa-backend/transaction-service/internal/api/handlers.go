@@ -19,7 +19,6 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/transfa/transaction-service/internal/app"
 	"github.com/transfa/transaction-service/internal/domain"
