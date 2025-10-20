@@ -85,7 +85,7 @@ const CreateRequestScreen = () => {
       return;
     }
 
-    let imageUrl: string | undefined = undefined;
+    let imageUrl: string | undefined;
     if (image) {
       setIsUploading(true);
       try {

@@ -20,6 +20,7 @@ import (
 	"github.com/transfa/account-service/internal/domain"
 	"github.com/transfa/account-service/internal/store"
 	"github.com/transfa/account-service/pkg/anchorclient"
+	"github.com/transfa/account-service/pkg/subscriptionclient"
 )
 
 const (
@@ -32,22 +33,25 @@ type AccountService struct {
 	beneficiaryRepo store.BeneficiaryRepository
 	bankRepo        store.BankRepository
 	anchorClient    *anchorclient.Client
+	subscriptionClient *subscriptionclient.Client
 	cacheWarmingMutex sync.Mutex // Prevents multiple cache warming operations
 }
 
 // NewAccountService creates a new instance of AccountService.
-func NewAccountService(accountRepo store.AccountRepository, beneficiaryRepo store.BeneficiaryRepository, bankRepo store.BankRepository, anchorClient *anchorclient.Client) *AccountService {
+func NewAccountService(accountRepo store.AccountRepository, beneficiaryRepo store.BeneficiaryRepository, bankRepo store.BankRepository, anchorClient *anchorclient.Client, subscriptionClient *subscriptionclient.Client) *AccountService {
 	return &AccountService{
 		accountRepo:     accountRepo,
 		beneficiaryRepo: beneficiaryRepo,
 		bankRepo:        bankRepo,
 		anchorClient:    anchorClient,
+		subscriptionClient: subscriptionClient,
 	}
 }
 
 // CreateBeneficiaryInput defines the required input for creating a beneficiary.
 type CreateBeneficiaryInput struct {
 	UserID        string
+	AuthToken     string
 	AccountNumber string
 	BankCode      string
 }
@@ -61,12 +65,12 @@ func (s *AccountService) CreateBeneficiary(ctx context.Context, input CreateBene
 	}
 	
 	// 2. Check user's subscription status and beneficiary count limit.
-	subscriptionStatus, err := s.beneficiaryRepo.GetUserSubscriptionStatus(ctx, internalUserID)
+	subscriptionStatus, err := s.subscriptionClient.GetUserSubscriptionStatus(ctx, input.AuthToken)
 	if err != nil {
 		return nil, fmt.Errorf("could not verify user subscription status: %w", err)
 	}
 
-	if subscriptionStatus != domain.SubscriptionStatusActive {
+	if !subscriptionStatus.IsActive {
 		count, err := s.beneficiaryRepo.CountBeneficiariesByUserID(ctx, internalUserID)
 		if err != nil {
 			return nil, fmt.Errorf("could not count existing beneficiaries: %w", err)

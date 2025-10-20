@@ -20,6 +20,8 @@ type AuthContextKey string
 const (
 	// UserIDKey is the key used to store the user's ID in the request context.
 	UserIDKey AuthContextKey = "userID"
+	// AuthTokenKey is the key used to store the raw auth token in the request context.
+	AuthTokenKey AuthContextKey = "authToken"
 )
 
 // ErrNoAuthHeader is returned when the Authorization header is missing.
@@ -34,10 +36,11 @@ func AuthMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 			// as a stand-in for full JWT validation. In a production system, you would
 			// validate the JWT from the "Authorization: Bearer" header against Clerk's JWKS.
 			clerkUserID := r.Header.Get("X-Clerk-User-Id")
+			authHeader := r.Header.Get("Authorization")
+			var authToken string
 
 			if clerkUserID == "" {
 				// Fallback to checking a bearer token for compatibility
-				authHeader := r.Header.Get("Authorization")
 				if authHeader == "" {
 					http.Error(w, "Unauthorized: Missing auth credentials", http.StatusUnauthorized)
 					return
@@ -55,8 +58,17 @@ func AuthMiddleware(cfg *config.Config) func(http.Handler) http.Handler {
 				return
 			}
 			
-			// Add the user ID to the request context.
+			// Extract the Bearer token if present
+			if authHeader != "" {
+				parts := strings.Split(authHeader, " ")
+				if len(parts) == 2 && strings.ToLower(parts[0]) == "bearer" {
+					authToken = parts[1]
+				}
+			}
+			
+			// Add the user ID and auth token to the request context.
 			ctx := context.WithValue(r.Context(), UserIDKey, clerkUserID)
+			ctx = context.WithValue(ctx, AuthTokenKey, authToken)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -70,4 +82,14 @@ func GetUserIDFromContext(ctx context.Context) string {
 		return ""
 	}
 	return userID
+}
+
+// GetAuthTokenFromContext retrieves the authorization token from the request context.
+// It returns an empty string if the token is not found.
+func GetAuthTokenFromContext(ctx context.Context) string {
+	token, ok := ctx.Value(AuthTokenKey).(string)
+	if !ok {
+		return ""
+	}
+	return token
 }

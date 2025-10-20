@@ -17,11 +17,12 @@ import (
 
 // Config stores all configuration for the application.
 type Config struct {
-	DatabaseURL      string `mapstructure:"DATABASE_URL"`
-	RabbitMQURL      string `mapstructure:"RABBITMQ_URL"`
-	AnchorAPIKey     string `mapstructure:"ANCHOR_API_KEY"`
-	AnchorAPIBaseURL string `mapstructure:"ANCHOR_API_BASE_URL"`
-	ServerPort       string `mapstructure:"SERVER_PORT"`
+	DatabaseURL           string `mapstructure:"DATABASE_URL"`
+	RabbitMQURL           string `mapstructure:"RABBITMQ_URL"`
+	AnchorAPIKey          string `mapstructure:"ANCHOR_API_KEY"`
+	AnchorAPIBaseURL      string `mapstructure:"ANCHOR_API_BASE_URL"`
+	SubscriptionServiceURL string `mapstructure:"SUBSCRIPTION_SERVICE_URL"`
+	ServerPort            string `mapstructure:"SERVER_PORT"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -35,12 +36,14 @@ func LoadConfig() (*Config, error) {
 
 	// Set default values
 	viper.SetDefault("SERVER_PORT", "8082")
+	viper.SetDefault("SUBSCRIPTION_SERVICE_URL", "http://localhost:8085")
 
 	// Bind envs explicitly so containers pick them up reliably
 	_ = viper.BindEnv("DATABASE_URL")
 	_ = viper.BindEnv("RABBITMQ_URL")
 	_ = viper.BindEnv("ANCHOR_API_KEY")
 	_ = viper.BindEnv("ANCHOR_API_BASE_URL")
+	_ = viper.BindEnv("SUBSCRIPTION_SERVICE_URL")
 	_ = viper.BindEnv("SERVER_PORT")
 
 	if err := viper.ReadInConfig(); err != nil {

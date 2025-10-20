@@ -55,6 +55,8 @@ func (h *BeneficiaryHandler) CreateBeneficiary(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	authToken := middleware.GetAuthTokenFromContext(r.Context())
+
 	var req CreateBeneficiaryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -63,6 +65,7 @@ func (h *BeneficiaryHandler) CreateBeneficiary(w http.ResponseWriter, r *http.Re
 
 	input := app.CreateBeneficiaryInput{
 		UserID:        userID,
+		AuthToken:     authToken,
 		AccountNumber: req.AccountNumber,
 		BankCode:      req.BankCode,
 	}

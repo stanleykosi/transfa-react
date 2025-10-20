@@ -247,7 +247,7 @@ export const useAccountBalance = () => {
  */
 export const useListPaymentRequests = () => {
   const fetchPaymentRequests = async (): Promise<PaymentRequest[]> => {
-    const { data } = await apiClient.get<PaymentRequest[]>('/payment-requests', {
+    const { data } = await apiClient.get<PaymentRequest[]>('/transactions/payment-requests', {
       baseURL: TRANSACTION_SERVICE_URL,
     });
     return data;
@@ -272,9 +272,13 @@ export const useCreatePaymentRequest = (
   const createPaymentRequestMutation = async (
     payload: CreatePaymentRequestPayload
   ): Promise<PaymentRequest> => {
-    const { data } = await apiClient.post<PaymentRequest>('/payment-requests', payload, {
-      baseURL: TRANSACTION_SERVICE_URL,
-    });
+    const { data } = await apiClient.post<PaymentRequest>(
+      '/transactions/payment-requests',
+      payload,
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
     return data;
   };
 
@@ -295,9 +299,12 @@ export const useCreatePaymentRequest = (
  */
 export const useGetPaymentRequest = (requestId: string) => {
   const fetchPaymentRequest = async (): Promise<PaymentRequest> => {
-    const { data } = await apiClient.get<PaymentRequest>(`/payment-requests/${requestId}`, {
-      baseURL: TRANSACTION_SERVICE_URL,
-    });
+    const { data } = await apiClient.get<PaymentRequest>(
+      `/transactions/payment-requests/${requestId}`,
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
     return data;
   };
 

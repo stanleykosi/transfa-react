@@ -35,6 +35,7 @@ import (
 	"github.com/transfa/account-service/internal/config"
 	"github.com/transfa/account-service/internal/store"
 	"github.com/transfa/account-service/pkg/anchorclient"
+	"github.com/transfa/account-service/pkg/subscriptionclient"
 	"github.com/transfa/account-service/pkg/rabbitmq"
 )
 
@@ -78,9 +79,10 @@ func main() {
 	beneficiaryRepo := store.NewPostgresBeneficiaryRepository(dbpool)
 	bankRepo := store.NewPostgresBankRepository(dbpool)
 	anchorClient := anchorclient.NewClient(cfg.AnchorAPIBaseURL, cfg.AnchorAPIKey)
+	subscriptionClient := subscriptionclient.NewClient(cfg.SubscriptionServiceURL)
 	
 	// Setup services
-	accountService := app.NewAccountService(accountRepo, beneficiaryRepo, bankRepo, anchorClient)
+	accountService := app.NewAccountService(accountRepo, beneficiaryRepo, bankRepo, anchorClient, subscriptionClient)
 	eventHandler := app.NewAccountEventHandler(accountRepo, anchorClient)
 	
 	// Setup RabbitMQ consumer.

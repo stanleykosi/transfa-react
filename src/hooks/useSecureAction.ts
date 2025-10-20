@@ -9,6 +9,7 @@
  * - Provides a PIN input modal as a fallback.
  * - Manages all the state related to the authorization flow (e.g., modal visibility, errors).
  * - Decouples security logic from business logic components.
+ * - Development mode bypass for testing with Expo Go (controlled by EXPO_PUBLIC_SKIP_PIN_CHECK env var)
  *
  * @dependencies
  * - react: For `useState`, `useCallback`.
@@ -39,8 +40,14 @@ import { useSecurityStore } from '@/store/useSecurityStore';
 
 const rnBiometrics = new ReactNativeBiometrics();
 
+// Function to check if development mode is enabled (done at runtime, not module load)
+const isDevModeEnabled = () => {
+  const skipPin = process.env.EXPO_PUBLIC_SKIP_PIN_CHECK === 'true';
+  return skipPin;
+};
+
 export const useSecureAction = () => {
-  const { isPinSet, biometricsEnabled, verifyPin } = useSecurityStore.getState();
+  const { isPinSet, biometricsEnabled, verifyPin } = useSecurityStore();
   const [isModalVisible, setModalVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [actionToExecute, setActionToExecute] = useState<(() => void) | null>(null);
@@ -68,6 +75,15 @@ export const useSecureAction = () => {
 
   const triggerSecureAction = useCallback(
     async (action: () => void) => {
+      // Development mode: skip PIN/biometric check entirely
+      if (isDevModeEnabled()) {
+        console.warn(
+          '⚠️  DEVELOPMENT MODE: Skipping PIN/biometric check (EXPO_PUBLIC_SKIP_PIN_CHECK=true)'
+        );
+        action();
+        return;
+      }
+
       if (!isPinSet) {
         Alert.alert(
           'PIN Not Set',

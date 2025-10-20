@@ -89,9 +89,7 @@ export const uploadImage = async (asset: Asset): Promise<string> => {
   }
 
   // After a successful upload, get the public URL for the file.
-  const { data: urlData } = supabase.storage
-    .from('payment-request-images')
-    .getPublicUrl(data.path);
+  const { data: urlData } = supabase.storage.from('payment-request-images').getPublicUrl(data.path);
 
   return urlData.publicUrl;
 };

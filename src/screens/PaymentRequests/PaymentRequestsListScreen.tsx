@@ -34,8 +34,7 @@ import PrimaryButton from '@/components/PrimaryButton';
 type NavigationProp = NativeStackNavigationProp<AppStackParamList>;
 
 const PaymentRequestItem = React.memo(({ item }: { item: PaymentRequest }) => {
-  const statusStyles =
-    item.status === 'fulfilled' ? styles.statusFulfilled : styles.statusPending;
+  const statusStyles = item.status === 'fulfilled' ? styles.statusFulfilled : styles.statusPending;
 
   return (
     <TouchableOpacity style={styles.itemContainer}>

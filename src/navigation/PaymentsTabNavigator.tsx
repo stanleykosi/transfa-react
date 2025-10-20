@@ -34,6 +34,8 @@ const PaymentsTabNavigator = () => {
         tabBarLabelStyle: {
           fontWeight: theme.fontWeights.semibold,
           textTransform: 'capitalize',
+          fontSize: 12,
+          color: theme.colors.textPrimary,
         },
         tabBarStyle: {
           backgroundColor: theme.colors.background,
@@ -42,8 +44,16 @@ const PaymentsTabNavigator = () => {
         },
       }}
     >
-      <Tab.Screen name="History" component={PaymentHistoryScreen} />
-      <Tab.Screen name="Requests" component={PaymentRequestsListScreen} />
+      <Tab.Screen
+        name="History"
+        component={PaymentHistoryScreen}
+        options={{ tabBarLabel: 'Transaction History' }}
+      />
+      <Tab.Screen
+        name="Requests"
+        component={PaymentRequestsListScreen}
+        options={{ tabBarLabel: 'Payment Requests' }}
+      />
     </Tab.Navigator>
   );
 };
