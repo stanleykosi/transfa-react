@@ -113,7 +113,7 @@ const SelfTransferScreen = () => {
       sendWithdrawal({
         beneficiary_id: selectedBeneficiary.id,
         amount: amountInKobo,
-        description: description.trim() || undefined,
+        description: description.trim(),
       });
     };
 

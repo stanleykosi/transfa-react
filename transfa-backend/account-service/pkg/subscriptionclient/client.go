@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 )
 
 // SubscriptionStatus represents the subscription status returned by the subscription service
@@ -46,7 +47,9 @@ func (c *Client) GetUserSubscriptionStatus(ctx context.Context, authToken string
 		return nil, fmt.Errorf("authorization token is required")
 	}
 
-	url := fmt.Sprintf("%s/status", c.baseURL)
+	// Trim trailing slashes to avoid double slashes in URL
+	baseURL := strings.TrimSuffix(c.baseURL, "/")
+	url := fmt.Sprintf("%s/status", baseURL)
 	
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {

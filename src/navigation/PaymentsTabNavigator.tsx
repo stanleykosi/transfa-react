@@ -14,6 +14,7 @@ import { createMaterialTopTabNavigator } from '@react-navigation/material-top-ta
 import PaymentHistoryScreen from '@/screens/Payments/PaymentHistoryScreen';
 import PaymentRequestsListScreen from '@/screens/PaymentRequests/PaymentRequestsListScreen';
 import { theme } from '@/constants/theme';
+import { Text } from 'react-native';
 
 export type PaymentsTabParamList = {
   History: undefined;
@@ -25,7 +26,7 @@ const Tab = createMaterialTopTabNavigator<PaymentsTabParamList>();
 const PaymentsTabNavigator = () => {
   return (
     <Tab.Navigator
-      screenOptions={{
+      screenOptions={({ route }) => ({
         tabBarActiveTintColor: theme.colors.primary,
         tabBarInactiveTintColor: theme.colors.textSecondary,
         tabBarIndicatorStyle: {
@@ -33,27 +34,32 @@ const PaymentsTabNavigator = () => {
         },
         tabBarLabelStyle: {
           fontWeight: theme.fontWeights.semibold,
-          textTransform: 'capitalize',
-          fontSize: 12,
-          color: theme.colors.textPrimary,
+          fontSize: 13,
+          margin: 0,
         },
         tabBarStyle: {
           backgroundColor: theme.colors.background,
-          elevation: 0, // Remove shadow on Android
-          shadowOpacity: 0, // Remove shadow on iOS
+          elevation: 0,
+          shadowOpacity: 0,
+          height: 48,
         },
-      }}
+        tabBarLabel: ({ focused, color }) => {
+          const label = route.name === 'History' ? 'Transaction History' : 'Payment Requests';
+          return (
+            <Text style={{
+              color: focused ? theme.colors.primary : theme.colors.textSecondary,
+              fontSize: 13,
+              fontWeight: '600',
+              textTransform: 'capitalize',
+            }}>
+              {label}
+            </Text>
+          );
+        },
+      })}
     >
-      <Tab.Screen
-        name="History"
-        component={PaymentHistoryScreen}
-        options={{ tabBarLabel: 'Transaction History' }}
-      />
-      <Tab.Screen
-        name="Requests"
-        component={PaymentRequestsListScreen}
-        options={{ tabBarLabel: 'Payment Requests' }}
-      />
+      <Tab.Screen name="History" component={PaymentHistoryScreen} />
+      <Tab.Screen name="Requests" component={PaymentRequestsListScreen} />
     </Tab.Navigator>
   );
 };

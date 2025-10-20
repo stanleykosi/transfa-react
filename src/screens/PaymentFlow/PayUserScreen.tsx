@@ -93,7 +93,7 @@ const PayUserScreen = () => {
       sendPayment({
         recipient_username: username.trim(),
         amount: amountInKobo,
-        description: description.trim() || undefined,
+        description: description.trim(),
       });
     };
 
