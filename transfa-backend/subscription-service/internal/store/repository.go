@@ -8,6 +8,7 @@ package store
 import (
 	"context"
 	"errors"
+	"log"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -29,11 +30,13 @@ func NewRepository(db *pgxpool.Pool) *Repository {
 
 // GetSubscriptionByUserID retrieves a subscription for a given user ID.
 func (r *Repository) GetSubscriptionByUserID(ctx context.Context, userID string) (*domain.Subscription, error) {
+	log.Printf("Repository: Looking up subscription for user ID: %s", userID)
+	
 	var sub domain.Subscription
 	query := `
         SELECT id, user_id, status, current_period_start, current_period_end, auto_renew
         FROM subscriptions
-        WHERE user_id = $1
+        WHERE user_id = $1::UUID
     `
 	err := r.db.QueryRow(ctx, query, userID).Scan(
 		&sub.ID,
@@ -44,20 +47,26 @@ func (r *Repository) GetSubscriptionByUserID(ctx context.Context, userID string)
 		&sub.AutoRenew,
 	)
 	if err != nil {
+		log.Printf("Repository: Query error for user %s: %v", userID, err)
 		if err == pgx.ErrNoRows {
+			log.Printf("Repository: No subscription found for user %s", userID)
 			return nil, ErrSubscriptionNotFound
 		}
 		return nil, err
 	}
+	
+	log.Printf("Repository: Found subscription for user %s: %+v", userID, sub)
 	return &sub, nil
 }
 
 // CreateOrUpdateSubscription creates a new subscription or updates an existing one for a user.
 func (r *Repository) CreateOrUpdateSubscription(ctx context.Context, sub *domain.Subscription) (*domain.Subscription, error) {
+	log.Printf("Repository: Creating/updating subscription for user %s: %+v", sub.UserID, sub)
+	
 	var createdSub domain.Subscription
 	query := `
         INSERT INTO subscriptions (user_id, status, current_period_start, current_period_end, auto_renew)
-        VALUES ($1, $2, $3, $4, $5)
+        VALUES ($1::UUID, $2, $3, $4, $5)
         ON CONFLICT (user_id) DO UPDATE SET
             status = EXCLUDED.status,
             current_period_start = EXCLUDED.current_period_start,
@@ -82,8 +91,11 @@ func (r *Repository) CreateOrUpdateSubscription(ctx context.Context, sub *domain
 	)
 
 	if err != nil {
+		log.Printf("Repository: Error creating/updating subscription for user %s: %v", sub.UserID, err)
 		return nil, err
 	}
+	
+	log.Printf("Repository: Successfully created/updated subscription for user %s: %+v", sub.UserID, createdSub)
 	return &createdSub, nil
 }
 
@@ -100,7 +112,7 @@ func (r *Repository) GetMonthlyTransferUsage(ctx context.Context, userID string)
 	query := `
         SELECT external_receipt_count
         FROM monthly_transfer_usage
-        WHERE user_id = $1 AND period = DATE_TRUNC('month', NOW())::DATE
+        WHERE user_id = $1::UUID AND period = DATE_TRUNC('month', NOW())::DATE
     `
 	err := r.db.QueryRow(ctx, query, userID).Scan(&count)
 	if err != nil {

@@ -41,8 +41,10 @@ func (s Service) GetStatus(ctx context.Context, userID string) (*domain.Subscrip
 
 	sub, err := s.repo.GetSubscriptionByUserID(ctx, userID)
 	if err != nil {
+		log.Printf("Repository error for user %s: %v", userID, err)
 		// If no subscription exists, create a free tier subscription record
 		if errors.Is(err, store.ErrSubscriptionNotFound) {
+			log.Printf("No subscription found for user %s, creating free tier record", userID)
 			// Create a free tier subscription record for the user
 			freeTierSub := &domain.Subscription{
 				UserID:             userID,

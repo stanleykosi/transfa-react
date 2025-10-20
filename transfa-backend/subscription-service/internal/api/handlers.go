@@ -8,6 +8,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/transfa/subscription-service/internal/app"
@@ -32,12 +33,19 @@ func (h *Handler) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Log the user ID for debugging
+	log.Printf("Getting subscription status for user: %s", userID)
+
 	// Call the service layer to get the subscription status
 	status, err := h.service.GetStatus(r.Context(), userID)
 	if err != nil {
+		log.Printf("Error getting subscription status for user %s: %v", userID, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	// Log successful response
+	log.Printf("Successfully retrieved subscription status for user %s: %+v", userID, status)
 
 	// Respond with the status
 	respondWithJSON(w, http.StatusOK, status)
