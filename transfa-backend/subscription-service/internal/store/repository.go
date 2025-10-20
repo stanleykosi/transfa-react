@@ -6,17 +6,18 @@
 package store
 
 import (
-	"context"
-	"errors"
-	"log"
+    "context"
+    "errors"
+    "log"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/transfa/subscription-service/internal/domain"
+    "github.com/jackc/pgx/v5"
+    "github.com/jackc/pgx/v5/pgxpool"
+    "github.com/transfa/subscription-service/internal/domain"
 )
 
 // Define error constants
 var ErrSubscriptionNotFound = errors.New("subscription not found")
+var ErrUserNotFound = errors.New("user not found")
 
 // Repository handles database operations for subscriptions.
 type Repository struct {
@@ -26,6 +27,23 @@ type Repository struct {
 // NewRepository creates a new repository.
 func NewRepository(db *pgxpool.Pool) *Repository {
 	return &Repository{db: db}
+}
+
+// FindUserIDByClerkUserID resolves the internal UUID from a Clerk user id string.
+func (r *Repository) FindUserIDByClerkUserID(ctx context.Context, clerkUserID string) (string, error) {
+    log.Printf("Repository: Resolving internal user id for clerk_user_id: %s", clerkUserID)
+    var id string
+    err := r.db.QueryRow(ctx, "SELECT id FROM users WHERE clerk_user_id = $1", clerkUserID).Scan(&id)
+    if err != nil {
+        if err == pgx.ErrNoRows {
+            log.Printf("Repository: No user found for clerk_user_id: %s", clerkUserID)
+            return "", ErrUserNotFound
+        }
+        log.Printf("Repository: Error resolving user id for clerk_user_id %s: %v", clerkUserID, err)
+        return "", err
+    }
+    log.Printf("Repository: Resolved clerk_user_id %s to internal user id %s", clerkUserID, id)
+    return id, nil
 }
 
 // GetSubscriptionByUserID retrieves a subscription for a given user ID.
