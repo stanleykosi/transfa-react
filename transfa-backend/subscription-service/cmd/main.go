@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+    "github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/transfa/subscription-service/internal/api"
@@ -44,7 +45,7 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
-	// Establish connection to the PostgreSQL database with connection pool configuration
+    // Establish connection to the PostgreSQL database with connection pool configuration
 	config, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 	if err != nil {
 		logger.Error("unable to parse database URL", "error", err)
@@ -56,6 +57,10 @@ func main() {
 	config.MinConns = 20
 	config.MaxConnLifetime = 30 * time.Minute
 	config.MaxConnIdleTime = 5 * time.Minute
+
+    // IMPORTANT: Disable prepared statements to work with PgBouncer transaction pooling
+    // Use simple protocol to avoid statement cache errors (SQLSTATE 42P05)
+    config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 	
 	dbpool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
