@@ -9,6 +9,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -58,7 +59,7 @@ func (h *TransactionHandlers) CreatePaymentRequestHandler(w http.ResponseWriter,
 	// Call the service to create the payment request.
 	request, err := h.service.CreatePaymentRequest(r.Context(), userID, payload)
 	if err != nil {
-		h.logger.Error("Failed to create payment request", "error", err)
+		log.Printf("Failed to create payment request for user %s: %v", userID, err)
 		h.writeError(w, http.StatusInternalServerError, "Could not create payment request.")
 		return
 	}
@@ -97,7 +98,7 @@ func (h *TransactionHandlers) ListPaymentRequestsHandler(w http.ResponseWriter, 
 	// Call the service to get the list of requests.
 	requests, err := h.service.ListPaymentRequests(r.Context(), userID)
 	if err != nil {
-		h.logger.Error("Failed to list payment requests", "error", err)
+		log.Printf("Failed to list payment requests for user %s: %v", userID, err)
 		h.writeError(w, http.StatusInternalServerError, "Could not retrieve payment requests.")
 		return
 	}
@@ -127,7 +128,7 @@ func (h *TransactionHandlers) GetPaymentRequestByIDHandler(w http.ResponseWriter
 	// Call the service to get the request.
 	request, err := h.service.GetPaymentRequestByID(r.Context(), requestID)
 	if err != nil {
-		h.logger.Error("Failed to get payment request by ID", "error", err, "request_id", requestID)
+		log.Printf("Failed to get payment request by ID %s: %v", requestID, err)
 		h.writeError(w, http.StatusInternalServerError, "Could not retrieve payment request.")
 		return
 	}
