@@ -20,6 +20,7 @@ type Beneficiary struct {
 	AccountName           string    `json:"account_name"`
 	AccountNumberMasked   string    `json:"account_number_masked"`
 	BankName              string    `json:"bank_name"`
+	IsDefault             bool      `json:"is_default"`
 	CreatedAt             time.Time `json:"created_at"`
 	UpdatedAt             time.Time `json:"updated_at"`
 }

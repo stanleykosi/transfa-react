@@ -69,10 +69,10 @@ func (r *PostgresBeneficiaryRepository) CreateBeneficiary(ctx context.Context, b
 func (r *PostgresBeneficiaryRepository) GetBeneficiariesByUserID(ctx context.Context, userID string) ([]domain.Beneficiary, error) {
 	var beneficiaries []domain.Beneficiary
 	query := `
-        SELECT id, user_id, anchor_counterparty_id, account_name, account_number_masked, bank_name, created_at, updated_at
+        SELECT id, user_id, anchor_counterparty_id, account_name, account_number_masked, bank_name, is_default, created_at, updated_at
         FROM beneficiaries
         WHERE user_id = $1
-        ORDER BY created_at DESC
+        ORDER BY is_default DESC, created_at DESC
     `
 	rows, err := r.db.Query(ctx, query, userID)
 	if err != nil {
@@ -82,7 +82,7 @@ func (r *PostgresBeneficiaryRepository) GetBeneficiariesByUserID(ctx context.Con
 
 	for rows.Next() {
 		var b domain.Beneficiary
-		err := rows.Scan(&b.ID, &b.UserID, &b.AnchorCounterpartyID, &b.AccountName, &b.AccountNumberMasked, &b.BankName, &b.CreatedAt, &b.UpdatedAt)
+		err := rows.Scan(&b.ID, &b.UserID, &b.AnchorCounterpartyID, &b.AccountName, &b.AccountNumberMasked, &b.BankName, &b.IsDefault, &b.CreatedAt, &b.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan beneficiary row: %w", err)
 		}
