@@ -93,9 +93,26 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		log.Printf("ProcessP2PTransfer: Failed to find sender account for %s: %v", sender.ID, err)
 		return nil, fmt.Errorf("failed to find sender account: %w", err)
 	}
-	log.Printf("ProcessP2PTransfer: Sender account balance: %d, required: %d", senderAccount.Balance, req.Amount+TransactionFee)
-	if senderAccount.Balance < req.Amount+TransactionFee {
-		log.Printf("ProcessP2PTransfer: Insufficient funds for sender %s", sender.ID)
+
+	// Sync the internal database balance with Anchor before validation
+	if err := s.syncAccountBalance(ctx, sender.ID); err != nil {
+		log.Printf("ProcessP2PTransfer: Failed to sync balance for %s: %v", sender.ID, err)
+		// Continue with validation even if sync fails, but log the warning
+	}
+
+	// Get the actual balance from Anchor API for validation
+	anchorBalance, err := s.anchorClient.GetAccountBalance(ctx, senderAccount.AnchorAccountID)
+	if err != nil {
+		log.Printf("ProcessP2PTransfer: Failed to get Anchor balance for %s: %v", sender.ID, err)
+		return nil, fmt.Errorf("failed to get account balance from Anchor: %w", err)
+	}
+
+	availableBalance := anchorBalance.Data.AvailableBalance
+	requiredAmount := req.Amount + TransactionFee
+	log.Printf("ProcessP2PTransfer: Sender Anchor balance: %d, required: %d", availableBalance, requiredAmount)
+	
+	if availableBalance < requiredAmount {
+		log.Printf("ProcessP2PTransfer: Insufficient funds for sender %s (Anchor balance: %d, required: %d)", sender.ID, availableBalance, requiredAmount)
 		return nil, store.ErrInsufficientFunds
 	}
 
@@ -274,7 +291,26 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 	if err != nil {
 		return nil, fmt.Errorf("failed to find sender account: %w", err)
 	}
-	if senderAccount.Balance < req.Amount+TransactionFee {
+
+	// Sync the internal database balance with Anchor before validation
+	if err := s.syncAccountBalance(ctx, sender.ID); err != nil {
+		log.Printf("ProcessSelfTransfer: Failed to sync balance for %s: %v", sender.ID, err)
+		// Continue with validation even if sync fails, but log the warning
+	}
+
+	// Get the actual balance from Anchor API for validation
+	anchorBalance, err := s.anchorClient.GetAccountBalance(ctx, senderAccount.AnchorAccountID)
+	if err != nil {
+		log.Printf("ProcessSelfTransfer: Failed to get Anchor balance for %s: %v", sender.ID, err)
+		return nil, fmt.Errorf("failed to get account balance from Anchor: %w", err)
+	}
+
+	availableBalance := anchorBalance.Data.AvailableBalance
+	requiredAmount := req.Amount + TransactionFee
+	log.Printf("ProcessSelfTransfer: Sender Anchor balance: %d, required: %d", availableBalance, requiredAmount)
+	
+	if availableBalance < requiredAmount {
+		log.Printf("ProcessSelfTransfer: Insufficient funds for sender %s (Anchor balance: %d, required: %d)", sender.ID, availableBalance, requiredAmount)
 		return nil, store.ErrInsufficientFunds
 	}
 
@@ -373,6 +409,12 @@ func (s *Service) GetAccountBalance(ctx context.Context, userID uuid.UUID) (*dom
 	}
 
 	log.Printf("Successfully fetched balance from Anchor: %+v", anchorBalance)
+
+	// Sync the internal database with the Anchor balance
+	if err := s.syncAccountBalance(ctx, userID); err != nil {
+		log.Printf("WARN: Failed to sync balance for user %s: %v", userID, err)
+		// Continue even if sync fails, but log the warning
+	}
 
 	// Convert Anchor balance to our domain model
 	balance := &domain.AccountBalance{
@@ -490,5 +532,34 @@ func (s *Service) collectTransactionFee(ctx context.Context, amount int64, descr
 	// 2. Use Anchor's fee collection mechanisms
 	// 3. Implement proper fee tracking and reporting
 	
+	return nil
+}
+
+// syncAccountBalance synchronizes the internal database balance with Anchor API
+func (s *Service) syncAccountBalance(ctx context.Context, userID uuid.UUID) error {
+	// Get the account from internal database
+	account, err := s.repo.FindAccountByUserID(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("failed to find account: %w", err)
+	}
+
+	// Get the current balance from Anchor
+	anchorBalance, err := s.anchorClient.GetAccountBalance(ctx, account.AnchorAccountID)
+	if err != nil {
+		return fmt.Errorf("failed to get balance from Anchor: %w", err)
+	}
+
+	// Update the internal database with the Anchor balance
+	newBalance := anchorBalance.Data.AvailableBalance
+	if account.Balance != newBalance {
+		log.Printf("Syncing balance for user %s: internal=%d, anchor=%d", userID, account.Balance, newBalance)
+		
+		if err := s.repo.UpdateAccountBalance(ctx, userID, newBalance); err != nil {
+			return fmt.Errorf("failed to update account balance: %w", err)
+		}
+		
+		log.Printf("Successfully synced balance for user %s to %d", userID, newBalance)
+	}
+
 	return nil
 }

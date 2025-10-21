@@ -29,6 +29,7 @@ type Repository interface {
 	FindUserByUsername(ctx context.Context, username string) (*domain.User, error)
 	FindUserByID(ctx context.Context, userID uuid.UUID) (*domain.User, error)
 	FindAccountByUserID(ctx context.Context, userID uuid.UUID) (*domain.Account, error)
+	UpdateAccountBalance(ctx context.Context, userID uuid.UUID, balance int64) error
 	FindBeneficiaryByID(ctx context.Context, beneficiaryID uuid.UUID, userID uuid.UUID) (*domain.Beneficiary, error)
 	FindBeneficiariesByUserID(ctx context.Context, userID uuid.UUID) ([]domain.Beneficiary, error)
 	FindDefaultBeneficiaryByUserID(ctx context.Context, userID uuid.UUID) (*domain.Beneficiary, error)

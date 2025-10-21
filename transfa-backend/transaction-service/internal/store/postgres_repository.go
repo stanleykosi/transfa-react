@@ -99,6 +99,22 @@ func (r *PostgresRepository) FindAccountByUserID(ctx context.Context, userID uui
 	return &account, nil
 }
 
+// UpdateAccountBalance updates the balance for a user's account
+func (r *PostgresRepository) UpdateAccountBalance(ctx context.Context, userID uuid.UUID, balance int64) error {
+	query := `UPDATE accounts SET balance = $1, updated_at = NOW() WHERE user_id = $2 AND account_type = 'primary'`
+	result, err := r.db.Exec(ctx, query, balance, userID)
+	if err != nil {
+		return err
+	}
+	
+	rowsAffected := result.RowsAffected()
+	if rowsAffected == 0 {
+		return ErrAccountNotFound
+	}
+	
+	return nil
+}
+
 // FindBeneficiaryByID retrieves a specific beneficiary owned by a user.
 func (r *PostgresRepository) FindBeneficiaryByID(ctx context.Context, beneficiaryID uuid.UUID, userID uuid.UUID) (*domain.Beneficiary, error) {
 	var beneficiary domain.Beneficiary
