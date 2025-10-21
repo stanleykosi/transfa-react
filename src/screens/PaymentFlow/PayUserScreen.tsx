@@ -89,6 +89,22 @@ const PayUserScreen = () => {
       return;
     }
 
+    // Validate description field for Anchor API compliance
+    if (!description.trim()) {
+      Alert.alert('Invalid Input', 'Please enter a description for this transfer.');
+      return;
+    }
+
+    if (description.trim().length < 3) {
+      Alert.alert('Invalid Input', 'Description must be at least 3 characters long.');
+      return;
+    }
+
+    if (description.trim().length > 100) {
+      Alert.alert('Invalid Input', 'Description must be less than 100 characters.');
+      return;
+    }
+
     const action = () => {
       sendPayment({
         recipient_username: username.trim(),

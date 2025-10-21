@@ -80,14 +80,14 @@ export interface BanksResponse {
 export interface P2PTransferPayload {
   recipient_username: string;
   amount: number; // in kobo
-  description?: string;
+  description: string; // Required for Anchor API compliance
 }
 
 // Payload for POST /transactions/self-transfer
 export interface SelfTransferPayload {
   beneficiary_id: string;
   amount: number; // in kobo
-  description?: string;
+  description: string; // Required for Anchor API compliance
 }
 
 // Generic response for a transaction initiation

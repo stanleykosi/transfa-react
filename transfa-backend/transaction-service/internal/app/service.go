@@ -183,10 +183,19 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 
 			if err != nil || recipientBeneficiary == nil {
 				log.Printf("WARN: recipient %s wants external transfer but has no beneficiary. Rerouting internally.", recipient.ID)
-				anchorResp, err = s.performInternalTransfer(ctx, txRecord, senderAccount, recipient, "No beneficiary available for external transfer")
+				reason := fmt.Sprintf("P2P Transfer to %s", req.RecipientUsername)
+				if req.Description != "" {
+					reason = fmt.Sprintf("P2P Transfer to %s: %s", req.RecipientUsername, req.Description)
+				}
+				anchorResp, err = s.performInternalTransfer(ctx, txRecord, senderAccount, recipient, reason)
 			} else {
 				txRecord.DestinationBeneficiaryID = &recipientBeneficiary.ID
-				anchorResp, err = s.anchorClient.InitiateNIPTransfer(ctx, senderAccount.AnchorAccountID, recipientBeneficiary.AnchorCounterpartyID, req.Description, req.Amount)
+				// Create a proper reason for Anchor API
+				reason := fmt.Sprintf("P2P Transfer to %s", req.RecipientUsername)
+				if req.Description != "" {
+					reason = fmt.Sprintf("P2P Transfer to %s: %s", req.RecipientUsername, req.Description)
+				}
+				anchorResp, err = s.anchorClient.InitiateNIPTransfer(ctx, senderAccount.AnchorAccountID, recipientBeneficiary.AnchorCounterpartyID, reason, req.Amount)
 
 				// Increment monthly usage for free tier recipients when external transfer is successful
 				if err == nil {
@@ -204,11 +213,19 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 			}
 		} else {
 			// Recipient wants external but is not eligible - route internally
-			anchorResp, err = s.performInternalTransfer(ctx, txRecord, senderAccount, recipient, "Recipient is on the free tier and has exhausted their monthly external transfer limit.")
+			reason := fmt.Sprintf("P2P Transfer to %s", req.RecipientUsername)
+			if req.Description != "" {
+				reason = fmt.Sprintf("P2P Transfer to %s: %s", req.RecipientUsername, req.Description)
+			}
+			anchorResp, err = s.performInternalTransfer(ctx, txRecord, senderAccount, recipient, reason)
 		}
 	} else {
 		// Recipient prefers internal wallet - route internally
-		anchorResp, err = s.performInternalTransfer(ctx, txRecord, senderAccount, recipient, "Recipient prefers to receive transfers to their internal wallet.")
+		reason := fmt.Sprintf("P2P Transfer to %s", req.RecipientUsername)
+		if req.Description != "" {
+			reason = fmt.Sprintf("P2P Transfer to %s: %s", req.RecipientUsername, req.Description)
+		}
+		anchorResp, err = s.performInternalTransfer(ctx, txRecord, senderAccount, recipient, reason)
 	}
 
 	// 6. Handle Anchor API response
@@ -247,7 +264,7 @@ func (s *Service) performInternalTransfer(ctx context.Context, txRecord *domain.
 		})
 	}
 
-	return s.anchorClient.InitiateBookTransfer(ctx, senderAccount.AnchorAccountID, recipientAccount.AnchorAccountID, txRecord.Description, txRecord.Amount)
+	return s.anchorClient.InitiateBookTransfer(ctx, senderAccount.AnchorAccountID, recipientAccount.AnchorAccountID, reason, txRecord.Amount)
 }
 
 // checkRecipientEligibility checks if a recipient can receive an external transfer.
@@ -346,7 +363,13 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 	}
 
 	// 5. Initiate NIP transfer via Anchor
-	anchorResp, err := s.anchorClient.InitiateNIPTransfer(ctx, senderAccount.AnchorAccountID, beneficiary.AnchorCounterpartyID, req.Description, req.Amount)
+	// Create a proper reason for Anchor API
+	reason := "Self Transfer"
+	if req.Description != "" {
+		reason = fmt.Sprintf("Self Transfer: %s", req.Description)
+	}
+	
+	anchorResp, err := s.anchorClient.InitiateNIPTransfer(ctx, senderAccount.AnchorAccountID, beneficiary.AnchorCounterpartyID, reason, req.Amount)
 	if err != nil {
 		// Mark transaction as failed and refund
 		s.repo.UpdateTransactionStatus(ctx, txRecord.ID, "", "failed")
