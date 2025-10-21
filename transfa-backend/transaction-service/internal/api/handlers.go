@@ -404,6 +404,51 @@ func (h *TransactionHandlers) GetAccountBalanceHandler(w http.ResponseWriter, r 
 	json.NewEncoder(w).Encode(balance)
 }
 
+// GetTransactionHistoryHandler handles requests to get user's transaction history.
+func (h *TransactionHandlers) GetTransactionHistoryHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("GetTransactionHistoryHandler called")
+	
+	// Retrieve the authenticated user's ID from the context.
+	userIDStr, ok := GetClerkUserID(r.Context())
+	if !ok {
+		log.Printf("Could not get user ID from context")
+		http.Error(w, "Could not get user ID from context", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("User ID from context: %s", userIDStr)
+
+	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
+	if err != nil {
+		log.Printf("Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		http.Error(w, "User not found", http.StatusBadRequest)
+		return
+	}
+	userID, err := uuid.Parse(internalIDStr)
+	if err != nil {
+		log.Printf("Invalid user ID format: %s, error: %v", internalIDStr, err)
+		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+		return
+	}
+
+	log.Printf("Parsed user ID: %s", userID)
+
+	// Get user's transaction history
+	transactions, err := h.service.GetTransactionHistory(r.Context(), userID)
+	if err != nil {
+		log.Printf("Failed to get transaction history for user %s: %v", userID, err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Successfully retrieved %d transactions for user %s", len(transactions), userID)
+
+	// Respond with the transaction history
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(transactions)
+}
+
 // SubscriptionFeeHandler handles internal requests to debit subscription fees.
 // This is called by the scheduler-service for monthly billing.
 func (h *TransactionHandlers) SubscriptionFeeHandler(w http.ResponseWriter, r *http.Request) {

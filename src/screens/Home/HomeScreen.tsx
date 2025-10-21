@@ -197,6 +197,16 @@ const HomeScreen = () => {
                 style={styles.paymentButton}
               />
             </View>
+
+            {/* Refresh Button */}
+            <View style={styles.actionButtons}>
+              <PrimaryButton
+                title={refreshing ? 'Refreshing...' : 'Refresh Balance'}
+                onPress={handleRefresh}
+                isLoading={refreshing}
+                style={styles.actionButton}
+              />
+            </View>
           </>
         ) : polling ? (
           <>
@@ -292,6 +302,19 @@ const styles = StyleSheet.create({
   },
   paymentButton: {
     backgroundColor: theme.colors.primary,
+    paddingVertical: theme.spacing.s12,
+    paddingHorizontal: theme.spacing.s24,
+    borderRadius: theme.radii.md,
+  },
+  actionButtons: {
+    marginTop: theme.spacing.s16,
+    width: '100%',
+    gap: theme.spacing.s12,
+  },
+  actionButton: {
+    backgroundColor: theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.primary,
     paddingVertical: theme.spacing.s12,
     paddingHorizontal: theme.spacing.s24,
     borderRadius: theme.radii.md,

@@ -122,7 +122,7 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 	}
 
 	// 3.5. Collect the transaction fee to admin account
-	if err := s.collectTransactionFee(ctx, TransactionFee, "P2P Transfer Fee"); err != nil {
+	if err := s.collectTransactionFee(ctx, senderAccount.AnchorAccountID, TransactionFee, "P2P Transfer Fee"); err != nil {
 		log.Printf("WARN: Failed to collect transaction fee: %v", err)
 		// Don't fail the transaction, just log the warning
 	}
@@ -138,6 +138,7 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		Amount:          req.Amount,
 		Fee:             TransactionFee,
 		Description:     req.Description,
+		Category:        "p2p_transfer",
 	}
 	if err := s.repo.CreateTransaction(ctx, txRecord); err != nil {
 		// Refund the debited amount since transaction creation failed
@@ -252,7 +253,10 @@ func (s *Service) performInternalTransfer(ctx context.Context, txRecord *domain.
 	if err != nil {
 		return nil, fmt.Errorf("could not find recipient's internal account: %w", err)
 	}
+	
+	// Set the destination account ID for internal transfers
 	txRecord.DestinationAccountID = &recipientAccount.ID
+	txRecord.RecipientID = &recipient.ID
 
 	// Publish event that transfer was rerouted
 	if s.eventProducer != nil {
@@ -337,7 +341,7 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 	}
 
 	// 3.5. Collect the transaction fee to admin account
-	if err := s.collectTransactionFee(ctx, TransactionFee, "Self Transfer Fee"); err != nil {
+	if err := s.collectTransactionFee(ctx, senderAccount.AnchorAccountID, TransactionFee, "Self Transfer Fee"); err != nil {
 		log.Printf("WARN: Failed to collect transaction fee: %v", err)
 		// Don't fail the transaction, just log the warning
 	}
@@ -353,6 +357,7 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 		Amount:                   req.Amount,
 		Fee:                      TransactionFee,
 		Description:              req.Description,
+		Category:                 "self_transfer",
 	}
 	if err := s.repo.CreateTransaction(ctx, txRecord); err != nil {
 		// Refund the debited amount since transaction creation failed
@@ -451,6 +456,11 @@ func (s *Service) GetAccountBalance(ctx context.Context, userID uuid.UUID) (*dom
 	return balance, nil
 }
 
+// GetTransactionHistory retrieves the transaction history for a user.
+func (s *Service) GetTransactionHistory(ctx context.Context, userID uuid.UUID) ([]domain.Transaction, error) {
+	return s.repo.FindTransactionsByUserID(ctx, userID)
+}
+
 // ProcessSubscriptionFee handles the logic for debiting subscription fees.
 // This is called by the scheduler-service for monthly billing.
 func (s *Service) ProcessSubscriptionFee(ctx context.Context, userID uuid.UUID, amount int64, reason string) (*domain.Transaction, error) {
@@ -538,22 +548,53 @@ func (s *Service) GetPaymentRequestByID(ctx context.Context, requestID uuid.UUID
 }
 
 // collectTransactionFee transfers the transaction fee to the admin account.
-func (s *Service) collectTransactionFee(ctx context.Context, amount int64, description string) error {
+func (s *Service) collectTransactionFee(ctx context.Context, sourceAccountID string, amount int64, description string) error {
 	if s.adminAccountID == "" {
 		return fmt.Errorf("admin account ID not configured")
 	}
 
-	// Use Anchor API to transfer fee to admin account
-	// For now, we'll use a book transfer from the sender's account to admin account
-	// In a real implementation, you might want to create a dedicated fee collection mechanism
+	log.Printf("Collecting transaction fee of %d from %s to admin account %s", amount, sourceAccountID, s.adminAccountID)
+
+	// Get the admin account balance to verify it exists
+	adminBalance, err := s.anchorClient.GetAccountBalance(ctx, s.adminAccountID)
+	if err != nil {
+		log.Printf("Failed to get admin account balance: %v", err)
+		return fmt.Errorf("failed to get admin account balance: %w", err)
+	}
+
+	log.Printf("Admin account current balance: %d", adminBalance.Data.AvailableBalance)
+
+	// Perform the actual transfer from source account to admin account
+	transferResp, err := s.anchorClient.InitiateBookTransfer(ctx, sourceAccountID, s.adminAccountID, description, amount)
+	if err != nil {
+		log.Printf("Failed to transfer fee to admin account: %v", err)
+		return fmt.Errorf("failed to transfer fee to admin account: %w", err)
+	}
+
+	log.Printf("Fee transfer successful: %s", transferResp.Data.ID)
+
+	// Create a fee collection transaction record for the admin account
+	feeTransaction := &domain.Transaction{
+		ID:                       uuid.New(),
+		AnchorTransferID:         &transferResp.Data.ID,
+		SenderID:                 uuid.Nil, // System-generated fee (no sender)
+		SourceAccountID:          uuid.Nil, // System account (nil for fee collection)
+		DestinationAccountID:     nil,      // Admin account (will be set by Anchor)
+		Type:                     "subscription_fee", // Use subscription_fee type for admin fees
+		Status:                   "completed",
+		Amount:                   amount,
+		Fee:                      0, // No fee on fee collection
+		Description:              description,
+		Category:                 "transaction_fee",
+	}
 	
-	log.Printf("Collecting transaction fee of %d kobo to admin account %s: %s", amount, s.adminAccountID, description)
+	// Save the fee transaction to the database
+	if err := s.repo.CreateTransaction(ctx, feeTransaction); err != nil {
+		log.Printf("Failed to save fee transaction to database: %v", err)
+		return fmt.Errorf("failed to save fee transaction: %w", err)
+	}
 	
-	// Note: This is a simplified implementation
-	// In production, you might want to:
-	// 1. Create a dedicated fee collection account in your system
-	// 2. Use Anchor's fee collection mechanisms
-	// 3. Implement proper fee tracking and reporting
+	log.Printf("Fee collection transaction created and saved: %s, amount: %d, transfer_id: %s", feeTransaction.ID, amount, transferResp.Data.ID)
 	
 	return nil
 }

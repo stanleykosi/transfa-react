@@ -55,6 +55,9 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 		// Account balance endpoint
 		r.Get("/account/balance", h.GetAccountBalanceHandler)
 
+		// Transaction history endpoint
+		r.Get("/transactions", h.GetTransactionHistoryHandler)
+
 		// Payment Request routes
 		r.Route("/payment-requests", func(r chi.Router) {
 			r.Post("/", h.CreatePaymentRequestHandler)    // Create a new payment request

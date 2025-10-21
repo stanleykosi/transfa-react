@@ -115,6 +115,38 @@ func (r *PostgresRepository) UpdateAccountBalance(ctx context.Context, userID uu
 	return nil
 }
 
+// FindTransactionsByUserID retrieves all transactions for a user (as sender or recipient).
+func (r *PostgresRepository) FindTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]domain.Transaction, error) {
+	var transactions []domain.Transaction
+	query := `
+		SELECT id, anchor_transfer_id, sender_id, recipient_id, source_account_id, destination_account_id, 
+		       destination_beneficiary_id, type, category, status, amount, fee, description, created_at, updated_at
+		FROM transactions 
+		WHERE sender_id = $1 OR recipient_id = $1 
+		ORDER BY created_at DESC
+	`
+	rows, err := r.db.Query(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var tx domain.Transaction
+		err := rows.Scan(
+			&tx.ID, &tx.AnchorTransferID, &tx.SenderID, &tx.RecipientID, &tx.SourceAccountID,
+			&tx.DestinationAccountID, &tx.DestinationBeneficiaryID, &tx.Type, &tx.Category,
+			&tx.Status, &tx.Amount, &tx.Fee, &tx.Description, &tx.CreatedAt, &tx.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		transactions = append(transactions, tx)
+	}
+
+	return transactions, nil
+}
+
 // FindBeneficiaryByID retrieves a specific beneficiary owned by a user.
 func (r *PostgresRepository) FindBeneficiaryByID(ctx context.Context, beneficiaryID uuid.UUID, userID uuid.UUID) (*domain.Beneficiary, error) {
 	var beneficiary domain.Beneficiary
@@ -235,10 +267,10 @@ func (r *PostgresRepository) IncrementMonthlyUsage(ctx context.Context, userID u
 // CreateTransaction inserts a new transaction record into the database.
 func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *domain.Transaction) error {
 	query := `
-		INSERT INTO transactions (id, sender_id, recipient_id, source_account_id, destination_account_id, destination_beneficiary_id, type, status, amount, fee, description)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO transactions (id, sender_id, recipient_id, source_account_id, destination_account_id, destination_beneficiary_id, type, category, status, amount, fee, description)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`
-	_, err := r.db.Exec(ctx, query, tx.ID, tx.SenderID, tx.RecipientID, tx.SourceAccountID, tx.DestinationAccountID, tx.DestinationBeneficiaryID, tx.Type, tx.Status, tx.Amount, tx.Fee, tx.Description)
+	_, err := r.db.Exec(ctx, query, tx.ID, tx.SenderID, tx.RecipientID, tx.SourceAccountID, tx.DestinationAccountID, tx.DestinationBeneficiaryID, tx.Type, tx.Category, tx.Status, tx.Amount, tx.Fee, tx.Description)
 	return err
 }
 

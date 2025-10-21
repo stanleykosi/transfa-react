@@ -231,11 +231,45 @@ export const useAccountBalance = () => {
   return useQuery<AccountBalance, Error>({
     queryKey: [ACCOUNT_BALANCE_QUERY_KEY],
     queryFn: fetchAccountBalance,
-    staleTime: 1000 * 60 * 2, // 2 minutes - balance is considered fresh for 2 minutes
-    gcTime: 1000 * 60 * 10, // Keep in cache for 10 minutes after last use
-    refetchOnWindowFocus: false, // Don't refetch when switching screens
-    refetchOnMount: false, // Don't refetch when component mounts if data is fresh
+    staleTime: 1000 * 30, // 30 seconds - balance is considered fresh for 30 seconds
+    gcTime: 1000 * 60 * 5, // Keep in cache for 5 minutes after last use
+    refetchOnWindowFocus: true, // Refetch when switching screens
+    refetchOnMount: true, // Refetch when component mounts
     refetchInterval: false, // Disable automatic refetching
+    retry: 3, // Retry failed requests 3 times
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
+  });
+};
+
+/**
+ * Custom hook to fetch user's transaction history.
+ * @returns A TanStack Query object for the transaction history.
+ */
+export const useTransactionHistory = () => {
+  const fetchTransactionHistory = async (): Promise<TransactionResponse[]> => {
+    console.log(
+      'Fetching transaction history from:',
+      `${TRANSACTION_SERVICE_URL}/transactions/transactions`
+    );
+    try {
+      const { data } = await apiClient.get<TransactionResponse[]>('/transactions/transactions', {
+        baseURL: TRANSACTION_SERVICE_URL,
+      });
+      console.log('Transaction history response:', data);
+      return data;
+    } catch (error) {
+      console.error('Error fetching transaction history:', error);
+      throw error;
+    }
+  };
+
+  return useQuery<TransactionResponse[], Error>({
+    queryKey: [TRANSACTIONS_QUERY_KEY],
+    queryFn: fetchTransactionHistory,
+    staleTime: 1000 * 30, // 30 seconds - transactions are considered fresh for 30 seconds
+    gcTime: 1000 * 60 * 5, // Keep in cache for 5 minutes after last use
+    refetchOnWindowFocus: true, // Refetch when switching screens
+    refetchOnMount: true, // Refetch when component mounts
     retry: 3, // Retry failed requests 3 times
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
   });

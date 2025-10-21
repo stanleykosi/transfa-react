@@ -30,6 +30,7 @@ type Transaction struct {
 	DestinationAccountID     *uuid.UUID `json:"destination_account_id,omitempty"`
 	DestinationBeneficiaryID *uuid.UUID `json:"destination_beneficiary_id,omitempty"`
 	Type                     string     `json:"type"`   // e.g., 'p2p', 'self_transfer'
+	Category                 string     `json:"category"` // e.g., 'p2p_transfer', 'self_transfer'
 	Status                   string     `json:"status"` // e.g., 'pending', 'completed', 'failed'
 	Amount                   int64      `json:"amount"` // in kobo
 	Fee                      int64      `json:"fee"`    // in kobo
