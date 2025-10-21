@@ -31,22 +31,37 @@ func NewPostgresBeneficiaryRepository(db *pgxpool.Pool) *PostgresBeneficiaryRepo
 
 // CreateBeneficiary inserts a new beneficiary record into the database.
 func (r *PostgresBeneficiaryRepository) CreateBeneficiary(ctx context.Context, beneficiary *domain.Beneficiary) (*domain.Beneficiary, error) {
+	// Check if this is the user's first beneficiary
+	var existingCount int
+	countQuery := `SELECT COUNT(*) FROM beneficiaries WHERE user_id = $1`
+	err := r.db.QueryRow(ctx, countQuery, beneficiary.UserID).Scan(&existingCount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to count existing beneficiaries: %w", err)
+	}
+
+	// If this is the first beneficiary, set it as default
+	isDefault := existingCount == 0
+
 	query := `
-        INSERT INTO beneficiaries (user_id, anchor_counterparty_id, account_name, account_number_masked, bank_name)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO beneficiaries (user_id, anchor_counterparty_id, account_name, account_number_masked, bank_name, is_default)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING id, created_at, updated_at
     `
-	err := r.db.QueryRow(ctx, query,
+	err = r.db.QueryRow(ctx, query,
 		beneficiary.UserID,
 		beneficiary.AnchorCounterpartyID,
 		beneficiary.AccountName,
 		beneficiary.AccountNumberMasked,
 		beneficiary.BankName,
+		isDefault,
 	).Scan(&beneficiary.ID, &beneficiary.CreatedAt, &beneficiary.UpdatedAt)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create beneficiary: %w", err)
 	}
+
+	// Set the is_default field in the returned object
+	beneficiary.IsDefault = isDefault
 	return beneficiary, nil
 }
 

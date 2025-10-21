@@ -19,6 +19,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/transfa/transaction-service/internal/domain"
 )
@@ -287,16 +288,16 @@ func (r *PostgresRepository) CreditWallet(ctx context.Context, userID uuid.UUID,
 }
 
 // FindOrCreateDefaultBeneficiary implements updated default beneficiary logic:
-// - For all users: Returns their first beneficiary as default (if any)
-// - First beneficiary is automatically marked as default
+// - Returns the user's default beneficiary if one exists
+// - If no default exists, returns the first beneficiary (which should be the default)
+// - There should always be a default (the first beneficiary added)
 func (r *PostgresRepository) FindOrCreateDefaultBeneficiary(ctx context.Context, userID uuid.UUID) (*domain.Beneficiary, error) {
-	// Get the first beneficiary for the user (if any)
+	// First, try to get an existing default beneficiary
 	var beneficiary domain.Beneficiary
 	query := `
         SELECT id, user_id, anchor_counterparty_id, account_name, account_number_masked, bank_name, is_default, created_at, updated_at 
         FROM beneficiaries 
-        WHERE user_id = $1 
-        ORDER BY created_at ASC 
+        WHERE user_id = $1 AND is_default = true
         LIMIT 1
     `
 	err := r.db.QueryRow(ctx, query, userID).Scan(
@@ -305,20 +306,73 @@ func (r *PostgresRepository) FindOrCreateDefaultBeneficiary(ctx context.Context,
 		&beneficiary.IsDefault, &beneficiary.CreatedAt, &beneficiary.UpdatedAt)
 
 	if err == nil {
-		// If this beneficiary is not marked as default, mark it as default
-		if !beneficiary.IsDefault {
-			_, updateErr := r.db.Exec(ctx, "UPDATE beneficiaries SET is_default = true WHERE id = $1", beneficiary.ID)
-			if updateErr != nil {
-				return nil, updateErr
-			}
-			beneficiary.IsDefault = true
-		}
+		// Found an existing default beneficiary
 		return &beneficiary, nil
 	}
-	if err == pgx.ErrNoRows {
-		return nil, ErrBeneficiaryNotFound
+
+	if err != pgx.ErrNoRows {
+		return nil, err
 	}
-	return nil, err
+
+	// No default beneficiary found, get the first beneficiary (which should be the default)
+	// This handles edge cases where the default flag might be missing
+	query = `
+        SELECT id, user_id, anchor_counterparty_id, account_name, account_number_masked, bank_name, is_default, created_at, updated_at 
+        FROM beneficiaries 
+        WHERE user_id = $1 
+        ORDER BY created_at ASC 
+        LIMIT 1
+    `
+	err = r.db.QueryRow(ctx, query, userID).Scan(
+		&beneficiary.ID, &beneficiary.UserID, &beneficiary.AnchorCounterpartyID,
+		&beneficiary.AccountName, &beneficiary.AccountNumberMasked, &beneficiary.BankName,
+		&beneficiary.IsDefault, &beneficiary.CreatedAt, &beneficiary.UpdatedAt)
+
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrBeneficiaryNotFound
+		}
+		return nil, err
+	}
+
+	// If this beneficiary is not marked as default, mark it as default
+	// This handles edge cases where the default flag might be missing
+	if !beneficiary.IsDefault {
+		// Use a transaction to handle potential race conditions
+		tx, txErr := r.db.Begin(ctx)
+		if txErr != nil {
+			return nil, txErr
+		}
+		defer tx.Rollback(ctx)
+
+		// First, remove default flag from all user's beneficiaries to avoid constraint violation
+		_, updateErr := tx.Exec(ctx, "UPDATE beneficiaries SET is_default = false WHERE user_id = $1", userID)
+		if updateErr != nil {
+			return nil, updateErr
+		}
+
+		// Then set this beneficiary as default
+		_, updateErr = tx.Exec(ctx, "UPDATE beneficiaries SET is_default = true WHERE id = $1", beneficiary.ID)
+		if updateErr != nil {
+			// Check if it's a constraint violation due to race condition
+			if pgErr, ok := updateErr.(*pgconn.PgError); ok && pgErr.Code == "23505" {
+				// Constraint violation - another request already set a default
+				// Rollback and retry by fetching the current default
+				tx.Rollback(ctx)
+				return r.FindOrCreateDefaultBeneficiary(ctx, userID)
+			}
+			return nil, updateErr
+		}
+
+		// Commit the transaction
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return nil, commitErr
+		}
+
+		beneficiary.IsDefault = true
+	}
+
+	return &beneficiary, nil
 }
 
 // SetDefaultBeneficiary sets a specific beneficiary as the default for a user.
