@@ -40,13 +40,21 @@ func (h *TransactionHandlers) P2PTransferHandler(w http.ResponseWriter, r *http.
 	// Retrieve the authenticated user's ID from the context.
 	userIDStr, ok := GetClerkUserID(r.Context())
 	if !ok {
+		log.Printf("P2P Transfer: Could not get user ID from context")
 		http.Error(w, "Could not get user ID from context", http.StatusInternalServerError)
 		return
 	}
 
-	// Parse the user ID as UUID
-	senderID, err := uuid.Parse(userIDStr)
+	// Resolve Clerk user id (e.g., user_abc) to internal UUID
+	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
 	if err != nil {
+		log.Printf("P2P Transfer: Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		http.Error(w, "User not found", http.StatusBadRequest)
+		return
+	}
+	senderID, err := uuid.Parse(internalIDStr)
+	if err != nil {
+		log.Printf("P2P Transfer: Invalid user ID format: %s", internalIDStr)
 		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
 		return
 	}
@@ -55,9 +63,12 @@ func (h *TransactionHandlers) P2PTransferHandler(w http.ResponseWriter, r *http.
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		log.Printf("P2P Transfer JSON decode error: %v", err)
 		log.Printf("Request headers: %v", r.Header)
+		log.Printf("Request body: %v", r.Body)
 		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
+
+	log.Printf("P2P Transfer request: sender=%s, recipient=%s, amount=%d", senderID, req.RecipientUsername, req.Amount)
 
 	// Call the core service logic.
 	tx, err := h.service.ProcessP2PTransfer(r.Context(), senderID, req)
@@ -86,22 +97,33 @@ func (h *TransactionHandlers) SelfTransferHandler(w http.ResponseWriter, r *http
 	// Retrieve the authenticated user's ID from the context.
 	userIDStr, ok := GetClerkUserID(r.Context())
 	if !ok {
+		log.Printf("Self Transfer: Could not get user ID from context")
 		http.Error(w, "Could not get user ID from context", http.StatusInternalServerError)
 		return
 	}
 
-	// Parse the user ID as UUID
-	senderID, err := uuid.Parse(userIDStr)
+	// Resolve Clerk user id (e.g., user_abc) to internal UUID
+	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
 	if err != nil {
+		log.Printf("Self Transfer: Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		http.Error(w, "User not found", http.StatusBadRequest)
+		return
+	}
+	senderID, err := uuid.Parse(internalIDStr)
+	if err != nil {
+		log.Printf("Self Transfer: Invalid user ID format: %s", internalIDStr)
 		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
 		return
 	}
 
 	var req domain.SelfTransferRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Self Transfer JSON decode error: %v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+
+	log.Printf("Self Transfer request: sender=%s, beneficiary=%s, amount=%d", senderID, req.BeneficiaryID, req.Amount)
 
 	// Call the core service logic.
 	tx, err := h.service.ProcessSelfTransfer(r.Context(), senderID, req)

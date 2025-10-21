@@ -87,7 +87,7 @@ func main() {
 	repository := store.NewPostgresRepository(dbpool)
 
 	// Initialize the core application service with its dependencies.
-	transactionService := app.NewService(repository, anchorClient, rabbitProducer)
+	transactionService := app.NewService(repository, anchorClient, rabbitProducer, cfg.AdminAccountID)
 
 	// Initialize the API handlers.
 	transactionHandlers := api.NewTransactionHandlers(transactionService)

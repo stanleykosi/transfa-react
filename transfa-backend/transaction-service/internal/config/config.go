@@ -26,6 +26,7 @@ type Config struct {
 	AnchorAPIBaseURL string `mapstructure:"ANCHOR_API_BASE_URL"`
 	AnchorAPIKey     string `mapstructure:"ANCHOR_API_KEY"`
 	ClerkJWKSURL     string `mapstructure:"CLERK_JWKS_URL"`
+	AdminAccountID   string `mapstructure:"ADMIN_ACCOUNT_ID"`
 }
 
 // LoadConfig reads configuration from environment variables from the given path.
@@ -42,6 +43,7 @@ func LoadConfig(path string) (config Config, err error) {
 
 	// Set default values
 	viper.SetDefault("SERVER_PORT", "8083")
+	viper.SetDefault("ADMIN_ACCOUNT_ID", "17568857819889-anc_acc")
 
 	// Bind environment variables explicitly to ensure they appear in Unmarshal
 	_ = viper.BindEnv("SERVER_PORT")
@@ -50,6 +52,7 @@ func LoadConfig(path string) (config Config, err error) {
 	_ = viper.BindEnv("ANCHOR_API_BASE_URL")
 	_ = viper.BindEnv("ANCHOR_API_KEY")
 	_ = viper.BindEnv("CLERK_JWKS_URL")
+	_ = viper.BindEnv("ADMIN_ACCOUNT_ID")
 
 	// Attempt to read the config file. It's okay if it doesn't exist.
 	if err = viper.ReadInConfig(); err != nil {
