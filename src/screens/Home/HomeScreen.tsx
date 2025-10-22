@@ -201,7 +201,7 @@ const HomeScreen = () => {
             {/* Refresh Button */}
             <View style={styles.actionButtons}>
               <PrimaryButton
-                title={refreshing ? 'Refreshing...' : 'Refresh Balance'}
+                title={refreshing ? 'Refreshing…' : 'Refresh Account Data'}
                 onPress={handleRefresh}
                 isLoading={refreshing}
                 style={styles.actionButton}
@@ -220,7 +220,7 @@ const HomeScreen = () => {
             <Text style={styles.title}>Home</Text>
             <Text style={styles.subtitle}>No account found yet.</Text>
             <PrimaryButton
-              title={refreshing ? 'Checking...' : 'Refresh'}
+              title={refreshing ? 'Checking…' : 'Refresh Account Data'}
               onPress={handleRefresh}
               isLoading={refreshing}
               style={styles.refreshButton}

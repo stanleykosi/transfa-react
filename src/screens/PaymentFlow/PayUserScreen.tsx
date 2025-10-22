@@ -121,7 +121,9 @@ const PayUserScreen = () => {
 
   const amountInKobo = nairaToKobo(parseFloat(amount)) || 0;
   const feeInKobo = useMemo(() => {
-    if (!fees) return 0;
+    if (!fees) {
+      return 0;
+    }
     return fees.p2p_fee_kobo ?? 0;
   }, [fees]);
   const totalAmountInKobo = amountInKobo + feeInKobo;

@@ -37,12 +37,7 @@ import FormInput from '@/components/FormInput';
 import PrimaryButton from '@/components/PrimaryButton';
 import { theme } from '@/constants/theme';
 import { useSecureAction } from '@/hooks/useSecureAction';
-import {
-  useAccountBalance,
-  useBeneficiaries,
-  useSendWithdrawal,
-  useTransactionFees,
-} from '@/api/transactionApi';
+import { useAccountBalance, useSelfTransfer, useTransactionFees } from '@/api/transactionApi';
 import { useListBeneficiaries } from '@/api/accountApi';
 import PinInputModal from '@/components/PinInputModal';
 import { Ionicons } from '@expo/vector-icons';
@@ -77,7 +72,7 @@ const SelfTransferScreen = () => {
 
   const { data: fees, isLoading: isLoadingFees } = useTransactionFees();
 
-  const { mutate: sendWithdrawal, isPending: isSending } = useSendWithdrawal({
+  const { mutate: sendWithdrawal, isPending: isSending } = useSelfTransfer({
     onSuccess: (data) => {
       Alert.alert(
         'Withdrawal Initiated',
@@ -145,7 +140,9 @@ const SelfTransferScreen = () => {
 
   const amountInKobo = nairaToKobo(parseFloat(amount)) || 0;
   const feeInKobo = useMemo(() => {
-    if (!fees) return 0;
+    if (!fees) {
+      return 0;
+    }
     return fees.self_fee_kobo ?? 0;
   }, [fees]);
   const totalAmountInKobo = amountInKobo + feeInKobo;

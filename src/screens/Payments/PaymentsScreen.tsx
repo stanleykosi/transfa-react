@@ -20,6 +20,10 @@ const PaymentsScreen = () => {
     <ScreenWrapper style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Payments</Text>
+        <View style={styles.sectionLabels}>
+          <Text style={styles.sectionLabel}>Transaction History</Text>
+          <Text style={styles.sectionLabel}>Payment Requests</Text>
+        </View>
       </View>
       <PaymentsTabNavigator />
     </ScreenWrapper>
@@ -39,6 +43,18 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSizes['3xl'],
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
+  },
+  sectionLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: theme.spacing.s12,
+  },
+  sectionLabel: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.textSecondary,
+    fontWeight: theme.fontWeights.medium,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
 });
 
