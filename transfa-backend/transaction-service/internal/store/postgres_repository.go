@@ -120,7 +120,7 @@ func (r *PostgresRepository) FindTransactionsByUserID(ctx context.Context, userI
 	var transactions []domain.Transaction
 	query := `
 		SELECT id, anchor_transfer_id, sender_id, recipient_id, source_account_id, destination_account_id,
-		       destination_beneficiary_id, type, category, status, amount, fee,
+		       destination_beneficiary_id, type, COALESCE(category, '') AS category, status, amount, fee,
 		       COALESCE(description, '') AS description,
 		       created_at, updated_at
 		FROM transactions
