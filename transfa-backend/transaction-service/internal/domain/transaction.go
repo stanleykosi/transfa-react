@@ -34,7 +34,7 @@ type Transaction struct {
 	Status                   string     `json:"status"`   // e.g., 'pending', 'completed', 'failed'
 	Amount                   int64      `json:"amount"`   // in kobo
 	Fee                      int64      `json:"fee"`      // in kobo
-	Description              *string    `json:"description"`
+	Description              string     `json:"description"`
 	CreatedAt                time.Time  `json:"created_at"`
 	UpdatedAt                time.Time  `json:"updated_at"`
 }
