@@ -20,7 +20,7 @@
  * - @/api/transactionApi: For the self-transfer mutation hook.
  * - @/utils/formatCurrency: For displaying currency values.
  */
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -37,7 +37,12 @@ import FormInput from '@/components/FormInput';
 import PrimaryButton from '@/components/PrimaryButton';
 import { theme } from '@/constants/theme';
 import { useSecureAction } from '@/hooks/useSecureAction';
-import { useSelfTransfer, useAccountBalance } from '@/api/transactionApi';
+import {
+  useAccountBalance,
+  useBeneficiaries,
+  useSendWithdrawal,
+  useTransactionFees,
+} from '@/api/transactionApi';
 import { useListBeneficiaries } from '@/api/accountApi';
 import PinInputModal from '@/components/PinInputModal';
 import { Ionicons } from '@expo/vector-icons';
@@ -70,7 +75,9 @@ const SelfTransferScreen = () => {
     closeModal,
   } = useSecureAction();
 
-  const { mutate: sendWithdrawal, isPending: isSending } = useSelfTransfer({
+  const { data: fees, isLoading: isLoadingFees } = useTransactionFees();
+
+  const { mutate: sendWithdrawal, isPending: isSending } = useSendWithdrawal({
     onSuccess: (data) => {
       Alert.alert(
         'Withdrawal Initiated',
@@ -137,8 +144,10 @@ const SelfTransferScreen = () => {
   };
 
   const amountInKobo = nairaToKobo(parseFloat(amount)) || 0;
-  // TODO: Fetch fee dynamically from API.
-  const feeInKobo = 1000; // ₦10.00 fee
+  const feeInKobo = useMemo(() => {
+    if (!fees) return 0;
+    return fees.self_fee_kobo ?? 0;
+  }, [fees]);
   const totalAmountInKobo = amountInKobo + feeInKobo;
 
   return (
@@ -206,7 +215,9 @@ const SelfTransferScreen = () => {
               </View>
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Withdrawal Fee</Text>
-                <Text style={styles.summaryValue}>{formatCurrency(feeInKobo)}</Text>
+                <Text style={styles.summaryValue}>
+                  {isLoadingFees ? 'Calculating…' : formatCurrency(feeInKobo)}
+                </Text>
               </View>
               <View style={[styles.summaryRow, styles.totalRow]}>
                 <Text style={styles.summaryTotalLabel}>Total to be Debited</Text>

@@ -68,6 +68,11 @@ func NewService(repo store.Repository, anchor *anchorclient.Client, producer rab
 	}
 }
 
+// GetTransactionFee returns the configured transaction fee in kobo.
+func (s *Service) GetTransactionFee() int64 {
+	return s.transactionFeeKobo
+}
+
 // ResolveInternalUserID converts a Clerk user id string (e.g., "user_abc123") into the
 // internal UUID used by our database. This allows handlers to accept Clerk subject ids
 // from validated JWTs while our repositories continue to operate on UUIDs.

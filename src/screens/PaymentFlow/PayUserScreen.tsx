@@ -18,7 +18,7 @@
  * - @/api/transactionApi: For the P2P transfer mutation hook.
  * - @/utils/formatCurrency: For displaying currency values.
  */
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -35,7 +35,7 @@ import FormInput from '@/components/FormInput';
 import PrimaryButton from '@/components/PrimaryButton';
 import { theme } from '@/constants/theme';
 import { useSecureAction } from '@/hooks/useSecureAction';
-import { useP2PTransfer } from '@/api/transactionApi';
+import { useP2PTransfer, useTransactionFees } from '@/api/transactionApi';
 import PinInputModal from '@/components/PinInputModal';
 import { Ionicons } from '@expo/vector-icons';
 import { formatCurrency, nairaToKobo } from '@/utils/formatCurrency';
@@ -54,6 +54,8 @@ const PayUserScreen = () => {
     clearError: clearPinError,
     closeModal,
   } = useSecureAction();
+
+  const { data: fees, isLoading: isLoadingFees } = useTransactionFees();
 
   const { mutate: sendPayment, isPending: isSending } = useP2PTransfer({
     onSuccess: (data) => {
@@ -118,8 +120,10 @@ const PayUserScreen = () => {
   };
 
   const amountInKobo = nairaToKobo(parseFloat(amount)) || 0;
-  // TODO: Fetch fee dynamically from API. For now, using a placeholder.
-  const feeInKobo = 500; // ₦5.00 fee
+  const feeInKobo = useMemo(() => {
+    if (!fees) return 0;
+    return fees.p2p_fee_kobo ?? 0;
+  }, [fees]);
   const totalAmountInKobo = amountInKobo + feeInKobo;
 
   return (
@@ -176,7 +180,9 @@ const PayUserScreen = () => {
               </View>
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Transaction Fee</Text>
-                <Text style={styles.summaryValue}>{formatCurrency(feeInKobo)}</Text>
+                <Text style={styles.summaryValue}>
+                  {isLoadingFees ? 'Calculating…' : formatCurrency(feeInKobo)}
+                </Text>
               </View>
               <View style={[styles.summaryRow, styles.totalRow]}>
                 <Text style={styles.summaryTotalLabel}>Total to be Debited</Text>

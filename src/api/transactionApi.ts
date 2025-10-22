@@ -15,6 +15,7 @@
  * - @/types/api: For transaction-related type definitions.
  */
 import {
+  queryOptions,
   useMutation,
   useQuery,
   useQueryClient,
@@ -274,6 +275,33 @@ export const useTransactionHistory = () => {
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
   });
 };
+
+export interface TransactionFeeResponse {
+  p2p_fee_kobo: number;
+  self_fee_kobo: number;
+}
+
+export const TRANSACTION_FEES_QUERY_KEY = 'transaction-fees';
+
+const feesQuery = queryOptions<TransactionFeeResponse, Error>({
+  queryKey: [TRANSACTION_FEES_QUERY_KEY],
+  queryFn: async (): Promise<TransactionFeeResponse> => {
+    console.log('Fetching transaction fees from:', `${TRANSACTION_SERVICE_URL}/transactions/fees`);
+    const { data } = await apiClient.get<TransactionFeeResponse>('/transactions/fees', {
+      baseURL: TRANSACTION_SERVICE_URL,
+    });
+    return data;
+  },
+  staleTime: 1000 * 60 * 5,
+  gcTime: 1000 * 60 * 10,
+  refetchOnWindowFocus: false,
+});
+
+export const useTransactionFees = () => {
+  return useQuery(feesQuery);
+};
+
+export const getTransactionFeesQuery = () => feesQuery;
 
 /**
  * Custom hook to list all payment requests for the authenticated user.

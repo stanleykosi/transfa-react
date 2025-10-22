@@ -28,11 +28,11 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 
-    // Health check endpoint (effective path when mounted: /transactions/health)
-    r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-        w.WriteHeader(http.StatusOK)
-        w.Write([]byte("healthy"))
-    })
+	// Health check endpoint (effective path when mounted: /transactions/health)
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("healthy"))
+	})
 
 	// Group routes that require authentication.
 	r.Group(func(r chi.Router) {
@@ -54,14 +54,15 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 
 		// Account balance endpoint
 		r.Get("/account/balance", h.GetAccountBalanceHandler)
+		r.Get("/fees", h.GetFeesHandler)
 
 		// Transaction history endpoint
 		r.Get("/transactions", h.GetTransactionHistoryHandler)
 
 		// Payment Request routes
 		r.Route("/payment-requests", func(r chi.Router) {
-			r.Post("/", h.CreatePaymentRequestHandler)    // Create a new payment request
-			r.Get("/", h.ListPaymentRequestsHandler)     // List all of user's payment requests
+			r.Post("/", h.CreatePaymentRequestHandler)     // Create a new payment request
+			r.Get("/", h.ListPaymentRequestsHandler)       // List all of user's payment requests
 			r.Get("/{id}", h.GetPaymentRequestByIDHandler) // Get a specific payment request
 		})
 	})

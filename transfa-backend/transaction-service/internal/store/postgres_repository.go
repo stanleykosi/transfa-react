@@ -119,10 +119,12 @@ func (r *PostgresRepository) UpdateAccountBalance(ctx context.Context, userID uu
 func (r *PostgresRepository) FindTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]domain.Transaction, error) {
 	var transactions []domain.Transaction
 	query := `
-		SELECT id, anchor_transfer_id, sender_id, recipient_id, source_account_id, destination_account_id, 
-       destination_beneficiary_id, type, category, status, amount, fee, description, created_at, updated_at
-		FROM transactions 
-		WHERE sender_id = $1 OR recipient_id = $1 
+		SELECT id, anchor_transfer_id, sender_id, recipient_id, source_account_id, destination_account_id,
+		       destination_beneficiary_id, type, category, status, amount, fee,
+		       COALESCE(description, '') AS description,
+		       created_at, updated_at
+		FROM transactions
+		WHERE sender_id = $1 OR recipient_id = $1
 		ORDER BY created_at DESC
 	`
 	rows, err := r.db.Query(ctx, query, userID)
