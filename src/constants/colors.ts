@@ -12,9 +12,10 @@
 export const COLORS = {
   /**
    * Primary color for main actions, buttons, and highlights.
-   * Value: #4F46E5 (Indigo)
+   * Modern fintech indigo/purple for trust and sophistication
+   * Value: #5B48E8 (Enhanced Indigo)
    */
-  primary: '#4F46E5',
+  primary: '#5B48E8',
 
   /**
    * Secondary color for success states, confirmation messages, and complementary actions.
@@ -24,9 +25,10 @@ export const COLORS = {
 
   /**
    * The default background color for most screens.
-   * Value: #F9FAFB (Gray 50)
+   * Soft off-white for reduced eye strain
+   * Value: #F7F8FC (Cool Gray 50)
    */
-  background: '#F9FAFB',
+  background: '#F7F8FC',
 
   /**
    * Background color for elevated surfaces like cards, modals, and headers.
@@ -36,9 +38,10 @@ export const COLORS = {
 
   /**
    * Primary text color for headings and important information.
-   * Value: #1F2937 (Gray 800)
+   * Deep charcoal for better readability
+   * Value: #1A1D2E (Dark Navy)
    */
-  textPrimary: '#1F2937',
+  textPrimary: '#1A1D2E',
 
   /**
    * Secondary text color for subtitles, descriptions, and less important information.
@@ -72,19 +75,38 @@ export const COLORS = {
 
   /**
    * Success color for positive states and confirmations.
-   * Value: #10B981 (Emerald)
+   * Vibrant green for positive feedback
+   * Value: #00D68F (Teal Green)
    */
-  success: '#10B981',
+  success: '#00D68F',
 
   /**
    * Warning color for caution states and pending actions.
-   * Value: #F59E0B (Amber)
+   * Value: #FFB020 (Warm Amber)
    */
-  warning: '#F59E0B',
+  warning: '#FFB020',
 
   /**
    * Light version of primary color for backgrounds and highlights.
-   * Value: #E0E7FF (Indigo 100)
+   * Value: #EEF2FF (Indigo 50)
    */
-  primaryLight: '#E0E7FF',
+  primaryLight: '#EEF2FF',
+
+  /**
+   * Accent color for special highlights and CTAs
+   * Value: #7C3AED (Purple Accent)
+   */
+  accent: '#7C3AED',
+
+  /**
+   * Info color for informational messages
+   * Value: #3B82F6 (Blue)
+   */
+  info: '#3B82F6',
+
+  /**
+   * Gradient colors for premium features
+   */
+  gradientStart: '#5B48E8',
+  gradientEnd: '#7C3AED',
 };

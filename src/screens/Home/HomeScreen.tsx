@@ -1,22 +1,37 @@
 /**
  * @description
- * Placeholder screen for the Home tab. This will be the main dashboard for the user,
- * displaying their wallet balance and primary actions like "Send/Move".
+ * Redesigned Home screen with modern fintech UI featuring card-based layout,
+ * icon buttons, and professional styling. Main dashboard displaying wallet balance
+ * and primary actions like "Pay Someone", "Self Transfer", and "Create Payment Request".
  *
  * @dependencies
- * - react-native: For Text component.
- * - @/components/ScreenWrapper: For consistent screen layout and safe area handling.
+ * - react-native: For core components
+ * - @/components/ScreenWrapper: For consistent screen layout and safe area handling
+ * - @/components/EnhancedCard: For modern card components
+ * - @/components/ActionButton: For icon-based action buttons
  */
 import React, { useEffect, useState, useCallback } from 'react';
-import { Text, View, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import {
+  Text,
+  View,
+  StyleSheet,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  RefreshControl,
+  Platform,
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { Ionicons } from '@expo/vector-icons';
 import ScreenWrapper from '@/components/ScreenWrapper';
-import PrimaryButton from '@/components/PrimaryButton';
+import EnhancedCard from '@/components/EnhancedCard';
+import ActionButton from '@/components/ActionButton';
 import { theme } from '@/constants/theme';
 import apiClient from '@/api/apiClient';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import { useAccountBalance } from '@/api/transactionApi';
 import { formatCurrency } from '@/utils/formatCurrency';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const HomeScreen = () => {
   const navigation = useNavigation();
@@ -156,191 +171,341 @@ const HomeScreen = () => {
     ]);
   };
 
-  return (
-    <ScreenWrapper>
-      <View style={styles.container}>
-        {loading ? (
-          <>
-            <ActivityIndicator size="large" color={theme.colors.primary} />
-            <Text style={styles.subtitle}>Loading your account...</Text>
-          </>
-        ) : nuban ? (
-          <>
-            <Text style={styles.title}>Your Account</Text>
-            <Text style={styles.subtitle}>Virtual NUBAN: {nuban}</Text>
-            {bankName && <Text style={styles.bankName}>Bank: {bankName}</Text>}
+  // Loading state
+  if (loading) {
+    return (
+      <ScreenWrapper>
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={styles.loadingText}>Loading your account...</Text>
+        </View>
+      </ScreenWrapper>
+    );
+  }
 
-            {/* Account Balance */}
-            <View style={styles.balanceCard}>
-              <Text style={styles.balanceLabel}>Available Balance</Text>
-              {isLoadingBalance ? (
-                <ActivityIndicator size="small" color={theme.colors.primary} />
-              ) : balanceError ? (
-                <Text style={styles.balanceError}>Unable to load balance</Text>
-              ) : (
-                <Text style={styles.balanceAmount}>
-                  {accountBalance ? formatCurrency(accountBalance.available_balance) : '₦0.00'}
-                </Text>
-              )}
-            </View>
+  // Polling state
+  if (polling) {
+    return (
+      <ScreenWrapper>
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={styles.title}>Setting up your account...</Text>
+          <Text style={styles.subtitle}>This may take a few minutes</Text>
+          <Text style={styles.pollingText}>Please wait while we create your virtual account</Text>
+        </View>
+      </ScreenWrapper>
+    );
+  }
 
-            {/* Temporary navigation buttons for testing payment flows */}
-            <View style={styles.paymentButtons}>
-              <PrimaryButton
-                title="Pay Someone"
-                onPress={() => navigation.navigate('PayUser' as never)}
-                style={styles.paymentButton}
-              />
-              <PrimaryButton
-                title="Self Transfer"
-                onPress={() => navigation.navigate('SelfTransfer' as never)}
-                style={styles.paymentButton}
-              />
-            </View>
-
-            {/* Refresh Button */}
-            <View style={styles.actionButtons}>
-              <PrimaryButton
-                title={refreshing ? 'Refreshing…' : 'Refresh Account Data'}
-                onPress={handleRefresh}
-                isLoading={refreshing}
-                style={styles.actionButton}
-              />
-            </View>
-          </>
-        ) : polling ? (
-          <>
-            <ActivityIndicator size="large" color={theme.colors.primary} />
-            <Text style={styles.title}>Setting up your account...</Text>
-            <Text style={styles.subtitle}>This may take a few minutes</Text>
-            <Text style={styles.debugText}>Please wait while we create your virtual account</Text>
-          </>
-        ) : (
-          <>
-            <Text style={styles.title}>Home</Text>
-            <Text style={styles.subtitle}>No account found yet.</Text>
-            <PrimaryButton
-              title={refreshing ? 'Checking…' : 'Refresh Account Data'}
-              onPress={handleRefresh}
-              isLoading={refreshing}
-              style={styles.refreshButton}
-            />
-          </>
-        )}
-
-        <View style={styles.signOutContainer}>
-          <PrimaryButton
-            title="Sign Out"
-            onPress={handleSignOut}
-            style={styles.signOutButton}
-            textStyle={styles.signOutButtonText}
+  // No account state
+  if (!nuban) {
+    return (
+      <ScreenWrapper>
+        <View style={styles.centerContainer}>
+          <Ionicons name="wallet-outline" size={64} color={theme.colors.textSecondary} />
+          <Text style={styles.title}>No Account Found</Text>
+          <Text style={styles.subtitle}>We couldn't find your account details.</Text>
+          <ActionButton
+            title={refreshing ? 'Checking...' : 'Refresh Account Data'}
+            icon="refresh"
+            onPress={handleRefresh}
+            loading={refreshing}
+            style={styles.refreshButton}
           />
         </View>
-      </View>
+      </ScreenWrapper>
+    );
+  }
+
+  // Main content - Account loaded successfully
+  return (
+    <ScreenWrapper style={styles.container}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={[theme.colors.primary]}
+            tintColor={theme.colors.primary}
+          />
+        }
+      >
+        {/* Header */}
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.greeting}>Welcome Back</Text>
+            <Text style={styles.userName}>{user?.firstName || 'User'}</Text>
+          </View>
+          <ActionButton
+            title=""
+            icon="refresh"
+            onPress={handleRefresh}
+            loading={refreshing}
+            variant="outline"
+            size="small"
+            style={styles.headerRefreshButton}
+          />
+        </View>
+
+        {/* Balance Card with Gradient */}
+        <LinearGradient
+          colors={[theme.colors.gradientStart, theme.colors.gradientEnd]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.balanceCard}
+        >
+          <View style={styles.balanceCardContent}>
+            <Text style={styles.balanceLabel}>Available Balance</Text>
+            {isLoadingBalance ? (
+              <ActivityIndicator size="small" color={theme.colors.textOnPrimary} />
+            ) : balanceError ? (
+              <Text style={styles.balanceError}>Unable to load balance</Text>
+            ) : (
+              <Text style={styles.balanceAmount}>
+                {accountBalance ? formatCurrency(accountBalance.available_balance) : '₦0.00'}
+              </Text>
+            )}
+
+            {/* Account Info */}
+            <View style={styles.accountInfo}>
+              <View style={styles.accountInfoItem}>
+                <Ionicons name="card-outline" size={16} color={theme.colors.textOnPrimary} />
+                <Text style={styles.accountInfoText}>{nuban}</Text>
+              </View>
+              {bankName && (
+                <View style={styles.accountInfoItem}>
+                  <Ionicons name="business-outline" size={16} color={theme.colors.textOnPrimary} />
+                  <Text style={styles.accountInfoText}>{bankName}</Text>
+                </View>
+              )}
+            </View>
+          </View>
+        </LinearGradient>
+
+        {/* Quick Actions Section */}
+        <View style={styles.quickActionsSection}>
+          <Text style={styles.sectionTitle}>Quick Actions</Text>
+
+          {/* Primary Actions */}
+          <View style={styles.actionGrid}>
+            <ActionButton
+              title="Pay Someone"
+              icon="send"
+              onPress={() => navigation.navigate('PayUser' as never)}
+              variant="primary"
+              size="large"
+              style={styles.actionButton}
+            />
+
+            <ActionButton
+              title="Self Transfer"
+              icon="swap-horizontal"
+              onPress={() => navigation.navigate('SelfTransfer' as never)}
+              variant="secondary"
+              size="large"
+              style={styles.actionButton}
+            />
+
+            <ActionButton
+              title="Create Payment Request"
+              icon="document-text"
+              onPress={() => navigation.navigate('CreatePaymentRequest' as never)}
+              variant="outline"
+              size="large"
+              style={styles.actionButton}
+            />
+          </View>
+        </View>
+
+        {/* Recent Activity Teaser Card */}
+        <EnhancedCard variant="elevated" style={styles.recentActivityCard}>
+          <View style={styles.recentActivityHeader}>
+            <Ionicons name="time-outline" size={24} color={theme.colors.primary} />
+            <Text style={styles.recentActivityTitle}>Recent Activity</Text>
+          </View>
+          <Text style={styles.recentActivitySubtitle}>
+            View your transaction history and payment requests in the Payments tab
+          </Text>
+        </EnhancedCard>
+
+        {/* Sign Out Button */}
+        <ActionButton
+          title="Sign Out"
+          icon="log-out-outline"
+          onPress={handleSignOut}
+          variant="outline"
+          style={styles.signOutButton}
+        />
+
+        <View style={styles.bottomSpacer} />
+      </ScrollView>
     </ScreenWrapper>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
+    paddingHorizontal: 0,
+  },
+  centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: theme.spacing.s16,
+    paddingHorizontal: theme.spacing.s24,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.s24,
+    marginBottom: theme.spacing.s24,
+    marginTop: theme.spacing.s16,
+  },
+  greeting: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.textSecondary,
+    fontWeight: theme.fontWeights.medium,
+  },
+  userName: {
+    fontSize: theme.fontSizes['2xl'],
+    fontWeight: theme.fontWeights.bold,
+    color: theme.colors.textPrimary,
+    marginTop: theme.spacing.s4,
+  },
+  headerRefreshButton: {
+    minWidth: 44,
+    paddingHorizontal: theme.spacing.s12,
+  },
+  // Balance Card Styles
+  balanceCard: {
+    marginHorizontal: theme.spacing.s24,
+    marginBottom: theme.spacing.s24,
+    borderRadius: theme.radii.xl,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#5B48E8',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.3,
+        shadowRadius: 16,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
+  },
+  balanceCardContent: {
+    padding: theme.spacing.s24,
+  },
+  balanceLabel: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.textOnPrimary,
+    opacity: 0.9,
+    fontWeight: theme.fontWeights.medium,
+    marginBottom: theme.spacing.s8,
+  },
+  balanceAmount: {
+    fontSize: theme.fontSizes['4xl'],
+    fontWeight: theme.fontWeights.bold,
+    color: theme.colors.textOnPrimary,
+    marginBottom: theme.spacing.s16,
+  },
+  balanceError: {
+    fontSize: theme.fontSizes.base,
+    color: theme.colors.textOnPrimary,
+    opacity: 0.8,
+  },
+  accountInfo: {
+    marginTop: theme.spacing.s12,
+    gap: theme.spacing.s8,
+  },
+  accountInfoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.s8,
+  },
+  accountInfoText: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.textOnPrimary,
+    opacity: 0.9,
+    fontWeight: theme.fontWeights.medium,
+  },
+  // Quick Actions Section
+  quickActionsSection: {
+    paddingHorizontal: theme.spacing.s24,
+    marginBottom: theme.spacing.s24,
+  },
+  sectionTitle: {
+    fontSize: theme.fontSizes.lg,
+    fontWeight: theme.fontWeights.bold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.s16,
+  },
+  actionGrid: {
+    gap: theme.spacing.s12,
+  },
+  actionButton: {
+    width: '100%',
+  },
+  // Recent Activity Card
+  recentActivityCard: {
+    marginHorizontal: theme.spacing.s24,
+    marginBottom: theme.spacing.s24,
+  },
+  recentActivityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.s12,
+    marginBottom: theme.spacing.s8,
+  },
+  recentActivityTitle: {
+    fontSize: theme.fontSizes.lg,
+    fontWeight: theme.fontWeights.semibold,
+    color: theme.colors.textPrimary,
+  },
+  recentActivitySubtitle: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.textSecondary,
+    lineHeight: 20,
+  },
+  // Sign Out Button
+  signOutButton: {
+    marginHorizontal: theme.spacing.s24,
+    marginTop: theme.spacing.s16,
+    borderColor: theme.colors.error,
+  },
+  // Misc
+  loadingText: {
+    marginTop: theme.spacing.s16,
+    fontSize: theme.fontSizes.base,
+    color: theme.colors.textSecondary,
   },
   title: {
     fontSize: theme.fontSizes['2xl'],
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
+    textAlign: 'center',
+    marginTop: theme.spacing.s16,
   },
   subtitle: {
     fontSize: theme.fontSizes.base,
     color: theme.colors.textSecondary,
     marginTop: theme.spacing.s8,
+    textAlign: 'center',
   },
-  bankName: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.textSecondary,
-    marginTop: theme.spacing.s4,
-    fontStyle: 'italic',
-  },
-  signOutContainer: {
-    position: 'absolute',
-    bottom: theme.spacing.s24,
-    left: theme.spacing.s16,
-    right: theme.spacing.s16,
-  },
-  signOutButton: {
-    backgroundColor: theme.colors.error,
-    paddingVertical: theme.spacing.s12,
-    paddingHorizontal: theme.spacing.s24,
-    borderRadius: theme.radii.md,
-  },
-  signOutButtonText: {
-    color: theme.colors.textOnPrimary,
-    fontSize: theme.fontSizes.base,
-    fontWeight: theme.fontWeights.semibold,
-  },
-  refreshButton: {
-    marginTop: theme.spacing.s16,
-    backgroundColor: theme.colors.primary,
-    paddingVertical: theme.spacing.s12,
-    paddingHorizontal: theme.spacing.s24,
-    borderRadius: theme.radii.md,
-  },
-  debugText: {
+  pollingText: {
     fontSize: theme.fontSizes.sm,
     color: theme.colors.textSecondary,
     marginTop: theme.spacing.s8,
     textAlign: 'center',
     fontStyle: 'italic',
   },
-  paymentButtons: {
+  refreshButton: {
     marginTop: theme.spacing.s24,
-    width: '100%',
-    gap: theme.spacing.s12,
+    minWidth: 200,
   },
-  paymentButton: {
-    backgroundColor: theme.colors.primary,
-    paddingVertical: theme.spacing.s12,
-    paddingHorizontal: theme.spacing.s24,
-    borderRadius: theme.radii.md,
-  },
-  actionButtons: {
-    marginTop: theme.spacing.s16,
-    width: '100%',
-    gap: theme.spacing.s12,
-  },
-  actionButton: {
-    backgroundColor: theme.colors.surface,
-    borderWidth: 1,
-    borderColor: theme.colors.primary,
-    paddingVertical: theme.spacing.s12,
-    paddingHorizontal: theme.spacing.s24,
-    borderRadius: theme.radii.md,
-  },
-  balanceCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radii.lg,
-    padding: theme.spacing.s20,
-    marginVertical: theme.spacing.s16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  balanceLabel: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.s8,
-  },
-  balanceAmount: {
-    fontSize: theme.fontSizes['3xl'],
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.primary,
-  },
-  balanceError: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.error,
+  bottomSpacer: {
+    height: theme.spacing.s32,
   },
 });
 

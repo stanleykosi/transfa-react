@@ -37,8 +37,8 @@ import {
   useUpgradeSubscription,
   useToggleAutoRenew,
 } from '@/api/subscriptionApi';
-import PrimaryButton from '@/components/PrimaryButton';
-import Card from '@/components/Card';
+import ActionButton from '@/components/ActionButton';
+import EnhancedCard from '@/components/EnhancedCard';
 
 const SubscriptionScreen = () => {
   const navigation = useNavigation();
@@ -88,8 +88,10 @@ const SubscriptionScreen = () => {
           <Text style={styles.errorText}>
             {error?.message || 'Could not load subscription details.'}
           </Text>
-          <PrimaryButton
+          <ActionButton
             title="Retry"
+            icon="refresh"
+            variant="primary"
             onPress={() => {
               // Force refetch the subscription status
               navigation.goBack();
@@ -140,10 +142,10 @@ const SubscriptionScreen = () => {
 
     return (
       <ScrollView showsVerticalScrollIndicator={false}>
-        <Card style={styles.statusCard}>
+        <EnhancedCard variant="gradient" style={styles.statusCard}>
           <Text style={styles.planLabel}>Current Plan</Text>
           <Text style={styles.planName}>
-            {isPremium ? 'Premium' : isLapsed ? 'Lapsed' : 'Free Tier'}
+            {isPremium ? '⭐ Premium' : isLapsed ? '⚠️ Lapsed' : '🆓 Free Tier'}
           </Text>
           <Text style={styles.planDescription}>
             {isPremium
@@ -153,36 +155,50 @@ const SubscriptionScreen = () => {
                 : 'You get a limited number of free transfers each month.'}
           </Text>
           {isLapsed && (
-            <Text style={styles.lapsedWarning}>
-              ⚠️ Your subscription expired. Some features may be limited.
-            </Text>
+            <View style={styles.lapsedWarning}>
+              <Ionicons name="warning" size={16} color={theme.colors.textOnPrimary} />
+              <Text style={styles.lapsedWarningText}>
+                Your subscription expired. Some features may be limited.
+              </Text>
+            </View>
           )}
-        </Card>
+        </EnhancedCard>
 
         {!isPremium && (
-          <Card style={styles.usageCard}>
+          <EnhancedCard variant="elevated" style={styles.usageCard}>
             <View style={styles.usageHeader}>
-              <Text style={styles.usageTitle}>Monthly External Transfers</Text>
-              <Text style={styles.usageCount}>
-                {usedTransfers} / {maxTransfers} used
-              </Text>
+              <View style={styles.usageIconContainer}>
+                <Ionicons name="stats-chart" size={20} color={theme.colors.primary} />
+              </View>
+              <View style={styles.usageContent}>
+                <Text style={styles.usageTitle}>Monthly External Transfers</Text>
+                <Text style={styles.usageCount}>
+                  {usedTransfers} / {maxTransfers} used
+                </Text>
+              </View>
             </View>
             <View style={styles.progressBarBackground}>
               <View style={[styles.progressBarFill, { width: `${usagePercentage}%` }]} />
             </View>
             {transfers_remaining < 0 && (
-              <Text style={styles.overLimitText}>
-                ⚠️ You've exceeded your monthly limit. Transfers will automatically use your
-                internal wallet until next month or upgrade to Premium.
-              </Text>
+              <View style={styles.overLimitBanner}>
+                <Ionicons name="alert-circle" size={16} color={theme.colors.error} />
+                <Text style={styles.overLimitText}>
+                  You've exceeded your monthly limit. Transfers will use your internal wallet until
+                  next month or upgrade to Premium.
+                </Text>
+              </View>
             )}
-          </Card>
+          </EnhancedCard>
         )}
 
         {isPremium ? (
-          <Card style={styles.manageCard}>
+          <EnhancedCard variant="default" style={styles.manageCard}>
             <View style={styles.autoRenewRow}>
-              <View>
+              <View style={styles.autoRenewIconContainer}>
+                <Ionicons name="repeat" size={20} color={theme.colors.primary} />
+              </View>
+              <View style={styles.autoRenewContent}>
                 <Text style={styles.autoRenewTitle}>Auto-Renew Subscription</Text>
                 <Text style={styles.autoRenewDesc}>
                   {auto_renew
@@ -218,12 +234,15 @@ const SubscriptionScreen = () => {
                 disabled={isToggling}
               />
             </View>
-          </Card>
+          </EnhancedCard>
         ) : (
-          <PrimaryButton
+          <ActionButton
             title="Upgrade to Premium"
+            icon="rocket"
+            variant="primary"
+            size="large"
             onPress={handleUpgrade}
-            isLoading={isUpgrading}
+            loading={isUpgrading}
           />
         )}
       </ScrollView>
@@ -278,45 +297,74 @@ const styles = StyleSheet.create({
   statusCard: {
     marginBottom: theme.spacing.s24,
     alignItems: 'center',
-    backgroundColor: theme.colors.primary,
   },
   planLabel: {
     fontSize: theme.fontSizes.sm,
     color: theme.colors.textOnPrimary,
-    opacity: 0.8,
+    opacity: 0.9,
+    marginBottom: theme.spacing.s8,
   },
   planName: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textOnPrimary,
-    marginVertical: theme.spacing.s8,
+    marginBottom: theme.spacing.s8,
   },
   planDescription: {
     fontSize: theme.fontSizes.base,
     color: theme.colors.textOnPrimary,
-    opacity: 0.9,
+    opacity: 0.95,
     textAlign: 'center',
+    lineHeight: 22,
+  },
+  lapsedWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.s8,
+    marginTop: theme.spacing.s16,
+    padding: theme.spacing.s12,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: theme.radii.md,
+  },
+  lapsedWarningText: {
+    flex: 1,
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.textOnPrimary,
+    fontWeight: theme.fontWeights.semibold,
   },
   usageCard: {
     marginBottom: theme.spacing.s24,
   },
   usageHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: theme.spacing.s12,
+    marginBottom: theme.spacing.s16,
+  },
+  usageIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: theme.radii.md,
+    backgroundColor: theme.colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: theme.spacing.s12,
+  },
+  usageContent: {
+    flex: 1,
   },
   usageTitle: {
     fontSize: theme.fontSizes.base,
     fontWeight: theme.fontWeights.semibold,
     color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.s4,
   },
   usageCount: {
     fontSize: theme.fontSizes.sm,
     color: theme.colors.textSecondary,
+    fontWeight: theme.fontWeights.medium,
   },
   progressBarBackground: {
-    height: 10,
+    height: 12,
     backgroundColor: theme.colors.border,
     borderRadius: theme.radii.full,
     overflow: 'hidden',
@@ -326,37 +374,52 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.primary,
     borderRadius: theme.radii.full,
   },
+  overLimitBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: theme.spacing.s8,
+    marginTop: theme.spacing.s16,
+    padding: theme.spacing.s12,
+    backgroundColor: '#FEE2E2', // Red 100
+    borderRadius: theme.radii.md,
+  },
+  overLimitText: {
+    flex: 1,
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.error,
+    lineHeight: 20,
+    fontWeight: theme.fontWeights.medium,
+  },
   manageCard: {
-    paddingVertical: theme.spacing.s8,
+    marginBottom: theme.spacing.s16,
   },
   autoRenewRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  autoRenewIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: theme.radii.md,
+    backgroundColor: theme.colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: theme.spacing.s12,
+  },
+  autoRenewContent: {
+    flex: 1,
+    marginRight: theme.spacing.s12,
   },
   autoRenewTitle: {
     fontSize: theme.fontSizes.base,
     fontWeight: theme.fontWeights.semibold,
     color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.s4,
   },
   autoRenewDesc: {
     fontSize: theme.fontSizes.sm,
     color: theme.colors.textSecondary,
-    marginTop: theme.spacing.s4,
-  },
-  overLimitText: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.error,
-    marginTop: theme.spacing.s8,
-    textAlign: 'center',
-    fontWeight: theme.fontWeights.semibold,
-  },
-  lapsedWarning: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.error,
-    marginTop: theme.spacing.s8,
-    textAlign: 'center',
-    fontWeight: theme.fontWeights.semibold,
+    lineHeight: 18,
   },
 });
 

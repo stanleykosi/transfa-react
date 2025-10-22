@@ -1,12 +1,13 @@
 /**
  * @description
- * Transaction History screen within the Payments section.
- * Displays a list of all user transactions with their status, amount, and details.
+ * Enhanced Transaction History screen with modern fintech UI.
+ * Displays a list of all user transactions with improved visual hierarchy,
+ * better status indicators, and smooth animations.
  *
  * @dependencies
- * - react, react-native: For UI components and state management.
- * - @/api/transactionApi: For fetching transaction history.
- * - @/utils/formatCurrency: For displaying currency values.
+ * - react, react-native: For UI components and state management
+ * - @/api/transactionApi: For fetching transaction history
+ * - @/utils/formatCurrency: For displaying currency values
  */
 import React, { useState } from 'react';
 import {
@@ -17,6 +18,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
+  Platform,
 } from 'react-native';
 import { theme } from '@/constants/theme';
 import { useTransactionHistory } from '@/api/transactionApi';
@@ -46,13 +48,13 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
   const getTransactionIcon = () => {
     switch (transaction.type) {
       case 'p2p':
-        return isOutgoing ? 'arrow-up' : 'arrow-down';
+        return isOutgoing ? 'arrow-up-circle' : 'arrow-down-circle';
       case 'self_transfer':
-        return 'arrow-forward';
+        return 'swap-horizontal-outline';
       case 'subscription_fee':
-        return 'card';
+        return 'card-outline';
       default:
-        return 'swap-horizontal';
+        return 'flash-outline';
     }
   };
 
@@ -69,6 +71,26 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
     }
   };
 
+  const getIconBgColor = () => {
+    if (isIncoming) {
+      return '#D1FAE5'; // Green 100
+    }
+    if (isOutgoing) {
+      return '#FEE2E2'; // Red 100
+    }
+    return theme.colors.primaryLight;
+  };
+
+  const getIconColor = () => {
+    if (isIncoming) {
+      return theme.colors.success;
+    }
+    if (isOutgoing) {
+      return theme.colors.error;
+    }
+    return theme.colors.primary;
+  };
+
   const getStatusText = () => {
     switch (transaction.status) {
       case 'completed':
@@ -79,6 +101,19 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
         return 'Failed';
       default:
         return transaction.status;
+    }
+  };
+
+  const getTransactionTitle = () => {
+    switch (transaction.type) {
+      case 'p2p':
+        return isOutgoing ? 'Sent to Contact' : 'Received from Contact';
+      case 'self_transfer':
+        return 'Withdrawal';
+      case 'subscription_fee':
+        return 'Service Fee';
+      default:
+        return transaction.type;
     }
   };
 
@@ -108,51 +143,56 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
 
   return (
     <View style={styles.transactionItem}>
-      <View style={styles.transactionHeader}>
-        <View style={styles.transactionIcon}>
-          <Ionicons name={getTransactionIcon() as any} size={20} color={theme.colors.primary} />
-        </View>
-        <View style={styles.transactionInfo}>
-          <Text style={styles.transactionType}>
-            {transaction.type === 'p2p'
-              ? 'P2P Transfer'
-              : transaction.type === 'self_transfer'
-                ? 'Withdrawal'
-                : transaction.type === 'subscription_fee'
-                  ? 'Fee'
-                  : transaction.type}
-          </Text>
-          <Text style={styles.transactionDescription} numberOfLines={1}>
-            {transaction.description || 'No description'}
-          </Text>
-        </View>
-        <View style={styles.transactionAmount}>
-          <Text style={[styles.amountText, { color: getAmountColor() }]}>{getAmountDisplay()}</Text>
-          {transaction.fee > 0 && (
-            <Text style={styles.feeText}>Fee: {formatCurrency(transaction.fee)}</Text>
-          )}
-        </View>
+      <View style={[styles.iconContainer, { backgroundColor: getIconBgColor() }]}>
+        <Ionicons name={getTransactionIcon() as any} size={24} color={getIconColor()} />
       </View>
 
-      <View style={styles.transactionFooter}>
-        <View style={styles.statusContainer}>
-          <View style={[styles.statusDot, { backgroundColor: getTransactionColor() }]} />
-          <Text style={[styles.statusText, { color: getTransactionColor() }]}>
-            {getStatusText()}
-          </Text>
+      <View style={styles.transactionContent}>
+        <View style={styles.transactionHeader}>
+          <View style={styles.transactionInfo}>
+            <Text style={styles.transactionTitle}>{getTransactionTitle()}</Text>
+            <Text style={styles.transactionDescription} numberOfLines={1}>
+              {transaction.description || 'No description'}
+            </Text>
+          </View>
+
+          <View style={styles.amountContainer}>
+            <Text style={[styles.amountText, { color: getAmountColor() }]}>
+              {getAmountDisplay()}
+            </Text>
+            {transaction.fee > 0 && isOutgoing && (
+              <Text style={styles.feeText}>Fee: {formatCurrency(transaction.fee)}</Text>
+            )}
+          </View>
         </View>
-        <Text style={styles.dateText}>
-          {new Date(transaction.created_at).toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })}
-        </Text>
+
+        <View style={styles.transactionFooter}>
+          <View style={styles.statusContainer}>
+            <View style={[styles.statusDot, { backgroundColor: getTransactionColor() }]} />
+            <Text style={[styles.statusText, { color: getTransactionColor() }]}>
+              {getStatusText()}
+            </Text>
+          </View>
+
+          <View style={styles.dateContainer}>
+            <Ionicons name="calendar-outline" size={12} color={theme.colors.textSecondary} />
+            <Text style={styles.dateText}>
+              {new Date(transaction.created_at).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </Text>
+          </View>
+        </View>
       </View>
     </View>
   );
 };
+
+// Move separator component outside of render
+const ItemSeparatorComponent = () => <View style={styles.separator} />;
 
 const PaymentHistoryScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
@@ -180,10 +220,24 @@ const PaymentHistoryScreen = () => {
 
   const renderEmptyState = () => (
     <View style={styles.emptyState}>
-      <Ionicons name="receipt-outline" size={64} color={theme.colors.textSecondary} />
+      <View style={styles.emptyIconContainer}>
+        <Ionicons name="receipt-outline" size={72} color={theme.colors.textSecondary} />
+      </View>
       <Text style={styles.emptyTitle}>No Transactions Yet</Text>
       <Text style={styles.emptySubtitle}>
-        Your transaction history will appear here once you start making payments.
+        Your transaction history will appear here once you start making payments or transfers.
+      </Text>
+    </View>
+  );
+
+  const renderErrorState = () => (
+    <View style={styles.errorContainer}>
+      <View style={styles.errorIconContainer}>
+        <Ionicons name="alert-circle-outline" size={72} color={theme.colors.error} />
+      </View>
+      <Text style={styles.errorTitle}>Failed to Load Transactions</Text>
+      <Text style={styles.errorSubtitle}>
+        {error?.message || 'Something went wrong while loading your transactions.'}
       </Text>
     </View>
   );
@@ -197,16 +251,8 @@ const PaymentHistoryScreen = () => {
     );
   }
 
-  if (error) {
-    return (
-      <View style={styles.errorContainer}>
-        <Ionicons name="alert-circle-outline" size={64} color={theme.colors.error} />
-        <Text style={styles.errorTitle}>Failed to Load Transactions</Text>
-        <Text style={styles.errorSubtitle}>
-          {error.message || 'Something went wrong while loading your transactions.'}
-        </Text>
-      </View>
-    );
+  if (error && !transactions) {
+    return renderErrorState();
   }
 
   return (
@@ -226,6 +272,7 @@ const PaymentHistoryScreen = () => {
         }
         contentContainerStyle={styles.listContainer}
         showsVerticalScrollIndicator={false}
+        ItemSeparatorComponent={ItemSeparatorComponent}
       />
     </View>
   );
@@ -239,55 +286,70 @@ const styles = StyleSheet.create({
   listContainer: {
     flexGrow: 1,
     paddingHorizontal: theme.spacing.s16,
-    paddingVertical: theme.spacing.s8,
+    paddingVertical: theme.spacing.s12,
   },
+  // Transaction Item
   transactionItem: {
+    flexDirection: 'row',
     backgroundColor: theme.colors.surface,
-    borderRadius: theme.radii.md,
+    borderRadius: theme.radii.lg,
     padding: theme.spacing.s16,
-    marginVertical: theme.spacing.s8,
     borderWidth: 1,
     borderColor: theme.colors.border,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
   },
-  transactionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: theme.spacing.s8,
-  },
-  transactionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: theme.colors.primaryLight,
+  iconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: theme.radii.full,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: theme.spacing.s12,
+  },
+  transactionContent: {
+    flex: 1,
+  },
+  transactionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: theme.spacing.s12,
   },
   transactionInfo: {
     flex: 1,
     marginRight: theme.spacing.s12,
   },
-  transactionType: {
+  transactionTitle: {
     fontSize: theme.fontSizes.base,
-    fontWeight: theme.fontWeights.medium,
+    fontWeight: theme.fontWeights.semibold,
     color: theme.colors.textPrimary,
     marginBottom: theme.spacing.s4,
   },
   transactionDescription: {
     fontSize: theme.fontSizes.sm,
     color: theme.colors.textSecondary,
+    lineHeight: 18,
   },
-  transactionAmount: {
+  amountContainer: {
     alignItems: 'flex-end',
   },
   amountText: {
     fontSize: theme.fontSizes.lg,
-    fontWeight: theme.fontWeights.semibold,
+    fontWeight: theme.fontWeights.bold,
+    marginBottom: theme.spacing.s2,
   },
   feeText: {
     fontSize: theme.fontSizes.xs,
     color: theme.colors.textSecondary,
-    marginTop: theme.spacing.s2,
   },
   transactionFooter: {
     flexDirection: 'row',
@@ -302,62 +364,84 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    marginRight: theme.spacing.s8,
+    marginRight: theme.spacing.s6,
   },
   statusText: {
     fontSize: theme.fontSizes.sm,
     fontWeight: theme.fontWeights.medium,
   },
+  dateContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.s4,
+  },
   dateText: {
-    fontSize: theme.fontSizes.sm,
+    fontSize: theme.fontSizes.xs,
     color: theme.colors.textSecondary,
   },
+  separator: {
+    height: theme.spacing.s12,
+  },
+  // Loading State
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: theme.colors.background,
   },
   loadingText: {
     marginTop: theme.spacing.s16,
     fontSize: theme.fontSizes.base,
     color: theme.colors.textSecondary,
   },
+  // Empty State
   emptyState: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: theme.spacing.s32,
+    paddingVertical: theme.spacing.s48,
+    paddingHorizontal: theme.spacing.s32,
+  },
+  emptyIconContainer: {
+    marginBottom: theme.spacing.s20,
+    opacity: 0.5,
   },
   emptyTitle: {
-    fontSize: theme.fontSizes.lg,
-    fontWeight: theme.fontWeights.semibold,
+    fontSize: theme.fontSizes.xl,
+    fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
-    marginTop: theme.spacing.s16,
     marginBottom: theme.spacing.s8,
+    textAlign: 'center',
   },
   emptySubtitle: {
     fontSize: theme.fontSizes.base,
     color: theme.colors.textSecondary,
     textAlign: 'center',
-    paddingHorizontal: theme.spacing.s32,
+    lineHeight: 22,
   },
+  // Error State
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: theme.spacing.s32,
+    backgroundColor: theme.colors.background,
+  },
+  errorIconContainer: {
+    marginBottom: theme.spacing.s20,
   },
   errorTitle: {
-    fontSize: theme.fontSizes.lg,
-    fontWeight: theme.fontWeights.semibold,
+    fontSize: theme.fontSizes.xl,
+    fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
-    marginTop: theme.spacing.s16,
     marginBottom: theme.spacing.s8,
+    textAlign: 'center',
   },
   errorSubtitle: {
     fontSize: theme.fontSizes.base,
     color: theme.colors.textSecondary,
     textAlign: 'center',
+    lineHeight: 22,
   },
 });
 

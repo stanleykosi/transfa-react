@@ -1,21 +1,21 @@
 /**
  * @description
- * This screen displays a list of the user's saved beneficiaries (linked external
- * bank accounts). It allows users to view their accounts, add new ones, and
- * delete existing ones.
+ * Enhanced Beneficiaries (Linked Accounts) screen with modern fintech UI.
+ * Displays a list of the user's saved beneficiaries (linked external bank accounts).
+ * Allows users to view their accounts, add new ones, and delete existing ones.
  *
  * Key features:
- * - Fetches and displays a list of beneficiaries using `useListBeneficiaries`.
- * - Handles loading, empty, and error states for the beneficiary list.
- * - Provides a button to navigate to the "Add Beneficiary" screen.
- * - Allows users to delete a beneficiary with a confirmation prompt.
+ * - Modern card-based layout with improved visual hierarchy
+ * - Enhanced empty states with illustrations
+ * - Smooth deletion with confirmation
+ * - Professional styling consistent with fintech best practices
  *
  * @dependencies
- * - react-native: For UI components and `Alert` for confirmation.
- * - @react-navigation/native: For navigation to other screens.
- * - @/components/*: Reusable UI components.
- * - @/api/accountApi: Hooks for listing and deleting beneficiaries.
- * - @expo/vector-icons: For icons.
+ * - react-native: For UI components and `Alert` for confirmation
+ * - @react-navigation/native: For navigation to other screens
+ * - @/components/*: Reusable UI components
+ * - @/api/accountApi: Hooks for listing and deleting beneficiaries
+ * - @expo/vector-icons: For icons
  */
 import React from 'react';
 import {
@@ -26,12 +26,13 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ProfileStackParamList } from '@/navigation/ProfileStack';
 import ScreenWrapper from '@/components/ScreenWrapper';
-import PrimaryButton from '@/components/PrimaryButton';
+import ActionButton from '@/components/ActionButton';
 import { useListBeneficiaries, useDeleteBeneficiary } from '@/api/accountApi';
 import { theme } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -42,7 +43,6 @@ type BeneficiariesScreenNavigationProp = NativeStackNavigationProp<
   'Beneficiaries'
 >;
 
-// Move ItemSeparatorComponent outside of render to avoid unstable nested components warning
 const ItemSeparator = () => <View style={styles.separator} />;
 
 const BeneficiaryItem = React.memo(
@@ -57,13 +57,18 @@ const BeneficiaryItem = React.memo(
     return (
       <View style={styles.itemContainer}>
         <View style={styles.iconContainer}>
-          <Ionicons name="business-outline" size={24} color={theme.colors.primary} />
+          <Ionicons name="business" size={24} color={theme.colors.primary} />
         </View>
         <View style={styles.itemDetails}>
           <Text style={styles.accountName}>{item.account_name}</Text>
-          <Text style={styles.bankInfo}>
-            {item.bank_name} • {item.account_number_masked}
-          </Text>
+          <View style={styles.bankInfoRow}>
+            <Ionicons name="briefcase-outline" size={14} color={theme.colors.textSecondary} />
+            <Text style={styles.bankInfo}>{item.bank_name}</Text>
+          </View>
+          <View style={styles.bankInfoRow}>
+            <Ionicons name="card-outline" size={14} color={theme.colors.textSecondary} />
+            <Text style={styles.bankInfo}>{item.account_number_masked}</Text>
+          </View>
         </View>
         <TouchableOpacity onPress={handleDelete} style={styles.deleteButton}>
           <Ionicons name="trash-outline" size={22} color={theme.colors.error} />
@@ -85,31 +90,63 @@ const BeneficiariesScreen = () => {
     },
   });
 
+  const renderEmptyState = () => (
+    <View style={styles.emptyContainer}>
+      <View style={styles.emptyIconContainer}>
+        <Ionicons name="business-outline" size={72} color={theme.colors.textSecondary} />
+      </View>
+      <Text style={styles.emptyTitle}>No Linked Accounts</Text>
+      <Text style={styles.emptySubtitle}>
+        Link your external bank accounts to receive payments and transfer funds easily.
+      </Text>
+    </View>
+  );
+
+  const renderErrorState = () => (
+    <View style={styles.emptyContainer}>
+      <View style={styles.errorIconContainer}>
+        <Ionicons name="alert-circle-outline" size={72} color={theme.colors.error} />
+      </View>
+      <Text style={styles.emptyTitle}>Failed to Load</Text>
+      <Text style={styles.emptySubtitle}>
+        {error?.message || 'Unable to load your linked accounts.'}
+      </Text>
+    </View>
+  );
+
   const renderContent = () => {
     if (isLoading) {
       return (
-        <ActivityIndicator size="large" color={theme.colors.primary} style={styles.centered} />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={styles.loadingText}>Loading linked accounts...</Text>
+        </View>
       );
     }
+
     if (isError) {
-      return <Text style={styles.centered}>{error.message}</Text>;
+      return renderErrorState();
     }
+
     if (!beneficiaries || beneficiaries.length === 0) {
-      return <Text style={styles.centered}>You haven't added any linked accounts yet.</Text>;
+      return renderEmptyState();
     }
+
     return (
       <FlatList
         data={beneficiaries}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <BeneficiaryItem item={item} onDelete={deleteBeneficiary} />}
         ItemSeparatorComponent={ItemSeparator}
-        contentContainerStyle={{ paddingBottom: 100 }} // Space for floating button
+        contentContainerStyle={styles.listContainer}
+        showsVerticalScrollIndicator={false}
       />
     );
   };
 
   return (
     <ScreenWrapper>
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={theme.colors.textPrimary} />
@@ -117,16 +154,25 @@ const BeneficiariesScreen = () => {
         <Text style={styles.title}>Linked Accounts</Text>
         <View style={{ width: 24 }} />
       </View>
+
+      {/* Deleting Overlay */}
       {isDeleting && (
         <View style={styles.deletingOverlay}>
           <ActivityIndicator size="small" color={theme.colors.primary} />
           <Text style={styles.deletingText}>Removing...</Text>
         </View>
       )}
+
+      {/* Content */}
       {renderContent()}
-      <PrimaryButton
+
+      {/* Add New Account Button */}
+      <ActionButton
         title="Add New Account"
+        icon="add-circle"
         onPress={() => navigation.navigate('AddBeneficiary')}
+        variant="primary"
+        size="large"
         style={styles.addButton}
       />
     </ScreenWrapper>
@@ -138,53 +184,153 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingBottom: theme.spacing.s24,
+    marginBottom: theme.spacing.s24,
   },
-  backButton: { padding: theme.spacing.s4 },
+  backButton: {
+    padding: theme.spacing.s4,
+  },
   title: {
     fontSize: theme.fontSizes['2xl'],
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
   },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  addButton: { position: 'absolute', bottom: theme.spacing.s32, left: 24, right: 24 },
+  // Loading State
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: theme.spacing.s48,
+  },
+  loadingText: {
+    marginTop: theme.spacing.s16,
+    fontSize: theme.fontSizes.base,
+    color: theme.colors.textSecondary,
+  },
+  // Empty State
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: theme.spacing.s48,
+    paddingHorizontal: theme.spacing.s32,
+  },
+  emptyIconContainer: {
+    marginBottom: theme.spacing.s20,
+    opacity: 0.5,
+  },
+  errorIconContainer: {
+    marginBottom: theme.spacing.s20,
+  },
+  emptyTitle: {
+    fontSize: theme.fontSizes.xl,
+    fontWeight: theme.fontWeights.bold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.s8,
+    textAlign: 'center',
+  },
+  emptySubtitle: {
+    fontSize: theme.fontSizes.base,
+    color: theme.colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  // List
+  listContainer: {
+    paddingBottom: 100, // Space for floating button
+  },
+  separator: {
+    height: theme.spacing.s12,
+  },
+  // Beneficiary Item
   itemContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: theme.colors.surface,
     padding: theme.spacing.s16,
-    borderRadius: theme.radii.md,
+    borderRadius: theme.radii.lg,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 2,
+      },
+    }),
   },
   iconContainer: {
-    padding: theme.spacing.s12,
-    backgroundColor: '#F0F2FF',
+    width: 48,
+    height: 48,
     borderRadius: theme.radii.full,
+    backgroundColor: theme.colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: theme.spacing.s12,
   },
-  itemDetails: { flex: 1, marginLeft: theme.spacing.s16 },
+  itemDetails: {
+    flex: 1,
+  },
   accountName: {
     fontSize: theme.fontSizes.base,
     fontWeight: theme.fontWeights.semibold,
     color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.s6,
+  },
+  bankInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.s6,
+    marginBottom: theme.spacing.s4,
   },
   bankInfo: {
     fontSize: theme.fontSizes.sm,
     color: theme.colors.textSecondary,
-    marginTop: theme.spacing.s4,
   },
-  deleteButton: { padding: theme.spacing.s8 },
-  separator: { height: theme.spacing.s12 },
+  deleteButton: {
+    padding: theme.spacing.s8,
+    marginLeft: theme.spacing.s8,
+  },
+  // Add Button
+  addButton: {
+    position: 'absolute',
+    bottom: theme.spacing.s24,
+    left: theme.spacing.s24,
+    right: theme.spacing.s24,
+  },
+  // Deleting Overlay
   deletingOverlay: {
     position: 'absolute',
     top: 100,
-    left: '35%',
+    alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    padding: theme.spacing.s8,
-    borderRadius: theme.radii.md,
+    backgroundColor: theme.colors.surface,
+    paddingVertical: theme.spacing.s12,
+    paddingHorizontal: theme.spacing.s20,
+    borderRadius: theme.radii.full,
     zIndex: 10,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
+    gap: theme.spacing.s12,
   },
-  deletingText: { marginLeft: theme.spacing.s8, color: theme.colors.textSecondary },
+  deletingText: {
+    fontSize: theme.fontSizes.sm,
+    color: theme.colors.textPrimary,
+    fontWeight: theme.fontWeights.medium,
+  },
 });
 
 export default BeneficiariesScreen;
