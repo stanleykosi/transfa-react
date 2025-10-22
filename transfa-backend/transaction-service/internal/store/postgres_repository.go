@@ -45,16 +45,16 @@ func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository {
 // FindUserIDByClerkUserID resolves the internal UUID from a Clerk user id.
 // This mirrors the approach used in other services (e.g., account-service).
 func (r *PostgresRepository) FindUserIDByClerkUserID(ctx context.Context, clerkUserID string) (string, error) {
-    var id string
-    // users table is expected to have a clerk_user_id column (managed by auth-service during onboarding)
-    err := r.db.QueryRow(ctx, "SELECT id FROM users WHERE clerk_user_id = $1", clerkUserID).Scan(&id)
-    if err != nil {
-        if err == pgx.ErrNoRows {
-            return "", ErrUserNotFound
-        }
-        return "", err
-    }
-    return id, nil
+	var id string
+	// users table is expected to have a clerk_user_id column (managed by auth-service during onboarding)
+	err := r.db.QueryRow(ctx, "SELECT id FROM users WHERE clerk_user_id = $1", clerkUserID).Scan(&id)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return "", ErrUserNotFound
+		}
+		return "", err
+	}
+	return id, nil
 }
 
 // FindUserByUsername retrieves a user from the database by their username.
@@ -106,12 +106,12 @@ func (r *PostgresRepository) UpdateAccountBalance(ctx context.Context, userID uu
 	if err != nil {
 		return err
 	}
-	
+
 	rowsAffected := result.RowsAffected()
 	if rowsAffected == 0 {
 		return ErrAccountNotFound
 	}
-	
+
 	return nil
 }
 
@@ -120,7 +120,7 @@ func (r *PostgresRepository) FindTransactionsByUserID(ctx context.Context, userI
 	var transactions []domain.Transaction
 	query := `
 		SELECT id, anchor_transfer_id, sender_id, recipient_id, source_account_id, destination_account_id, 
-		       destination_beneficiary_id, type, category, status, amount, fee, description, created_at, updated_at
+		       destination_beneficiary_id, type, category, status, amount, fee, COALESCE(description, ''), created_at, updated_at
 		FROM transactions 
 		WHERE sender_id = $1 OR recipient_id = $1 
 		ORDER BY created_at DESC
@@ -285,6 +285,13 @@ func (r *PostgresRepository) UpdateTransactionStatus(ctx context.Context, transa
 func (r *PostgresRepository) UpdateTransactionStatusAndFee(ctx context.Context, transactionID uuid.UUID, anchorTransferID, status string, fee int64) error {
 	query := `UPDATE transactions SET status = $1, anchor_transfer_id = $2, fee = $3, updated_at = NOW() WHERE id = $4`
 	_, err := r.db.Exec(ctx, query, status, anchorTransferID, fee, transactionID)
+	return err
+}
+
+// UpdateTransactionDestinations fills in destination account/beneficiary for a transaction.
+func (r *PostgresRepository) UpdateTransactionDestinations(ctx context.Context, transactionID uuid.UUID, destinationAccountID *uuid.UUID, destinationBeneficiaryID *uuid.UUID) error {
+	query := `UPDATE transactions SET destination_account_id = $1, destination_beneficiary_id = $2, updated_at = NOW() WHERE id = $3`
+	_, err := r.db.Exec(ctx, query, destinationAccountID, destinationBeneficiaryID, transactionID)
 	return err
 }
 

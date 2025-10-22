@@ -35,25 +35,36 @@ import (
 
 const (
 	FreeTierTransferLimit = 5
-	TransactionFee        = 5000   // 50 NGN in kobo
 	SubscriptionFee       = 100000 // 1000 NGN in kobo
+	defaultTransactionFee = 500    // 5 NGN in kobo (failsafe)
 )
 
 // Service provides the core business logic for transactions.
 type Service struct {
-	repo          store.Repository
-	anchorClient  *anchorclient.Client
-	eventProducer rabbitmq.Publisher
-	adminAccountID string
+	repo               store.Repository
+	anchorClient       *anchorclient.Client
+	eventProducer      rabbitmq.Publisher
+	adminAccountID     string
+	transactionFeeKobo int64
 }
 
 // NewService creates a new transaction service instance.
-func NewService(repo store.Repository, anchor *anchorclient.Client, producer rabbitmq.Publisher, adminAccountID string) *Service {
+func NewService(repo store.Repository, anchor *anchorclient.Client, producer rabbitmq.Publisher, adminAccountID string, transactionFeeKobo int64) *Service {
+	if transactionFeeKobo <= 0 {
+		log.Printf("INFO: Using default transaction fee %d kobo", defaultTransactionFee)
+		transactionFeeKobo = defaultTransactionFee
+	}
+
+	if adminAccountID == "" {
+		log.Printf("WARN: Admin account ID not provided; fee collection will be disabled")
+	}
+
 	return &Service{
-		repo:          repo,
-		anchorClient:  anchor,
-		eventProducer: producer,
-		adminAccountID: adminAccountID,
+		repo:               repo,
+		anchorClient:       anchor,
+		eventProducer:      producer,
+		adminAccountID:     adminAccountID,
+		transactionFeeKobo: transactionFeeKobo,
 	}
 }
 
@@ -61,13 +72,13 @@ func NewService(repo store.Repository, anchor *anchorclient.Client, producer rab
 // internal UUID used by our database. This allows handlers to accept Clerk subject ids
 // from validated JWTs while our repositories continue to operate on UUIDs.
 func (s *Service) ResolveInternalUserID(ctx context.Context, clerkUserID string) (string, error) {
-    return s.repo.FindUserIDByClerkUserID(ctx, clerkUserID)
+	return s.repo.FindUserIDByClerkUserID(ctx, clerkUserID)
 }
 
 // ProcessP2PTransfer handles the logic for a peer-to-peer transfer.
 func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, req domain.P2PTransferRequest) (*domain.Transaction, error) {
 	log.Printf("ProcessP2PTransfer: Starting transfer from %s to %s for amount %d", senderID, req.RecipientUsername, req.Amount)
-	
+
 	// 1. Get sender and recipient details
 	sender, err := s.repo.FindUserByID(ctx, senderID)
 	if err != nil {
@@ -75,7 +86,7 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		return nil, fmt.Errorf("failed to find sender: %w", err)
 	}
 	log.Printf("ProcessP2PTransfer: Found sender %s (allow_sending: %v)", sender.ID, sender.AllowSending)
-	
+
 	recipient, err := s.repo.FindUserByUsername(ctx, req.RecipientUsername)
 	if err != nil {
 		log.Printf("ProcessP2PTransfer: Failed to find recipient %s: %v", req.RecipientUsername, err)
@@ -108,23 +119,17 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 	}
 
 	availableBalance := anchorBalance.Data.AvailableBalance
-	requiredAmount := req.Amount + TransactionFee
+	requiredAmount := req.Amount + s.transactionFeeKobo
 	log.Printf("ProcessP2PTransfer: Sender Anchor balance: %d, required: %d", availableBalance, requiredAmount)
-	
+
 	if availableBalance < requiredAmount {
 		log.Printf("ProcessP2PTransfer: Insufficient funds for sender %s (Anchor balance: %d, required: %d)", sender.ID, availableBalance, requiredAmount)
 		return nil, store.ErrInsufficientFunds
 	}
 
 	// 3. Debit the sender's wallet immediately to lock funds
-	if err := s.repo.DebitWallet(ctx, sender.ID, req.Amount+TransactionFee); err != nil {
+	if err := s.repo.DebitWallet(ctx, sender.ID, req.Amount+s.transactionFeeKobo); err != nil {
 		return nil, fmt.Errorf("failed to debit sender wallet: %w", err)
-	}
-
-	// 3.5. Collect the transaction fee to admin account
-	if err := s.collectTransactionFee(ctx, senderAccount.AnchorAccountID, TransactionFee, "P2P Transfer Fee"); err != nil {
-		log.Printf("WARN: Failed to collect transaction fee: %v", err)
-		// Don't fail the transaction, just log the warning
 	}
 
 	// 4. Create initial transaction record
@@ -136,16 +141,22 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		Type:            "p2p",
 		Status:          "pending",
 		Amount:          req.Amount,
-		Fee:             TransactionFee,
+		Fee:             s.transactionFeeKobo,
 		Description:     req.Description,
 		Category:        "p2p_transfer",
 	}
 	if err := s.repo.CreateTransaction(ctx, txRecord); err != nil {
 		// Refund the debited amount since transaction creation failed
-		if refundErr := s.repo.CreditWallet(ctx, sender.ID, req.Amount+TransactionFee); refundErr != nil {
+		if refundErr := s.repo.CreditWallet(ctx, sender.ID, req.Amount+s.transactionFeeKobo); refundErr != nil {
 			log.Printf("CRITICAL: Failed to refund debited amount for user %s after transaction creation failure: %v", sender.ID, refundErr)
 		}
 		return nil, fmt.Errorf("failed to create transaction record: %w", err)
+	}
+
+	// 3.5. Collect the transaction fee to admin account
+	if err := s.collectTransactionFee(ctx, txRecord, senderAccount, s.transactionFeeKobo, "P2P Transfer Fee"); err != nil {
+		log.Printf("WARN: Failed to collect transaction fee: %v", err)
+		// Don't fail the transaction, just log the warning
 	}
 
 	// 5. Determine routing based on recipient's receiving preference and eligibility
@@ -197,6 +208,11 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 					reason = fmt.Sprintf("P2P Transfer to %s: %s", req.RecipientUsername, req.Description)
 				}
 				anchorResp, err = s.anchorClient.InitiateNIPTransfer(ctx, senderAccount.AnchorAccountID, recipientBeneficiary.AnchorCounterpartyID, reason, req.Amount)
+				if err == nil {
+					if updateErr := s.repo.UpdateTransactionDestinations(ctx, txRecord.ID, nil, &recipientBeneficiary.ID); updateErr != nil {
+						log.Printf("WARN: Failed to persist destination beneficiary for transaction %s: %v", txRecord.ID, updateErr)
+					}
+				}
 
 				// Increment monthly usage for free tier recipients when external transfer is successful
 				if err == nil {
@@ -234,14 +250,14 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		// If Anchor transfer fails, mark our transaction as failed.
 		s.repo.UpdateTransactionStatus(ctx, txRecord.ID, "", "failed")
 		// Refund the debited amount since Anchor transfer failed
-		if refundErr := s.repo.CreditWallet(ctx, sender.ID, req.Amount+TransactionFee); refundErr != nil {
+		if refundErr := s.repo.CreditWallet(ctx, sender.ID, req.Amount+s.transactionFeeKobo); refundErr != nil {
 			log.Printf("CRITICAL: Failed to refund debited amount for user %s after Anchor transfer failure: %v", sender.ID, refundErr)
 		}
 		return nil, fmt.Errorf("anchor transfer failed: %w", err)
 	}
 
 	// 7. Update transaction with final status from Anchor
-	s.repo.UpdateTransactionStatusAndFee(ctx, txRecord.ID, anchorResp.Data.ID, "completed", anchorResp.Data.Attributes.Fee)
+	s.repo.UpdateTransactionStatusAndFee(ctx, txRecord.ID, anchorResp.Data.ID, "completed", txRecord.Fee)
 	txRecord.Status = "completed"
 
 	return txRecord, nil
@@ -253,7 +269,7 @@ func (s *Service) performInternalTransfer(ctx context.Context, txRecord *domain.
 	if err != nil {
 		return nil, fmt.Errorf("could not find recipient's internal account: %w", err)
 	}
-	
+
 	// Set the destination account ID for internal transfers
 	txRecord.DestinationAccountID = &recipientAccount.ID
 	txRecord.RecipientID = &recipient.ID
@@ -268,7 +284,16 @@ func (s *Service) performInternalTransfer(ctx context.Context, txRecord *domain.
 		})
 	}
 
-	return s.anchorClient.InitiateBookTransfer(ctx, senderAccount.AnchorAccountID, recipientAccount.AnchorAccountID, reason, txRecord.Amount)
+	transferResp, err := s.anchorClient.InitiateBookTransfer(ctx, senderAccount.AnchorAccountID, recipientAccount.AnchorAccountID, reason, txRecord.Amount)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.repo.UpdateTransactionDestinations(ctx, txRecord.ID, &recipientAccount.ID, nil); err != nil {
+		log.Printf("WARN: Failed to persist destination account for transaction %s: %v", txRecord.ID, err)
+	}
+
+	return transferResp, nil
 }
 
 // checkRecipientEligibility checks if a recipient can receive an external transfer.
@@ -327,23 +352,17 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 	}
 
 	availableBalance := anchorBalance.Data.AvailableBalance
-	requiredAmount := req.Amount + TransactionFee
+	requiredAmount := req.Amount + s.transactionFeeKobo
 	log.Printf("ProcessSelfTransfer: Sender Anchor balance: %d, required: %d", availableBalance, requiredAmount)
-	
+
 	if availableBalance < requiredAmount {
 		log.Printf("ProcessSelfTransfer: Insufficient funds for sender %s (Anchor balance: %d, required: %d)", sender.ID, availableBalance, requiredAmount)
 		return nil, store.ErrInsufficientFunds
 	}
 
 	// 3. Debit sender's wallet to lock funds
-	if err := s.repo.DebitWallet(ctx, sender.ID, req.Amount+TransactionFee); err != nil {
+	if err := s.repo.DebitWallet(ctx, sender.ID, req.Amount+s.transactionFeeKobo); err != nil {
 		return nil, fmt.Errorf("failed to debit sender wallet: %w", err)
-	}
-
-	// 3.5. Collect the transaction fee to admin account
-	if err := s.collectTransactionFee(ctx, senderAccount.AnchorAccountID, TransactionFee, "Self Transfer Fee"); err != nil {
-		log.Printf("WARN: Failed to collect transaction fee: %v", err)
-		// Don't fail the transaction, just log the warning
 	}
 
 	// 4. Create initial transaction record
@@ -355,16 +374,22 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 		Type:                     "self_transfer",
 		Status:                   "pending",
 		Amount:                   req.Amount,
-		Fee:                      TransactionFee,
+		Fee:                      s.transactionFeeKobo,
 		Description:              req.Description,
 		Category:                 "self_transfer",
 	}
 	if err := s.repo.CreateTransaction(ctx, txRecord); err != nil {
 		// Refund the debited amount since transaction creation failed
-		if refundErr := s.repo.CreditWallet(ctx, sender.ID, req.Amount+TransactionFee); refundErr != nil {
+		if refundErr := s.repo.CreditWallet(ctx, sender.ID, req.Amount+s.transactionFeeKobo); refundErr != nil {
 			log.Printf("CRITICAL: Failed to refund debited amount for user %s after transaction creation failure: %v", sender.ID, refundErr)
 		}
 		return nil, fmt.Errorf("failed to create transaction record: %w", err)
+	}
+
+	// 3.5. Collect the transaction fee to admin account
+	if err := s.collectTransactionFee(ctx, txRecord, senderAccount, s.transactionFeeKobo, "Self Transfer Fee"); err != nil {
+		log.Printf("WARN: Failed to collect transaction fee: %v", err)
+		// Don't fail the transaction, just log the warning
 	}
 
 	// 5. Initiate NIP transfer via Anchor
@@ -373,20 +398,20 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 	if req.Description != "" {
 		reason = fmt.Sprintf("Self Transfer: %s", req.Description)
 	}
-	
+
 	anchorResp, err := s.anchorClient.InitiateNIPTransfer(ctx, senderAccount.AnchorAccountID, beneficiary.AnchorCounterpartyID, reason, req.Amount)
 	if err != nil {
 		// Mark transaction as failed and refund
 		s.repo.UpdateTransactionStatus(ctx, txRecord.ID, "", "failed")
 		// Refund the debited amount since Anchor transfer failed
-		if refundErr := s.repo.CreditWallet(ctx, sender.ID, req.Amount+TransactionFee); refundErr != nil {
+		if refundErr := s.repo.CreditWallet(ctx, sender.ID, req.Amount+s.transactionFeeKobo); refundErr != nil {
 			log.Printf("CRITICAL: Failed to refund debited amount for user %s after Anchor transfer failure: %v", sender.ID, refundErr)
 		}
 		return nil, fmt.Errorf("anchor NIP transfer failed: %w", err)
 	}
 
 	// 6. Update transaction with final status
-	s.repo.UpdateTransactionStatusAndFee(ctx, txRecord.ID, anchorResp.Data.ID, "completed", anchorResp.Data.Attributes.Fee)
+	s.repo.UpdateTransactionStatusAndFee(ctx, txRecord.ID, anchorResp.Data.ID, "completed", txRecord.Fee)
 	txRecord.Status = "completed"
 
 	return txRecord, nil
@@ -548,12 +573,17 @@ func (s *Service) GetPaymentRequestByID(ctx context.Context, requestID uuid.UUID
 }
 
 // collectTransactionFee transfers the transaction fee to the admin account.
-func (s *Service) collectTransactionFee(ctx context.Context, sourceAccountID string, amount int64, description string) error {
+func (s *Service) collectTransactionFee(ctx context.Context, parentTx *domain.Transaction, sourceAccount *domain.Account, amount int64, description string) error {
 	if s.adminAccountID == "" {
-		return fmt.Errorf("admin account ID not configured")
+		log.Printf("WARN: Admin account ID not configured; skipping fee collection")
+		return nil
 	}
 
-	log.Printf("Collecting transaction fee of %d from %s to admin account %s", amount, sourceAccountID, s.adminAccountID)
+	if sourceAccount == nil {
+		return fmt.Errorf("source account is nil")
+	}
+
+	log.Printf("Collecting transaction fee of %d from %s to admin account %s", amount, sourceAccount.AnchorAccountID, s.adminAccountID)
 
 	// Get the admin account balance to verify it exists
 	adminBalance, err := s.anchorClient.GetAccountBalance(ctx, s.adminAccountID)
@@ -565,7 +595,7 @@ func (s *Service) collectTransactionFee(ctx context.Context, sourceAccountID str
 	log.Printf("Admin account current balance: %d", adminBalance.Data.AvailableBalance)
 
 	// Perform the actual transfer from source account to admin account
-	transferResp, err := s.anchorClient.InitiateBookTransfer(ctx, sourceAccountID, s.adminAccountID, description, amount)
+	transferResp, err := s.anchorClient.InitiateBookTransfer(ctx, sourceAccount.AnchorAccountID, s.adminAccountID, description, amount)
 	if err != nil {
 		log.Printf("Failed to transfer fee to admin account: %v", err)
 		return fmt.Errorf("failed to transfer fee to admin account: %w", err)
@@ -574,28 +604,9 @@ func (s *Service) collectTransactionFee(ctx context.Context, sourceAccountID str
 	log.Printf("Fee transfer successful: %s", transferResp.Data.ID)
 
 	// Create a fee collection transaction record for the admin account
-	feeTransaction := &domain.Transaction{
-		ID:                       uuid.New(),
-		AnchorTransferID:         &transferResp.Data.ID,
-		SenderID:                 uuid.Nil, // System-generated fee (no sender)
-		SourceAccountID:          uuid.Nil, // System account (nil for fee collection)
-		DestinationAccountID:     nil,      // Admin account (will be set by Anchor)
-		Type:                     "subscription_fee", // Use subscription_fee type for admin fees
-		Status:                   "completed",
-		Amount:                   amount,
-		Fee:                      0, // No fee on fee collection
-		Description:              description,
-		Category:                 "transaction_fee",
-	}
-	
-	// Save the fee transaction to the database
-	if err := s.repo.CreateTransaction(ctx, feeTransaction); err != nil {
-		log.Printf("Failed to save fee transaction to database: %v", err)
-		return fmt.Errorf("failed to save fee transaction: %w", err)
-	}
-	
-	log.Printf("Fee collection transaction created and saved: %s, amount: %d, transfer_id: %s", feeTransaction.ID, amount, transferResp.Data.ID)
-	
+	// Update parent transaction destination fields when fee collection targets admin account
+	log.Printf("Fee collection recorded for transaction %s: amount=%d, transfer_id=%s", parentTx.ID, amount, transferResp.Data.ID)
+
 	return nil
 }
 
@@ -617,11 +628,11 @@ func (s *Service) syncAccountBalance(ctx context.Context, userID uuid.UUID) erro
 	newBalance := anchorBalance.Data.AvailableBalance
 	if account.Balance != newBalance {
 		log.Printf("Syncing balance for user %s: internal=%d, anchor=%d", userID, account.Balance, newBalance)
-		
+
 		if err := s.repo.UpdateAccountBalance(ctx, userID, newBalance); err != nil {
 			return fmt.Errorf("failed to update account balance: %w", err)
 		}
-		
+
 		log.Printf("Successfully synced balance for user %s to %d", userID, newBalance)
 	}
 

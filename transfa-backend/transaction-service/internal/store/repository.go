@@ -24,8 +24,8 @@ import (
 // Repository defines the set of methods for interacting with the database.
 type Repository interface {
 	// User and Account methods
-    // Resolve internal UUID from Clerk user id (e.g., "user_abc123").
-    FindUserIDByClerkUserID(ctx context.Context, clerkUserID string) (string, error)
+	// Resolve internal UUID from Clerk user id (e.g., "user_abc123").
+	FindUserIDByClerkUserID(ctx context.Context, clerkUserID string) (string, error)
 	FindUserByUsername(ctx context.Context, username string) (*domain.User, error)
 	FindUserByID(ctx context.Context, userID uuid.UUID) (*domain.User, error)
 	FindAccountByUserID(ctx context.Context, userID uuid.UUID) (*domain.Account, error)
@@ -59,4 +59,5 @@ type Repository interface {
 
 	// Transaction history methods
 	FindTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]domain.Transaction, error)
+	UpdateTransactionDestinations(ctx context.Context, transactionID uuid.UUID, destinationAccountID *uuid.UUID, destinationBeneficiaryID *uuid.UUID) error
 }

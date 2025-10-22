@@ -50,17 +50,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("unable to parse database URL: %v", err)
 	}
-	
+
 	// Configure connection pool for high-traffic scenarios (100k+ users)
 	// Align with account-service configuration for consistency
 	config.MaxConns = 100
 	config.MinConns = 20
 	config.MaxConnLifetime = 30 * time.Minute
 	config.MaxConnIdleTime = 5 * time.Minute
-	
+
 	// Disable prepared statement caching to prevent conflicts
 	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
-	
+
 	dbpool, err := pgxpool.NewWithConfig(context.Background(), config)
 	if err != nil {
 		log.Fatalf("unable to connect to database: %v", err)
@@ -87,7 +87,7 @@ func main() {
 	repository := store.NewPostgresRepository(dbpool)
 
 	// Initialize the core application service with its dependencies.
-	transactionService := app.NewService(repository, anchorClient, rabbitProducer, cfg.AdminAccountID)
+	transactionService := app.NewService(repository, anchorClient, rabbitProducer, cfg.AdminAccountID, cfg.P2PTransactionFeeKobo)
 
 	// Initialize the API handlers.
 	transactionHandlers := api.NewTransactionHandlers(transactionService)

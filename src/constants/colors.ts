@@ -69,4 +69,22 @@ export const COLORS = {
    * Value: #FFFFFF (White)
    */
   textOnPrimary: '#FFFFFF',
+
+  /**
+   * Success color for positive states and confirmations.
+   * Value: #10B981 (Emerald)
+   */
+  success: '#10B981',
+
+  /**
+   * Warning color for caution states and pending actions.
+   * Value: #F59E0B (Amber)
+   */
+  warning: '#F59E0B',
+
+  /**
+   * Light version of primary color for backgrounds and highlights.
+   * Value: #E0E7FF (Indigo 100)
+   */
+  primaryLight: '#E0E7FF',
 };

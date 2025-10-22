@@ -12,6 +12,8 @@ package config
 
 import (
 	"log"
+	"math"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -20,13 +22,14 @@ import (
 // Config holds all the configuration variables for the transaction-service.
 // These values are loaded from environment variables.
 type Config struct {
-	ServerPort       string `mapstructure:"SERVER_PORT"`
-	DatabaseURL      string `mapstructure:"DATABASE_URL"`
-	RabbitMQURL      string `mapstructure:"RABBITMQ_URL"`
-	AnchorAPIBaseURL string `mapstructure:"ANCHOR_API_BASE_URL"`
-	AnchorAPIKey     string `mapstructure:"ANCHOR_API_KEY"`
-	ClerkJWKSURL     string `mapstructure:"CLERK_JWKS_URL"`
-	AdminAccountID   string `mapstructure:"ADMIN_ACCOUNT_ID"`
+	ServerPort            string `mapstructure:"SERVER_PORT"`
+	DatabaseURL           string `mapstructure:"DATABASE_URL"`
+	RabbitMQURL           string `mapstructure:"RABBITMQ_URL"`
+	AnchorAPIBaseURL      string `mapstructure:"ANCHOR_API_BASE_URL"`
+	AnchorAPIKey          string `mapstructure:"ANCHOR_API_KEY"`
+	ClerkJWKSURL          string `mapstructure:"CLERK_JWKS_URL"`
+	AdminAccountID        string `mapstructure:"ADMIN_ACCOUNT_ID"`
+	P2PTransactionFeeKobo int64  `mapstructure:"P2P_TRANSACTION_FEE_KOBO"`
 }
 
 // LoadConfig reads configuration from environment variables from the given path.
@@ -44,6 +47,7 @@ func LoadConfig(path string) (config Config, err error) {
 	// Set default values
 	viper.SetDefault("SERVER_PORT", "8083")
 	viper.SetDefault("ADMIN_ACCOUNT_ID", "17568857819889-anc_acc")
+	viper.SetDefault("P2P_TRANSACTION_FEE_KOBO", 500)
 
 	// Bind environment variables explicitly to ensure they appear in Unmarshal
 	_ = viper.BindEnv("SERVER_PORT")
@@ -53,6 +57,9 @@ func LoadConfig(path string) (config Config, err error) {
 	_ = viper.BindEnv("ANCHOR_API_KEY")
 	_ = viper.BindEnv("CLERK_JWKS_URL")
 	_ = viper.BindEnv("ADMIN_ACCOUNT_ID")
+	_ = viper.BindEnv("P2P_TRANSACTION_FEE_KOBO")
+	_ = viper.BindEnv("P2P_TRANSACTION_FEE")
+	_ = viper.BindEnv("P2P_TRANSACTION_FEE_NAIRA")
 
 	// Attempt to read the config file. It's okay if it doesn't exist.
 	if err = viper.ReadInConfig(); err != nil {
@@ -65,5 +72,37 @@ func LoadConfig(path string) (config Config, err error) {
 
 	// Unmarshal the configuration into the Config struct.
 	err = viper.Unmarshal(&config)
+	if err != nil {
+		return
+	}
+
+	// Allow specifying fee in whole currency units via P2P_TRANSACTION_FEE or P2P_TRANSACTION_FEE_NAIRA.
+	if viper.IsSet("P2P_TRANSACTION_FEE") {
+		feeStr := strings.TrimSpace(viper.GetString("P2P_TRANSACTION_FEE"))
+		if feeStr != "" {
+			feeValue, parseErr := strconv.ParseFloat(feeStr, 64)
+			if parseErr != nil {
+				log.Printf("Warning: invalid P2P_TRANSACTION_FEE value %q: %v", feeStr, parseErr)
+			} else {
+				config.P2PTransactionFeeKobo = int64(math.Round(feeValue * 100))
+			}
+		}
+	} else if viper.IsSet("P2P_TRANSACTION_FEE_NAIRA") {
+		feeStr := strings.TrimSpace(viper.GetString("P2P_TRANSACTION_FEE_NAIRA"))
+		if feeStr != "" {
+			feeValue, parseErr := strconv.ParseFloat(feeStr, 64)
+			if parseErr != nil {
+				log.Printf("Warning: invalid P2P_TRANSACTION_FEE_NAIRA value %q: %v", feeStr, parseErr)
+			} else {
+				config.P2PTransactionFeeKobo = int64(math.Round(feeValue * 100))
+			}
+		}
+	}
+
+	if config.P2PTransactionFeeKobo < 0 {
+		log.Printf("Warning: negative P2P transaction fee configured (%d). Coercing to 0.", config.P2PTransactionFeeKobo)
+		config.P2PTransactionFeeKobo = 0
+	}
+
 	return
 }

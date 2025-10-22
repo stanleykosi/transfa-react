@@ -97,8 +97,12 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
   };
 
   const getAmountColor = () => {
-    if (isIncoming) return theme.colors.success;
-    if (isOutgoing) return theme.colors.error;
+    if (isIncoming) {
+      return theme.colors.success;
+    }
+    if (isOutgoing) {
+      return theme.colors.error;
+    }
     return theme.colors.textPrimary;
   };
 
@@ -106,31 +110,26 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
     <View style={styles.transactionItem}>
       <View style={styles.transactionHeader}>
         <View style={styles.transactionIcon}>
-          <Ionicons
-            name={getTransactionIcon() as any}
-            size={20}
-            color={theme.colors.primary}
-          />
+          <Ionicons name={getTransactionIcon() as any} size={20} color={theme.colors.primary} />
         </View>
         <View style={styles.transactionInfo}>
           <Text style={styles.transactionType}>
-            {transaction.type === 'p2p' ? 'P2P Transfer' :
-              transaction.type === 'self_transfer' ? 'Withdrawal' :
-                transaction.type === 'subscription_fee' ? 'Fee' :
-                  transaction.type}
+            {transaction.type === 'p2p'
+              ? 'P2P Transfer'
+              : transaction.type === 'self_transfer'
+                ? 'Withdrawal'
+                : transaction.type === 'subscription_fee'
+                  ? 'Fee'
+                  : transaction.type}
           </Text>
           <Text style={styles.transactionDescription} numberOfLines={1}>
             {transaction.description || 'No description'}
           </Text>
         </View>
         <View style={styles.transactionAmount}>
-          <Text style={[styles.amountText, { color: getAmountColor() }]}>
-            {getAmountDisplay()}
-          </Text>
+          <Text style={[styles.amountText, { color: getAmountColor() }]}>{getAmountDisplay()}</Text>
           {transaction.fee > 0 && (
-            <Text style={styles.feeText}>
-              Fee: {formatCurrency(transaction.fee)}
-            </Text>
+            <Text style={styles.feeText}>Fee: {formatCurrency(transaction.fee)}</Text>
           )}
         </View>
       </View>
@@ -158,19 +157,14 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
 const PaymentHistoryScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
 
-  const {
-    data: transactions,
-    isLoading,
-    error,
-    refetch,
-  } = useTransactionHistory();
+  const { data: transactions, isLoading, error, refetch } = useTransactionHistory();
 
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
       await refetch();
-    } catch (error) {
-      console.error('Error refreshing transactions:', error);
+    } catch (refreshError) {
+      console.error('Error refreshing transactions:', refreshError);
       Alert.alert('Error', 'Failed to refresh transactions');
     } finally {
       setRefreshing(false);
@@ -249,7 +243,7 @@ const styles = StyleSheet.create({
   },
   transactionItem: {
     backgroundColor: theme.colors.surface,
-    borderRadius: theme.borderRadius.md,
+    borderRadius: theme.radii.md,
     padding: theme.spacing.s16,
     marginVertical: theme.spacing.s8,
     borderWidth: 1,
