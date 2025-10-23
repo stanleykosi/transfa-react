@@ -1,19 +1,20 @@
 /**
  * @description
- * This file defines the top tab navigator for the "Payments" section of the app.
- * It provides two tabs: "History" for past transactions and "Requests" for
- * managing payment requests.
+ * Redesigned top tab navigator for the "Payments" section with CLEAR visual distinction.
+ * Provides two tabs: "Transaction History" and "Payment Requests" with prominent labels,
+ * icons, and visual indicators.
  *
  * @dependencies
- * - @react-navigation/material-top-tabs: For the tab navigator component.
- * - Screens: Imports the PaymentHistoryScreen and PaymentRequestsListScreen.
- * - @/constants/theme: For consistent styling of the tab bar.
+ * - @react-navigation/material-top-tabs: For the tab navigator component
+ * - Screens: Imports the PaymentHistoryScreen and PaymentRequestsListScreen
+ * - @/constants/theme: For consistent styling
  */
 import React from 'react';
 import { createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
 import PaymentHistoryScreen from '@/screens/Payments/PaymentHistoryScreen';
 import PaymentRequestsListScreen from '@/screens/PaymentRequests/PaymentRequestsListScreen';
 import { theme } from '@/constants/theme';
+import { Ionicons } from '@expo/vector-icons';
 
 export type PaymentsTabParamList = {
   History: undefined;
@@ -21,6 +22,15 @@ export type PaymentsTabParamList = {
 };
 
 const Tab = createMaterialTopTabNavigator<PaymentsTabParamList>();
+
+// Tab icon components moved outside to avoid nested component warning
+const HistoryTabIcon = ({ color }: { color: string }) => (
+  <Ionicons name="receipt" size={20} color={color} />
+);
+
+const RequestsTabIcon = ({ color }: { color: string }) => (
+  <Ionicons name="document-text" size={20} color={color} />
+);
 
 const PaymentsTabNavigator = () => {
   return (
@@ -30,24 +40,34 @@ const PaymentsTabNavigator = () => {
         tabBarInactiveTintColor: theme.colors.textSecondary,
         tabBarIndicatorStyle: {
           backgroundColor: theme.colors.primary,
-          height: 3,
+          height: 4,
+          borderRadius: 2,
         },
         tabBarStyle: {
           backgroundColor: theme.colors.surface,
-          elevation: 1,
-          shadowOpacity: 0.1,
+          elevation: 4,
+          shadowOpacity: 0.15,
           shadowColor: '#000',
-          shadowOffset: { width: 0, height: 1 },
-          shadowRadius: 2,
+          shadowOffset: { width: 0, height: 2 },
+          shadowRadius: 4,
+          borderBottomWidth: 1,
+          borderBottomColor: theme.colors.border,
+          paddingTop: 8,
         },
         tabBarLabelStyle: {
-          fontSize: 13,
+          fontSize: 14,
           fontWeight: '600',
-          textTransform: 'capitalize',
+          textTransform: 'none',
           margin: 0,
           padding: 0,
         },
+        tabBarItemStyle: {
+          paddingVertical: 8,
+        },
         tabBarShowLabel: true,
+        tabBarShowIcon: true,
+        tabBarPressColor: theme.colors.primaryLight,
+        tabBarAllowFontScaling: false,
       }}
     >
       <Tab.Screen
@@ -55,6 +75,7 @@ const PaymentsTabNavigator = () => {
         component={PaymentHistoryScreen}
         options={{
           tabBarLabel: 'Transaction History',
+          tabBarIcon: HistoryTabIcon,
           title: 'Transaction History',
         }}
       />
@@ -63,6 +84,7 @@ const PaymentsTabNavigator = () => {
         component={PaymentRequestsListScreen}
         options={{
           tabBarLabel: 'Payment Requests',
+          tabBarIcon: RequestsTabIcon,
           title: 'Payment Requests',
         }}
       />

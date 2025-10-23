@@ -16,7 +16,6 @@ import {
   View,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   ScrollView,
   RefreshControl,
   Platform,
@@ -24,24 +23,25 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenWrapper from '@/components/ScreenWrapper';
-import EnhancedCard from '@/components/EnhancedCard';
 import ActionButton from '@/components/ActionButton';
 import { theme } from '@/constants/theme';
 import apiClient from '@/api/apiClient';
-import { useAuth, useUser } from '@clerk/clerk-expo';
-import { useAccountBalance } from '@/api/transactionApi';
+import { useAuth } from '@clerk/clerk-expo';
+import { useAccountBalance, useUserProfile } from '@/api/transactionApi';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const HomeScreen = () => {
   const navigation = useNavigation();
-  const { getToken, signOut } = useAuth();
-  const { user } = useUser();
+  const { getToken } = useAuth();
   const [loading, setLoading] = useState(true);
   const [nuban, setNuban] = useState<string | null>(null);
   const [bankName, setBankName] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Fetch user profile from database (includes username, UUID)
+  const { data: userProfile, isLoading: isLoadingProfile } = useUserProfile();
 
   // Fetch account balance with caching
   const {
@@ -55,16 +55,9 @@ const HomeScreen = () => {
     try {
       const token = await getToken().catch(() => undefined);
       console.log('Fetching account data with token:', token ? 'present' : 'missing');
-      console.log('User ID:', user?.id);
 
       const { data } = await apiClient.get<{ accountNumber?: string; bankName?: string }>(
-        '/me/primary-account',
-        {
-          headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-            'X-Clerk-User-Id': user?.id || '',
-          },
-        }
+        '/me/primary-account'
       );
 
       console.log('API response:', data);
@@ -73,7 +66,7 @@ const HomeScreen = () => {
       console.error('Error fetching account data:', e);
       return null;
     }
-  }, [getToken, user?.id]);
+  }, [getToken]);
 
   useEffect(() => {
     let mounted = true;
@@ -145,7 +138,7 @@ const HomeScreen = () => {
         clearInterval(pollInterval);
       }
     };
-  }, [getToken, user?.id, fetchAccountData]);
+  }, [fetchAccountData]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -160,19 +153,8 @@ const HomeScreen = () => {
     setRefreshing(false);
   };
 
-  const handleSignOut = () => {
-    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Sign Out',
-        style: 'destructive',
-        onPress: () => signOut(),
-      },
-    ]);
-  };
-
   // Loading state
-  if (loading) {
+  if (loading || isLoadingProfile) {
     return (
       <ScreenWrapper>
         <View style={styles.centerContainer}>
@@ -235,17 +217,8 @@ const HomeScreen = () => {
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Welcome Back</Text>
-            <Text style={styles.userName}>{user?.firstName || 'User'}</Text>
+            <Text style={styles.userName}>{userProfile?.username || 'User'}</Text>
           </View>
-          <ActionButton
-            title=""
-            icon="refresh"
-            onPress={handleRefresh}
-            loading={refreshing}
-            variant="outline"
-            size="small"
-            style={styles.headerRefreshButton}
-          />
         </View>
 
         {/* Balance Card with Gradient */}
@@ -318,26 +291,6 @@ const HomeScreen = () => {
           </View>
         </View>
 
-        {/* Recent Activity Teaser Card */}
-        <EnhancedCard variant="elevated" style={styles.recentActivityCard}>
-          <View style={styles.recentActivityHeader}>
-            <Ionicons name="time-outline" size={24} color={theme.colors.primary} />
-            <Text style={styles.recentActivityTitle}>Recent Activity</Text>
-          </View>
-          <Text style={styles.recentActivitySubtitle}>
-            View your transaction history and payment requests in the Payments tab
-          </Text>
-        </EnhancedCard>
-
-        {/* Sign Out Button */}
-        <ActionButton
-          title="Sign Out"
-          icon="log-out-outline"
-          onPress={handleSignOut}
-          variant="outline"
-          style={styles.signOutButton}
-        />
-
         <View style={styles.bottomSpacer} />
       </ScrollView>
     </ScreenWrapper>
@@ -372,10 +325,6 @@ const styles = StyleSheet.create({
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
     marginTop: theme.spacing.s4,
-  },
-  headerRefreshButton: {
-    minWidth: 44,
-    paddingHorizontal: theme.spacing.s12,
   },
   // Balance Card Styles
   balanceCard: {
@@ -446,33 +395,6 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     width: '100%',
-  },
-  // Recent Activity Card
-  recentActivityCard: {
-    marginHorizontal: theme.spacing.s24,
-    marginBottom: theme.spacing.s24,
-  },
-  recentActivityHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.s12,
-    marginBottom: theme.spacing.s8,
-  },
-  recentActivityTitle: {
-    fontSize: theme.fontSizes.lg,
-    fontWeight: theme.fontWeights.semibold,
-    color: theme.colors.textPrimary,
-  },
-  recentActivitySubtitle: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.textSecondary,
-    lineHeight: 20,
-  },
-  // Sign Out Button
-  signOutButton: {
-    marginHorizontal: theme.spacing.s24,
-    marginTop: theme.spacing.s16,
-    borderColor: theme.colors.error,
   },
   // Misc
   loadingText: {

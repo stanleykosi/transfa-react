@@ -1,13 +1,13 @@
 /**
  * @description
- * Enhanced Transaction History screen with modern fintech UI.
- * Displays a list of all user transactions with improved visual hierarchy,
- * better status indicators, and smooth animations.
+ * Enhanced Transaction History screen with CORRECT transaction direction logic.
+ * Properly distinguishes between incoming transfers, outgoing transfers, and withdrawals.
  *
  * @dependencies
  * - react, react-native: For UI components and state management
  * - @/api/transactionApi: For fetching transaction history
  * - @/utils/formatCurrency: For displaying currency values
+ * - @clerk/clerk-expo: For getting current user ID
  */
 import React, { useState } from 'react';
 import {
@@ -21,7 +21,7 @@ import {
   Platform,
 } from 'react-native';
 import { theme } from '@/constants/theme';
-import { useTransactionHistory } from '@/api/transactionApi';
+import { useTransactionHistory, useUserProfile } from '@/api/transactionApi';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -42,20 +42,31 @@ interface TransactionItemProps {
 }
 
 const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentUserId }) => {
-  const isOutgoing = transaction.sender_id === currentUserId;
-  const isIncoming = transaction.recipient_id === currentUserId;
+  // CORRECT LOGIC: Check if current user is the sender or recipient
+  const isSelfTransfer =
+    transaction.type === 'self_transfer' ||
+    transaction.type === 'self' ||
+    transaction.category === 'self';
+  const isP2P = transaction.type === 'p2p' || transaction.category === 'p2p';
+
+  // For P2P transactions, check if user is sender or recipient
+  const isOutgoing = isP2P && transaction.sender_id === currentUserId;
+  const isIncoming =
+    isP2P &&
+    transaction.recipient_id === currentUserId &&
+    transaction.recipient_id !== transaction.sender_id;
 
   const getTransactionIcon = () => {
-    switch (transaction.type) {
-      case 'p2p':
-        return isOutgoing ? 'arrow-up-circle' : 'arrow-down-circle';
-      case 'self_transfer':
-        return 'swap-horizontal-outline';
-      case 'subscription_fee':
-        return 'card-outline';
-      default:
-        return 'flash-outline';
+    if (isSelfTransfer) {
+      return 'swap-horizontal';
     }
+    if (isOutgoing) {
+      return 'arrow-up';
+    }
+    if (isIncoming) {
+      return 'arrow-down';
+    }
+    return 'swap-horizontal';
   };
 
   const getTransactionColor = () => {
@@ -75,7 +86,7 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
     if (isIncoming) {
       return '#D1FAE5'; // Green 100
     }
-    if (isOutgoing) {
+    if (isOutgoing || isSelfTransfer) {
       return '#FEE2E2'; // Red 100
     }
     return theme.colors.primaryLight;
@@ -85,7 +96,7 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
     if (isIncoming) {
       return theme.colors.success;
     }
-    if (isOutgoing) {
+    if (isOutgoing || isSelfTransfer) {
       return theme.colors.error;
     }
     return theme.colors.primary;
@@ -105,16 +116,16 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
   };
 
   const getTransactionTitle = () => {
-    switch (transaction.type) {
-      case 'p2p':
-        return isOutgoing ? 'Sent to Contact' : 'Received from Contact';
-      case 'self_transfer':
-        return 'Withdrawal';
-      case 'subscription_fee':
-        return 'Service Fee';
-      default:
-        return transaction.type;
+    if (isSelfTransfer) {
+      return 'Withdrawal to Bank';
     }
+    if (isOutgoing) {
+      return 'Payment Sent';
+    }
+    if (isIncoming) {
+      return 'Payment Received';
+    }
+    return 'Transaction';
   };
 
   const getAmountDisplay = () => {
@@ -122,12 +133,12 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
     const fee = transaction.fee || 0;
     const total = amount + fee;
 
-    if (isOutgoing) {
-      return `-${formatCurrency(total)}`;
-    } else if (isIncoming) {
+    if (isIncoming) {
+      // For incoming payments, show positive amount (no fee deducted)
       return `+${formatCurrency(amount)}`;
     } else {
-      return formatCurrency(amount);
+      // For outgoing and self transfers, show negative amount with fee
+      return `-${formatCurrency(total)}`;
     }
   };
 
@@ -135,10 +146,7 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
     if (isIncoming) {
       return theme.colors.success;
     }
-    if (isOutgoing) {
-      return theme.colors.error;
-    }
-    return theme.colors.textPrimary;
+    return theme.colors.error;
   };
 
   return (
@@ -160,7 +168,7 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
             <Text style={[styles.amountText, { color: getAmountColor() }]}>
               {getAmountDisplay()}
             </Text>
-            {transaction.fee > 0 && isOutgoing && (
+            {transaction.fee > 0 && (isOutgoing || isSelfTransfer) && (
               <Text style={styles.feeText}>Fee: {formatCurrency(transaction.fee)}</Text>
             )}
           </View>
@@ -197,7 +205,12 @@ const ItemSeparatorComponent = () => <View style={styles.separator} />;
 const PaymentHistoryScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
 
+  // Get user profile with UUID for correct transaction direction logic
+  const { data: userProfile, isLoading: isLoadingProfile } = useUserProfile();
   const { data: transactions, isLoading, error, refetch } = useTransactionHistory();
+
+  // Get the current user's UUID from backend (not Clerk ID)
+  const currentUserId = userProfile?.id || '';
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -214,7 +227,7 @@ const PaymentHistoryScreen = () => {
   const renderTransaction = ({ item }: { item: any }) => (
     <TransactionItem
       transaction={item}
-      currentUserId="current-user-id" // TODO: Get from auth context
+      currentUserId={currentUserId} // Pass user UUID from backend
     />
   );
 
@@ -242,7 +255,7 @@ const PaymentHistoryScreen = () => {
     </View>
   );
 
-  if (isLoading && !refreshing) {
+  if ((isLoading || isLoadingProfile) && !refreshing) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={theme.colors.primary} />

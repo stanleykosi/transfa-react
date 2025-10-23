@@ -20,7 +20,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { ProfileStackParamList } from '@/navigation/ProfileStack';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '@/hooks/useAuth';
-import { useUser } from '@clerk/clerk-expo';
+import { useUserProfile } from '@/api/transactionApi';
 
 type ProfileScreenNavigationProp = NativeStackNavigationProp<ProfileStackParamList, 'ProfileHome'>;
 
@@ -30,7 +30,7 @@ const ItemSeparator = () => <View style={styles.separator} />;
 const ProfileScreen = () => {
   const navigation = useNavigation<ProfileScreenNavigationProp>();
   const { signOut } = useAuth();
-  const { user } = useUser();
+  const { data: userProfile } = useUserProfile();
 
   const menuItems = [
     {
@@ -93,13 +93,9 @@ const ProfileScreen = () => {
           <View style={styles.userInfo}>
             <Text style={styles.title}>Profile</Text>
             <Text style={styles.userName}>
-              {user?.firstName && user?.lastName
-                ? `${user.firstName} ${user.lastName}`
-                : user?.firstName || 'User'}
+              {userProfile?.username || userProfile?.full_name || 'User'}
             </Text>
-            {user?.primaryEmailAddress && (
-              <Text style={styles.userEmail}>{user.primaryEmailAddress.emailAddress}</Text>
-            )}
+            {userProfile?.email && <Text style={styles.userEmail}>{userProfile.email}</Text>}
           </View>
         </View>
       </View>

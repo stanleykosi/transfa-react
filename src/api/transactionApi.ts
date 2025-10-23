@@ -46,6 +46,7 @@ const RECEIVING_PREFERENCE_QUERY_KEY = 'receiving-preference';
 const DEFAULT_BENEFICIARY_QUERY_KEY = 'default-beneficiary';
 const ACCOUNT_BALANCE_QUERY_KEY = 'account-balance';
 const PAYMENT_REQUESTS_QUERY_KEY = 'paymentRequests';
+const USER_PROFILE_QUERY_KEY = 'user-profile';
 
 /**
  * Custom hook to perform a Peer-to-Peer (P2P) transfer to another Transfa user.
@@ -374,5 +375,41 @@ export const useGetPaymentRequest = (requestId: string) => {
     queryKey: [PAYMENT_REQUESTS_QUERY_KEY, requestId],
     queryFn: fetchPaymentRequest,
     enabled: !!requestId, // Only run the query if requestId is available.
+  });
+};
+
+/**
+ * Custom hook to fetch the current user's profile including their UUID.
+ * This UUID is needed to correctly identify transaction direction (sent vs received).
+ * Fetches from auth-service via API Gateway.
+ * @returns A TanStack Query object containing the user's profile with UUID.
+ */
+export interface UserProfile {
+  id: string; // UUID from backend database
+  clerk_user_id: string; // Clerk ID for reference
+  username: string; // Actual username from database
+  email?: string | null;
+  phone_number?: string | null;
+  full_name?: string | null;
+  user_type: 'personal' | 'merchant';
+  allow_sending: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export const useUserProfile = () => {
+  const fetchUserProfile = async (): Promise<UserProfile> => {
+    // Use API Gateway URL (not TRANSACTION_SERVICE_URL) to route to auth-service
+    const { data } = await apiClient.get<UserProfile>('/me/profile');
+    console.log('User profile fetched:', data);
+    return data;
+  };
+
+  return useQuery<UserProfile, Error>({
+    queryKey: [USER_PROFILE_QUERY_KEY],
+    queryFn: fetchUserProfile,
+    staleTime: 1000 * 60 * 5, // User profile is fresh for 5 minutes
+    gcTime: 1000 * 60 * 30, // Keep in cache for 30 minutes
+    retry: 2,
   });
 };

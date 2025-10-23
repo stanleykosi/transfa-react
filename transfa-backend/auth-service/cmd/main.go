@@ -197,6 +197,26 @@ func main() {
 		w.Write([]byte("Auth service is healthy"))
 	})
 
+    // Endpoint to fetch the user's profile including username, email, and UUID
+    r.Get("/me/profile", func(w http.ResponseWriter, r *http.Request) {
+        clerkUserID := r.Header.Get("X-Clerk-User-Id")
+        if clerkUserID == "" {
+            w.WriteHeader(http.StatusUnauthorized)
+            w.Write([]byte("Unauthorized: Clerk User ID missing"))
+            return
+        }
+        existing, err := userRepo.FindByClerkUserID(r.Context(), clerkUserID)
+        if err != nil || existing == nil {
+            w.WriteHeader(http.StatusNotFound)
+            w.Write([]byte("User not found"))
+            return
+        }
+        // Return user profile data
+        w.Header().Set("Content-Type", "application/json")
+        w.WriteHeader(http.StatusOK)
+        json.NewEncoder(w).Encode(existing)
+    })
+
     // Lightweight helper to fetch the user's primary account number (NUBAN) and bank name
     r.Get("/me/primary-account", func(w http.ResponseWriter, r *http.Request) {
         clerkUserID := r.Header.Get("X-Clerk-User-Id")

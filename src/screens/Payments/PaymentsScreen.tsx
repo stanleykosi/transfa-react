@@ -1,8 +1,8 @@
 /**
  * @description
- * Enhanced Payments screen with modern fintech UI and improved tab styling.
- * Acts as a container for a top tab navigator that separates Transaction History
- * and Payment Requests with clear visual distinction and professional design.
+ * Redesigned Payments screen with CRYSTAL CLEAR tab distinction.
+ * Features prominent header, descriptive subtitle, and highly visible tabs
+ * that clearly separate Transaction History from Payment Requests.
  *
  * @dependencies
  * - react-native: For core components
@@ -19,20 +19,28 @@ import { Ionicons } from '@expo/vector-icons';
 const PaymentsScreen = () => {
   return (
     <ScreenWrapper style={styles.container}>
-      {/* Header with Icon */}
+      {/* Enhanced Header with Clear Description */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
           <View style={styles.iconContainer}>
-            <Ionicons name="wallet" size={28} color={theme.colors.primary} />
+            <Ionicons name="wallet" size={32} color={theme.colors.primary} />
           </View>
-          <View>
+          <View style={styles.headerTextContainer}>
             <Text style={styles.title}>Payments</Text>
-            <Text style={styles.subtitle}>View your activity</Text>
+            <Text style={styles.subtitle}>View your financial activity</Text>
           </View>
+        </View>
+
+        {/* Info Banner - Explains the two sections */}
+        <View style={styles.infoBanner}>
+          <Ionicons name="information-circle" size={18} color={theme.colors.info} />
+          <Text style={styles.infoBannerText}>
+            Swipe between tabs to view your transaction history or payment requests
+          </Text>
         </View>
       </View>
 
-      {/* Tab Navigator */}
+      {/* Tab Navigator with Enhanced Visibility */}
       <View style={styles.tabContainer}>
         <PaymentsTabNavigator />
       </View>
@@ -47,9 +55,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    paddingHorizontal: theme.spacing.s24,
+    paddingHorizontal: theme.spacing.s20,
     paddingTop: theme.spacing.s16,
-    paddingBottom: theme.spacing.s20,
+    paddingBottom: theme.spacing.s16,
     backgroundColor: theme.colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
@@ -57,29 +65,33 @@ const styles = StyleSheet.create({
       ios: {
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
+        shadowOpacity: 0.08,
         shadowRadius: 4,
       },
       android: {
-        elevation: 2,
+        elevation: 3,
       },
     }),
   },
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: theme.spacing.s12,
   },
   iconContainer: {
-    width: 56,
-    height: 56,
+    width: 60,
+    height: 60,
     borderRadius: theme.radii.lg,
     backgroundColor: theme.colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: theme.spacing.s16,
   },
+  headerTextContainer: {
+    flex: 1,
+  },
   title: {
-    fontSize: theme.fontSizes['2xl'],
+    fontSize: theme.fontSizes['3xl'],
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
     marginBottom: theme.spacing.s4,
@@ -88,6 +100,22 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSizes.sm,
     color: theme.colors.textSecondary,
     fontWeight: theme.fontWeights.medium,
+  },
+  infoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF', // Blue 50
+    paddingVertical: theme.spacing.s10,
+    paddingHorizontal: theme.spacing.s12,
+    borderRadius: theme.radii.md,
+    gap: theme.spacing.s8,
+  },
+  infoBannerText: {
+    flex: 1,
+    fontSize: theme.fontSizes.xs,
+    color: theme.colors.info,
+    fontWeight: theme.fontWeights.medium,
+    lineHeight: 16,
   },
   tabContainer: {
     flex: 1,
