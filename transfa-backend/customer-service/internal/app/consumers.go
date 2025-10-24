@@ -36,13 +36,27 @@ import (
 type UserEventHandler struct {
 	repo         store.UserRepository
 	anchorClient *anchorclient.Client
+	publisher    EventPublisher
+}
+
+type EventPublisher interface {
+	Publish(ctx context.Context, exchange, routingKey string, payload interface{}) error
+}
+
+// TierStatusEvent represents tier status updates received from other services.
+type TierStatusEvent struct {
+	UserID           string  `json:"user_id"`
+	AnchorCustomerID string  `json:"anchor_customer_id"`
+	Status           string  `json:"status"`
+	Reason           *string `json:"reason"`
 }
 
 // NewUserEventHandler creates a new instance of UserEventHandler.
-func NewUserEventHandler(repo store.UserRepository, anchorClient *anchorclient.Client) *UserEventHandler {
+func NewUserEventHandler(repo store.UserRepository, anchorClient *anchorclient.Client, publisher EventPublisher) *UserEventHandler {
 	return &UserEventHandler{
 		repo:         repo,
 		anchorClient: anchorClient,
+		publisher:    publisher,
 	}
 }
 
@@ -129,19 +143,19 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 					// Update the database with the existing customer ID and full name
 					if updateErr := h.repo.UpdateAnchorCustomerInfo(ctx, event.UserID, customerID, fullNamePtr); updateErr != nil {
 						log.Printf("ERROR: Failed to update user record with existing Anchor customer ID %s for UserID %s: %v", customerID, event.UserID, updateErr)
-                        _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "system_error", ptr("Customer exists on Anchor but failed to link in database. Manual intervention required."))
+						_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "system_error", ptr("Customer exists on Anchor but failed to link in database. Manual intervention required."))
 						return true // ACK to prevent infinite requeue
 					}
 
 					log.Printf("Successfully recovered and linked existing Anchor customer %s to UserID %s", customerID, event.UserID)
-                    _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "created", nil)
+					_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "created", nil)
 					return true // ACK - recovery successful
 				}
 			}
 
 			// If we can't extract customer ID, mark as system error requiring manual intervention
 			log.Printf("CRITICAL: Customer exists on Anchor but not in our DB for UserID %s. Manual intervention required to link the customer.", event.UserID)
-            _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "system_error", ptr("Customer exists on Anchor but not linked in database. Manual intervention required."))
+			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "system_error", ptr("Customer exists on Anchor but not linked in database. Manual intervention required."))
 			return true // ACK to prevent infinite requeue
 		}
 
@@ -153,20 +167,20 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 			strings.Contains(err.Error(), "status 409") ||
 			strings.Contains(err.Error(), "status 422") {
 			log.Printf("Non-retriable client error from Anchor (ACK). UserID %s: %v", event.UserID, err)
-            _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", ptr(err.Error()))
+			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", ptr(err.Error()))
 			return true
 		}
 		// Rate limit from Anchor: ACK to avoid hot-looping and API limits
 		if strings.Contains(err.Error(), "status 429") || strings.Contains(strings.ToLower(err.Error()), "too many requests") {
 			log.Printf("Rate limited by Anchor (ACK). UserID %s: %v", event.UserID, err)
-            _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "rate_limited", ptr("Rate limited by Anchor API. Please try again later."))
+			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "rate_limited", ptr("Rate limited by Anchor API. Please try again later."))
 			return true
 		}
 
 		// For any other errors (5xx, network issues, etc.), ACK to prevent API rate limiting
 		// This prevents hitting Anchor's API limits with repeated failed requests
 		log.Printf("ERROR: Failed to create Anchor customer for UserID %s (ACK to prevent API limits): %v", event.UserID, err)
-        _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", ptr("Failed to create customer on Anchor. Please try again later."))
+		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", ptr("Failed to create customer on Anchor. Please try again later."))
 		return true // ACK to prevent API rate limiting
 	}
 
@@ -179,17 +193,17 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 	}
 	log.Printf("Successfully updated user record for UserID %s", event.UserID)
 
-    // Record success status for Tier 1 so frontend can surface it
-    _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "created", nil)
+	// Record success status for Tier 1 so frontend can surface it
+	_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "created", nil)
 
-    // Tier 2 is handled later in the account creation flow
+	// Tier 2 is handled later in the account creation flow
 	return true
 }
 
 func (h *UserEventHandler) HandleTier2VerificationRequestedEvent(body []byte) bool {
-    var event domain.Tier2VerificationRequestedEvent
+	var event domain.Tier2VerificationRequestedEvent
 	if err := json.Unmarshal(body, &event); err != nil {
-		log.Printf("Error unmarshaling tier1.verification.requested event: %v", err)
+		log.Printf("Error unmarshaling tier2.verification.requested event: %v", err)
 		return true
 	}
 
@@ -197,7 +211,7 @@ func (h *UserEventHandler) HandleTier2VerificationRequestedEvent(body []byte) bo
 		var err error
 		event.UserID, err = h.repo.FindUserIDByAnchorCustomerID(context.Background(), event.AnchorCustomerID)
 		if err != nil || event.UserID == "" {
-			log.Printf("Invalid tier1.verification.requested event: missing user or anchor customer ID")
+			log.Printf("Invalid tier2.verification.requested event: missing user or anchor customer ID")
 			return true
 		}
 	}
@@ -205,8 +219,8 @@ func (h *UserEventHandler) HandleTier2VerificationRequestedEvent(body []byte) bo
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-    if err := h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier2", "processing", nil); err != nil {
-        log.Printf("Failed to mark tier2 processing for user %s: %v", event.UserID, err)
+	if err := h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier2", "processing", nil); err != nil {
+		log.Printf("Failed to mark tier2 processing for user %s: %v", event.UserID, err)
 	}
 
 	req := domain.AnchorIndividualKYCRequest{
@@ -223,14 +237,106 @@ func (h *UserEventHandler) HandleTier2VerificationRequestedEvent(body []byte) bo
 		},
 	}
 
-    if err := h.anchorClient.TriggerIndividualKYC(ctx, event.AnchorCustomerID, req); err != nil {
-		log.Printf("ERROR: Failed to trigger Anchor Tier1 KYC for user %s: %v", event.UserID, err)
-        reason := fmt.Sprintf("Failed to trigger Anchor Tier2 KYC: %v", err)
-        _ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier2", "failed", &reason)
+	if err := h.anchorClient.TriggerIndividualKYC(ctx, event.AnchorCustomerID, req); err != nil {
+		lowerErr := strings.ToLower(err.Error())
+		if strings.Contains(lowerErr, "status 412") && strings.Contains(lowerErr, "kyc already completed") {
+			log.Printf("Tier2 KYC already completed on Anchor for user %s. Marking as completed.", event.UserID)
+			if err := h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier2", "completed", nil); err != nil {
+				log.Printf("Failed to mark tier2 completed for user %s: %v", event.UserID, err)
+			}
+			go h.triggerAccountRecovery(event)
+			return true
+		}
+
+		log.Printf("ERROR: Failed to trigger Anchor Tier2 KYC for user %s: %v", event.UserID, err)
+		reason := fmt.Sprintf("Failed to trigger Anchor Tier2 KYC: %v", err)
+		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier2", "failed", &reason)
 		return false
 	}
 
-    log.Printf("Successfully triggered Anchor Tier2 KYC for user %s", event.UserID)
+	log.Printf("Successfully triggered Anchor Tier2 KYC for user %s", event.UserID)
+	return true
+}
+
+func (h *UserEventHandler) triggerAccountRecovery(event domain.Tier2VerificationRequestedEvent) {
+	if h.publisher == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	userID := event.UserID
+	if userID == "" {
+		resolved, err := h.repo.FindUserIDByAnchorCustomerID(ctx, event.AnchorCustomerID)
+		if err != nil || resolved == "" {
+			log.Printf("Auto reconcile skipped: unable to resolve user for anchor ID %s: %v", event.AnchorCustomerID, err)
+			return
+		}
+		userID = resolved
+	}
+
+	jobCtx, cancelJob := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelJob()
+
+	hasAccount, err := h.repo.UserHasAccount(jobCtx, userID)
+	if err != nil {
+		log.Printf("Auto reconcile: failed to check existing account for user %s: %v", userID, err)
+		return
+	}
+	if hasAccount {
+		log.Printf("Auto reconcile: user %s already has an account. No recovery event published.", userID)
+		return
+	}
+
+	payload := map[string]string{
+		"anchor_customer_id": event.AnchorCustomerID,
+		"user_id":            userID,
+		"source":             "auto_reconcile",
+	}
+
+	if err := h.publisher.Publish(ctx, "customer_events", "customer.verified", payload); err != nil {
+		log.Printf("Auto reconcile: failed to publish customer.verified for user %s: %v", userID, err)
+		return
+	}
+
+	log.Printf("Auto reconcile: published customer.verified for user %s after 412 response", userID)
+}
+
+// HandleTierStatusEvent processes tier status updates (e.g., rejections, manual review) to keep onboarding state in sync.
+func (h *UserEventHandler) HandleTierStatusEvent(body []byte) bool {
+	var event TierStatusEvent
+	if err := json.Unmarshal(body, &event); err != nil {
+		log.Printf("Error unmarshaling customer.tier.status event: %v", err)
+		return true
+	}
+
+	if event.UserID == "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		userID, err := h.repo.FindUserIDByAnchorCustomerID(ctx, event.AnchorCustomerID)
+		if err != nil || userID == "" {
+			log.Printf("Unable to resolve user for tier status event (anchor_id=%s): %v", event.AnchorCustomerID, err)
+			return true
+		}
+		event.UserID = userID
+	}
+
+	if event.Status == "" {
+		log.Printf("customer.tier.status missing status field for user %s", event.UserID)
+		return true
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	stage := "tier2"
+	if err := h.repo.UpsertOnboardingStatus(ctx, event.UserID, stage, event.Status, event.Reason); err != nil {
+		log.Printf("Failed to persist tier status %s for user %s: %v", event.Status, event.UserID, err)
+		return false
+	}
+
+	log.Printf("Updated onboarding status for user %s -> %s", event.UserID, event.Status)
 	return true
 }
 

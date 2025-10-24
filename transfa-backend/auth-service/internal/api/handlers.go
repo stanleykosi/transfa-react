@@ -37,8 +37,8 @@ func (h *OnboardingHandler) HandleTier2(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-    if existing.AnchorCustomerID == nil || *existing.AnchorCustomerID == "" {
-        http.Error(w, "Tier 1 verification incomplete", http.StatusPreconditionFailed)
+	if existing.AnchorCustomerID == nil || *existing.AnchorCustomerID == "" {
+		http.Error(w, "Tier 1 verification incomplete", http.StatusPreconditionFailed)
 		return
 	}
 
@@ -82,8 +82,8 @@ func (h *OnboardingHandler) HandleTier2(w http.ResponseWriter, r *http.Request) 
 
 	normalizedGender := strings.ToUpper(genderLower[:1]) + genderLower[1:]
 
-    if err := h.repo.UpsertOnboardingStatus(r.Context(), existing.ID, "tier2", "pending", nil); err != nil {
-        log.Printf("Failed to persist tier2 pending status for user %s: %v", existing.ID, err)
+	if err := h.repo.UpsertOnboardingStatus(r.Context(), existing.ID, "tier2", "pending", nil); err != nil {
+		log.Printf("Failed to persist tier2 pending status for user %s: %v", existing.ID, err)
 		http.Error(w, "Failed to update status", http.StatusInternalServerError)
 		return
 	}
@@ -96,14 +96,14 @@ func (h *OnboardingHandler) HandleTier2(w http.ResponseWriter, r *http.Request) 
 			DateOfBirth:      body.Dob,
 			Gender:           normalizedGender,
 		}
-		if err := h.producer.Publish(r.Context(), "customer_events", "tier1.verification.requested", event); err != nil {
-			log.Printf("Failed to publish tier1.verification.requested event for user %s: %v", existing.ID, err)
+		if err := h.producer.Publish(r.Context(), "customer_events", "tier2.verification.requested", event); err != nil {
+			log.Printf("Failed to publish tier2.verification.requested event for user %s: %v", existing.ID, err)
 		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "tier1_pending"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "tier2_processing"})
 }
 
 // ServeHTTP implements the http.Handler interface.
@@ -162,11 +162,11 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if existing.AnchorCustomerID != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-            json.NewEncoder(w).Encode(map[string]any{
-                "user_id":            existing.ID,
-                "anchor_customer_id": existing.AnchorCustomerID,
-                "status":             "tier1_already_created",
-            })
+			json.NewEncoder(w).Encode(map[string]any{
+				"user_id":            existing.ID,
+				"anchor_customer_id": existing.AnchorCustomerID,
+				"status":             "tier1_already_created",
+			})
 			return
 		}
 	} else {
@@ -219,14 +219,14 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		internalUserID = createdID
 	}
 
-    // Prepare KYC data for the event (Tier 1 base fields + any provided extras)
+	// Prepare KYC data for the event (Tier 1 base fields + any provided extras)
 	eventKYC := map[string]interface{}{}
 	for k, v := range req.KYCData {
 		eventKYC[k] = v
 	}
-    // Ensure email and phoneNumber are present for Tier 1 processing downstream
-    eventKYC["email"] = req.Email
-    eventKYC["phoneNumber"] = req.PhoneNumber
+	// Ensure email and phoneNumber are present for Tier 1 processing downstream
+	eventKYC["email"] = req.Email
+	eventKYC["phoneNumber"] = req.PhoneNumber
 
 	// Publish user.created event to RabbitMQ
 	event := domain.UserCreatedEvent{
@@ -247,5 +247,5 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Respond to the client
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-    json.NewEncoder(w).Encode(map[string]string{"user_id": internalUserID, "status": "tier1_processing"})
+	json.NewEncoder(w).Encode(map[string]string{"user_id": internalUserID, "status": "tier1_processing"})
 }

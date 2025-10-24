@@ -77,6 +77,20 @@ The app uses:
 - React Navigation for navigation
 - Various other React Native libraries
 
+## Backend Onboarding Notes
+
+### Manual Tier2 Reconciliation (Anchor KYC Already Completed)
+
+Anchor may occasionally complete Tier2 verification before our trigger runs, returning `412 Kyc already completed`. To align internal state:
+
+1. Confirm the customer is approved inside the Anchor dashboard.
+2. Record the Anchor Customer ID for that user.
+3. Link it internally by running the admin recovery job in `customer-service` (or manually invoking `UpdateAnchorCustomerInfo`).
+4. Update `onboarding_status` for `tier2` to `completed` via Supabase or the admin script.
+5. If account provisioning hasn’t occurred, publish a `customer.verified` event so `account-service` creates the deposit account.
+
+Documenting this runbook prevents retry storms and keeps the system consistent with Anchor.
+
 ## Troubleshooting
 
 ### WSL2 Users

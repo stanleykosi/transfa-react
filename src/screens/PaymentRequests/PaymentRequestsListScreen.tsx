@@ -2,7 +2,7 @@
  * @description
  * Enhanced Payment Requests List screen with modern fintech UI.
  * Displays a list of payment requests created by the user with improved visual hierarchy.
- * The "Create New Request" button has been moved to the Home screen.
+ * Includes a button at the bottom to navigate to create a new payment request.
  *
  * @dependencies
  * - react, react-native: For UI components and hooks
@@ -10,6 +10,7 @@
  * - @/api/transactionApi: For the `useListPaymentRequests` hook
  * - @/utils/formatCurrency: For formatting amounts
  * - @expo/vector-icons: For icons
+ * - @react-navigation/native: For navigation
  */
 import React, { useState } from 'react';
 import {
@@ -21,11 +22,13 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useListPaymentRequests } from '@/api/transactionApi';
 import { PaymentRequest } from '@/types/api';
 import { theme } from '@/constants/theme';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { Ionicons } from '@expo/vector-icons';
+import ActionButton from '@/components/ActionButton';
 
 const PaymentRequestItem = React.memo(({ item }: { item: PaymentRequest }) => {
   const isFulfilled = item.status === 'fulfilled';
@@ -100,6 +103,7 @@ const PaymentRequestItem = React.memo(({ item }: { item: PaymentRequest }) => {
 const ItemSeparator = () => <View style={styles.separator} />;
 
 const PaymentRequestsListScreen = () => {
+  const navigation = useNavigation();
   const [refreshing, setRefreshing] = useState(false);
   const { data: requests, isLoading, isError, error, refetch } = useListPaymentRequests();
 
@@ -177,7 +181,23 @@ const PaymentRequestsListScreen = () => {
     );
   };
 
-  return <View style={styles.container}>{renderContent()}</View>;
+  return (
+    <View style={styles.container}>
+      {renderContent()}
+
+      {/* Create New Payment Request Button */}
+      <View style={styles.buttonContainer}>
+        <ActionButton
+          title="Create New Payment Request"
+          icon="add-circle"
+          variant="primary"
+          size="large"
+          onPress={() => navigation.navigate('CreatePaymentRequest' as never)}
+          style={styles.createButton}
+        />
+      </View>
+    </View>
+  );
 };
 
 const styles = StyleSheet.create({
@@ -289,6 +309,16 @@ const styles = StyleSheet.create({
   },
   separator: {
     height: theme.spacing.s12,
+  },
+  buttonContainer: {
+    padding: theme.spacing.s16,
+    paddingBottom: theme.spacing.s24,
+    backgroundColor: theme.colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.border,
+  },
+  createButton: {
+    width: '100%',
   },
 });
 

@@ -25,6 +25,7 @@ import PayUserScreen from '@/screens/PaymentFlow/PayUserScreen';
 import SelfTransferScreen from '@/screens/PaymentFlow/SelfTransferScreen';
 import CreateRequestScreen from '@/screens/PaymentRequests/CreateRequestScreen';
 import PaymentRequestSuccessScreen from '@/screens/PaymentRequests/PaymentRequestSuccessScreen';
+import PaymentRequestsListScreen from '@/screens/PaymentRequests/PaymentRequestsListScreen';
 import { NavigatorScreenParams } from '@react-navigation/native';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import apiClient from '@/api/apiClient';
@@ -39,6 +40,7 @@ export type AppStackParamList = {
   CreateAccount: undefined;
   PayUser: undefined;
   SelfTransfer: undefined;
+  PaymentRequestsList: undefined; // New screen for viewing payment request history
   CreatePaymentRequest: undefined;
   PaymentRequestSuccess: { requestId: string };
 };
@@ -72,11 +74,17 @@ const AppStack = () => {
           case 'completed':
             setInitialRoute('AppTabs');
             break;
+          case 'tier2_processing':
           case 'tier2_pending':
+          case 'tier2_manual_review':
+          case 'tier2_error':
+          case 'tier2_failed':
+          case 'tier2_completed':
           case 'tier1_created':
             setInitialRoute('CreateAccount');
             break;
           case 'tier1_pending':
+          case 'tier1_processing':
           case 'new':
           default:
             setInitialRoute('OnboardingForm');
@@ -137,6 +145,16 @@ const AppStack = () => {
         name="SelfTransfer"
         component={SelfTransferScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PaymentRequestsList"
+        component={PaymentRequestsListScreen}
+        options={{
+          title: 'Payment Requests',
+          headerShown: true,
+          headerStyle: { backgroundColor: theme.colors.surface },
+          headerTitleStyle: { color: theme.colors.textPrimary, fontWeight: 'bold' },
+        }}
       />
       <Stack.Screen
         name="CreatePaymentRequest"

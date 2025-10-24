@@ -31,6 +31,7 @@ type UserRepository interface {
 	FindUserIDByAnchorCustomerID(ctx context.Context, anchorCustomerID string) (string, error)
 	EnsureOnboardingStatusTable(ctx context.Context) error
 	UpsertOnboardingStatus(ctx context.Context, userID, stage, status string, reason *string) error
+	UserHasAccount(ctx context.Context, userID string) (bool, error)
 }
 
 // PostgresUserRepository is the PostgreSQL implementation of the UserRepository.
@@ -165,6 +166,17 @@ func (r *PostgresUserRepository) UpsertOnboardingStatus(ctx context.Context, use
 		return err
 	}
 	return nil
+}
+
+// UserHasAccount checks whether the user already has a deposit account.
+func (r *PostgresUserRepository) UserHasAccount(ctx context.Context, userID string) (bool, error) {
+	query := `SELECT EXISTS (SELECT 1 FROM accounts WHERE user_id = $1)`
+	var exists bool
+	if err := r.db.QueryRow(ctx, query, userID).Scan(&exists); err != nil {
+		log.Printf("Error checking account existence for user %s: %v", userID, err)
+		return false, err
+	}
+	return exists, nil
 }
 
 func nullIfEmpty(val string) interface{} {

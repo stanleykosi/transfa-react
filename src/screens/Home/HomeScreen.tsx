@@ -283,7 +283,7 @@ const HomeScreen = () => {
             <ActionButton
               title="Create Payment Request"
               icon="document-text"
-              onPress={() => navigation.navigate('CreatePaymentRequest' as never)}
+              onPress={() => navigation.navigate('PaymentRequestsList' as never)}
               variant="outline"
               size="large"
               style={styles.actionButton}

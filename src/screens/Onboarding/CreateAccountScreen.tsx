@@ -27,9 +27,16 @@ const CreateAccountScreen = () => {
   const { getToken, signOut } = useAuth();
   const { user } = useUser();
   const navigation = useNavigation();
-  const [status, setStatus] = useState<'checking' | 'tier1_pending' | 'tier1_created' | 'error'>(
-    'checking'
-  );
+  const [status, setStatus] = useState<
+    | 'checking'
+    | 'tier1_pending'
+    | 'tier1_created'
+    | 'tier2_processing'
+    | 'tier2_manual_review'
+    | 'tier2_failed'
+    | 'tier2_completed'
+    | 'error'
+  >('checking');
   const [dob, setDob] = useState(''); // YYYY-MM-DD
   const [gender, setGender] = useState('');
   const [bvn, setBvn] = useState('');
@@ -41,6 +48,19 @@ const CreateAccountScreen = () => {
     }),
     [user?.id]
   );
+
+  const statusMessage = useMemo(() => {
+    switch (status) {
+      case 'tier2_processing':
+        return 'Your Tier 2 verification is processing. We will refresh automatically.';
+      case 'tier2_manual_review':
+        return 'Your documents are under manual review. We will notify you once complete.';
+      case 'tier2_failed':
+        return 'Tier 2 verification needs attention. Please reach out to support.';
+      default:
+        return 'Preparing your form…';
+    }
+  }, [status]);
 
   useEffect(() => {
     let mounted = true;
@@ -57,9 +77,24 @@ const CreateAccountScreen = () => {
         console.log('🔍 Status check response:', data?.status);
         console.log('🔍 Full response data:', data);
 
-        if (data?.status === 'completed') {
+        if (data?.status === 'completed' || data?.status === 'tier2_completed') {
           // Already fully enabled -> go to main app
           navigation.navigate('AppTabs' as never);
+          return;
+        } else if (data?.status === 'tier2_processing') {
+          setStatus('tier2_processing');
+          return;
+        } else if (data?.status === 'tier2_manual_review') {
+          setStatus('tier2_manual_review');
+          return;
+        } else if (data?.status === 'tier2_error' || data?.status === 'tier2_failed') {
+          setStatus('tier2_failed');
+          Alert.alert(
+            'Verification Issue',
+            data?.status === 'tier2_error'
+              ? 'There was an error completing your verification. Our team has been notified. Please try again later or contact support.'
+              : 'Your Tier 2 verification was rejected. Please contact support to continue.'
+          );
           return;
         } else if (data?.status === 'tier2_pending' || data?.status === 'tier1_created') {
           setStatus('tier1_created');
@@ -173,9 +208,7 @@ const CreateAccountScreen = () => {
       <ScreenWrapper>
         <View style={styles.centered}>
           <ActivityIndicator size="large" />
-          <Text style={[styles.subtitle, { marginTop: theme.spacing.s16 }]}>
-            Preparing your form…
-          </Text>
+          <Text style={[styles.subtitle, { marginTop: theme.spacing.s16 }]}>{statusMessage}</Text>
         </View>
       </ScreenWrapper>
     );

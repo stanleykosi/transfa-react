@@ -1,48 +1,38 @@
 /**
  * @description
- * Redesigned Payments screen with CRYSTAL CLEAR tab distinction.
- * Features prominent header, descriptive subtitle, and highly visible tabs
- * that clearly separate Transaction History from Payment Requests.
+ * Simplified Payments screen that ONLY shows transaction history.
+ * No tabs - just the transaction history list.
  *
  * @dependencies
  * - react-native: For core components
- * - @/navigation/PaymentsTabNavigator: The actual tab navigator component
+ * - @/screens/Payments/PaymentHistoryScreen: The transaction history component
  * - @/components/ScreenWrapper: To provide a consistent safe area and background
  */
 import React from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
 import ScreenWrapper from '@/components/ScreenWrapper';
-import PaymentsTabNavigator from '@/navigation/PaymentsTabNavigator';
+import PaymentHistoryScreen from '@/screens/Payments/PaymentHistoryScreen';
 import { theme } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 
 const PaymentsScreen = () => {
   return (
     <ScreenWrapper style={styles.container}>
-      {/* Enhanced Header with Clear Description */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
           <View style={styles.iconContainer}>
-            <Ionicons name="wallet" size={32} color={theme.colors.primary} />
+            <Ionicons name="receipt" size={28} color={theme.colors.primary} />
           </View>
           <View style={styles.headerTextContainer}>
-            <Text style={styles.title}>Payments</Text>
-            <Text style={styles.subtitle}>View your financial activity</Text>
+            <Text style={styles.title}>Transaction History</Text>
+            <Text style={styles.subtitle}>View all your payment transactions</Text>
           </View>
-        </View>
-
-        {/* Info Banner - Explains the two sections */}
-        <View style={styles.infoBanner}>
-          <Ionicons name="information-circle" size={18} color={theme.colors.info} />
-          <Text style={styles.infoBannerText}>
-            Swipe between tabs to view your transaction history or payment requests
-          </Text>
         </View>
       </View>
 
-      {/* Tab Navigator with Enhanced Visibility */}
-      <View style={styles.tabContainer}>
-        <PaymentsTabNavigator />
+      {/* Directly render transaction history */}
+      <View style={styles.contentContainer}>
+        <PaymentHistoryScreen />
       </View>
     </ScreenWrapper>
   );
@@ -76,48 +66,30 @@ const styles = StyleSheet.create({
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: theme.spacing.s12,
   },
   iconContainer: {
-    width: 60,
-    height: 60,
-    borderRadius: theme.radii.lg,
+    width: 48,
+    height: 48,
+    borderRadius: theme.radii.md,
     backgroundColor: theme.colors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: theme.spacing.s16,
+    marginRight: theme.spacing.s12,
   },
   headerTextContainer: {
     flex: 1,
   },
   title: {
-    fontSize: theme.fontSizes['3xl'],
+    fontSize: theme.fontSizes['2xl'],
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.s4,
+    marginBottom: theme.spacing.s2,
   },
   subtitle: {
     fontSize: theme.fontSizes.sm,
     color: theme.colors.textSecondary,
-    fontWeight: theme.fontWeights.medium,
   },
-  infoBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#EFF6FF', // Blue 50
-    paddingVertical: theme.spacing.s10,
-    paddingHorizontal: theme.spacing.s12,
-    borderRadius: theme.radii.md,
-    gap: theme.spacing.s8,
-  },
-  infoBannerText: {
-    flex: 1,
-    fontSize: theme.fontSizes.xs,
-    color: theme.colors.info,
-    fontWeight: theme.fontWeights.medium,
-    lineHeight: 16,
-  },
-  tabContainer: {
+  contentContainer: {
     flex: 1,
   },
 });

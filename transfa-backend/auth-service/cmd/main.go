@@ -2,12 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
-	"encoding/json"
 	"strings"
 	"syscall"
 	"time"
@@ -47,30 +47,30 @@ func main() {
 		log.Fatalf("cannot load config: %v", err)
 	}
 
-    // If a platform-provided PORT is set (e.g., Railway/Render), prefer it
-    if port := os.Getenv("PORT"); port != "" {
-        cfg.ServerPort = port
-    }
-    // Ensure we have a port fallback if neither env is set
-    if cfg.ServerPort == "" {
-        cfg.ServerPort = "8080"
-    }
+	// If a platform-provided PORT is set (e.g., Railway/Render), prefer it
+	if port := os.Getenv("PORT"); port != "" {
+		cfg.ServerPort = port
+	}
+	// Ensure we have a port fallback if neither env is set
+	if cfg.ServerPort == "" {
+		cfg.ServerPort = "8080"
+	}
 
 	// Establish database connection pool with better configuration
 	dbConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("Unable to parse database URL: %v\n", err)
 	}
-	
+
 	// Configure connection pool to prevent prepared statement conflict
 	dbConfig.MaxConns = 10
 	dbConfig.MinConns = 2
 	dbConfig.MaxConnLifetime = 30 * time.Minute
 	dbConfig.MaxConnIdleTime = 5 * time.Minute
-	
+
 	// Disable prepared statement caching to prevent conflicts
 	dbConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
-	
+
 	dbpool, err := pgxpool.NewWithConfig(context.Background(), dbConfig)
 	if err != nil {
 		log.Fatalf("Unable to connect to database: %v\n", err)
@@ -78,24 +78,24 @@ func main() {
 	defer dbpool.Close()
 	log.Println("Database connection established")
 
-    log.Printf("RABBITMQ_URL (masked)=%s", maskAMQPURLForLog(cfg.RabbitMQURL))
+	log.Printf("RABBITMQ_URL (masked)=%s", maskAMQPURLForLog(cfg.RabbitMQURL))
 
-    // Set up RabbitMQ producer with bounded dial timeout; allow nil on failure
-    var producer *rabbitmq.EventProducer
-    if p, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL); err != nil {
-        log.Printf("WARNING: Failed to connect to RabbitMQ at startup: %v. Continuing without MQ.", err)
-        producer = nil
-    } else {
-        producer = p
-        defer producer.Close()
-        log.Println("RabbitMQ producer connected")
-    }
+	// Set up RabbitMQ producer with bounded dial timeout; allow nil on failure
+	var producer *rabbitmq.EventProducer
+	if p, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL); err != nil {
+		log.Printf("WARNING: Failed to connect to RabbitMQ at startup: %v. Continuing without MQ.", err)
+		producer = nil
+	} else {
+		producer = p
+		defer producer.Close()
+		log.Println("RabbitMQ producer connected")
+	}
 
-    // Set up repository
-    userRepo := store.NewPostgresUserRepository(dbpool)
+	// Set up repository
+	userRepo := store.NewPostgresUserRepository(dbpool)
 
-    // Ensure required tables exist (idempotent)
-    if _, err := dbpool.Exec(context.Background(), `
+	// Ensure required tables exist (idempotent)
+	if _, err := dbpool.Exec(context.Background(), `
         CREATE TABLE IF NOT EXISTS onboarding_status (
             user_id UUID NOT NULL,
             stage TEXT NOT NULL,
@@ -113,20 +113,20 @@ func main() {
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
     `); err != nil {
-        log.Printf("Warning: failed ensuring tables (may already exist): %v", err)
-    }
+		log.Printf("Warning: failed ensuring tables (may already exist): %v", err)
+	}
 
 	// Set up router and handlers
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)    // Log API requests
 	r.Use(middleware.Recoverer) // Recover from panics
 
-    // Create the onboarding handler with its dependencies
-    onboardingHandler := api.NewOnboardingHandler(userRepo, producer)
+	// Create the onboarding handler with its dependencies
+	onboardingHandler := api.NewOnboardingHandler(userRepo, producer)
 
-    // Define routes
-    r.Post("/onboarding", onboardingHandler.ServeHTTP)
-    r.Post("/onboarding/tier2", onboardingHandler.HandleTier2)
+	// Define routes
+	r.Post("/onboarding", onboardingHandler.ServeHTTP)
+	r.Post("/onboarding/tier2", onboardingHandler.HandleTier2)
 
 	r.Get("/onboarding/status", func(w http.ResponseWriter, r *http.Request) {
 		clerkUserID := r.Header.Get("X-Clerk-User-Id")
@@ -143,8 +143,8 @@ func main() {
 			w.Write([]byte("User not found"))
 			return
 		}
-        // Derive a normalized, frontend-friendly status
-        // Priority: completed (has account) > tier2_pending > tier1_created/pending > new
+		// Derive a normalized, frontend-friendly status
+		// Priority: completed (has account) > tier2_pending > tier1_created/pending > new
 		status := "new"
 		var reason *string
 		if conn, err := dbpool.Acquire(r.Context()); err == nil {
@@ -156,12 +156,20 @@ func main() {
 			if accountCount > 0 {
 				status = "completed"
 			} else {
-		        // 2) Tier2 status
+				// 2) Tier2 status
 				var t2 string
-				_ = conn.QueryRow(r.Context(), `SELECT status FROM onboarding_status WHERE user_id = $1 AND stage = 'tier2'`, existing.ID).Scan(&t2)
+				if err := conn.QueryRow(r.Context(), `SELECT status, reason FROM onboarding_status WHERE user_id = $1 AND stage = 'tier2'`, existing.ID).Scan(&t2, &reason); err != nil {
+					t2 = ""
+				}
 				if t2 != "" {
-		            // Treat any presence of tier2 record as pending until account exists
-		            status = "tier2_pending"
+					// Treat any presence of tier2 record as pending until account exists unless completed with account
+					status = "tier2_" + strings.ToLower(t2)
+					if t2 == "failed" || t2 == "error" {
+						status = "tier2_failed"
+					}
+					if t2 == "completed" {
+						status = "tier2_completed"
+					}
 				} else {
 					// 3) Tier1 status
 					var t1 string
@@ -197,59 +205,59 @@ func main() {
 		w.Write([]byte("Auth service is healthy"))
 	})
 
-    // Endpoint to fetch the user's profile including username, email, and UUID
-    r.Get("/me/profile", func(w http.ResponseWriter, r *http.Request) {
-        clerkUserID := r.Header.Get("X-Clerk-User-Id")
-        if clerkUserID == "" {
-            w.WriteHeader(http.StatusUnauthorized)
-            w.Write([]byte("Unauthorized: Clerk User ID missing"))
-            return
-        }
-        existing, err := userRepo.FindByClerkUserID(r.Context(), clerkUserID)
-        if err != nil || existing == nil {
-            w.WriteHeader(http.StatusNotFound)
-            w.Write([]byte("User not found"))
-            return
-        }
-        // Return user profile data
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusOK)
-        json.NewEncoder(w).Encode(existing)
-    })
+	// Endpoint to fetch the user's profile including username, email, and UUID
+	r.Get("/me/profile", func(w http.ResponseWriter, r *http.Request) {
+		clerkUserID := r.Header.Get("X-Clerk-User-Id")
+		if clerkUserID == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Unauthorized: Clerk User ID missing"))
+			return
+		}
+		existing, err := userRepo.FindByClerkUserID(r.Context(), clerkUserID)
+		if err != nil || existing == nil {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("User not found"))
+			return
+		}
+		// Return user profile data
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(existing)
+	})
 
-    // Lightweight helper to fetch the user's primary account number (NUBAN) and bank name
-    r.Get("/me/primary-account", func(w http.ResponseWriter, r *http.Request) {
-        clerkUserID := r.Header.Get("X-Clerk-User-Id")
-        if clerkUserID == "" {
-            w.WriteHeader(http.StatusUnauthorized)
-            w.Write([]byte("Unauthorized: Clerk User ID missing"))
-            return
-        }
-        existing, err := userRepo.FindByClerkUserID(r.Context(), clerkUserID)
-        if err != nil || existing == nil {
-            w.WriteHeader(http.StatusNotFound)
-            w.Write([]byte("User not found"))
-            return
-        }
-        var accountNumber, bankName *string
-        if conn, err := dbpool.Acquire(r.Context()); err == nil {
-            defer conn.Release()
-            _ = conn.QueryRow(r.Context(), `SELECT virtual_nuban, bank_name FROM accounts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, existing.ID).Scan(&accountNumber, &bankName)
-        }
-        w.Header().Set("Content-Type", "application/json")
-        w.WriteHeader(http.StatusOK)
-        if accountNumber != nil {
-            response := map[string]interface{}{
-                "accountNumber": *accountNumber,
-            }
-            if bankName != nil && *bankName != "" {
-                response["bankName"] = *bankName
-            }
-            json.NewEncoder(w).Encode(response)
-        } else {
-            w.Write([]byte("{}"))
-        }
-    })
+	// Lightweight helper to fetch the user's primary account number (NUBAN) and bank name
+	r.Get("/me/primary-account", func(w http.ResponseWriter, r *http.Request) {
+		clerkUserID := r.Header.Get("X-Clerk-User-Id")
+		if clerkUserID == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte("Unauthorized: Clerk User ID missing"))
+			return
+		}
+		existing, err := userRepo.FindByClerkUserID(r.Context(), clerkUserID)
+		if err != nil || existing == nil {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("User not found"))
+			return
+		}
+		var accountNumber, bankName *string
+		if conn, err := dbpool.Acquire(r.Context()); err == nil {
+			defer conn.Release()
+			_ = conn.QueryRow(r.Context(), `SELECT virtual_nuban, bank_name FROM accounts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, existing.ID).Scan(&accountNumber, &bankName)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if accountNumber != nil {
+			response := map[string]interface{}{
+				"accountNumber": *accountNumber,
+			}
+			if bankName != nil && *bankName != "" {
+				response["bankName"] = *bankName
+			}
+			json.NewEncoder(w).Encode(response)
+		} else {
+			w.Write([]byte("{}"))
+		}
+	})
 	// Start the server
 	server := &http.Server{
 		Addr:    ":" + cfg.ServerPort,
@@ -281,9 +289,9 @@ func main() {
 
 // jsonString safely marshals a string to a JSON quoted string, falling back if needed.
 func jsonString(s string) string {
-    b, err := json.Marshal(s)
-    if err != nil {
-        return "\"" + strings.ReplaceAll(s, "\"", "\\\"") + "\""
-    }
-    return string(b)
+	b, err := json.Marshal(s)
+	if err != nil {
+		return "\"" + strings.ReplaceAll(s, "\"", "\\\"") + "\""
+	}
+	return string(b)
 }

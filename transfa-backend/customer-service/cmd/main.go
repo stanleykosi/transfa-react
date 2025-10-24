@@ -58,16 +58,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("Unable to parse database URL: %v\n", err)
 	}
-	
+
 	// Configure connection pool to prevent prepared statement conflicts
 	dbConfig.MaxConns = 10
 	dbConfig.MinConns = 2
 	dbConfig.MaxConnLifetime = 30 * time.Minute
 	dbConfig.MaxConnIdleTime = 5 * time.Minute
-	
+
 	// Disable prepared statement caching to prevent conflicts
 	dbConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
-	
+
 	dbpool, err := pgxpool.NewWithConfig(context.Background(), dbConfig)
 	if err != nil {
 		log.Fatalf("Unable to connect to database: %v\n", err)
@@ -78,7 +78,12 @@ func main() {
 	// Set up dependencies
 	userRepo := store.NewPostgresUserRepository(dbpool)
 	anchorClient := anchorclient.NewClient(cfg.AnchorAPIBaseURL, cfg.AnchorAPIKey)
-	eventHandler := app.NewUserEventHandler(userRepo, anchorClient)
+	publisher, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL)
+	if err != nil {
+		log.Fatalf("Failed to create event publisher: %v", err)
+	}
+	defer publisher.Close()
+	eventHandler := app.NewUserEventHandler(userRepo, anchorClient, publisher)
 
 	// Ensure onboarding status table exists
 	if err := userRepo.EnsureOnboardingStatusTable(context.Background()); err != nil {
@@ -106,15 +111,26 @@ func main() {
 		}
 	}()
 
-	// Consume tier1 verification requests on the same exchange using a dedicated queue
+	// Consume tier status events and tier2 verification requests on dedicated queues
 	go func() {
 		tier2Queue := "customer_service_tier2_requested"
 		bindings := map[string]func([]byte) bool{
-			"tier1.verification.requested": eventHandler.HandleTier2VerificationRequestedEvent,
+			"tier2.verification.requested": eventHandler.HandleTier2VerificationRequestedEvent,
 		}
 		log.Printf("Starting consumer for tier2 queue '%s'...", tier2Queue)
 		if err := consumer.ConsumeWithBindings("customer_events", tier2Queue, bindings); err != nil {
 			log.Fatalf("Tier2 consumer error: %v", err)
+		}
+	}()
+
+	go func() {
+		tierStatusQueue := "customer_service_tier_status"
+		bindings := map[string]func([]byte) bool{
+			"customer.tier.status": eventHandler.HandleTierStatusEvent,
+		}
+		log.Printf("Starting consumer for tier status queue '%s'...", tierStatusQueue)
+		if err := consumer.ConsumeWithBindings("customer_events", tierStatusQueue, bindings); err != nil {
+			log.Fatalf("Tier status consumer error: %v", err)
 		}
 	}()
 
