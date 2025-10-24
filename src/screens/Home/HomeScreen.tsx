@@ -281,7 +281,7 @@ const HomeScreen = () => {
             />
 
             <ActionButton
-              title="Create Payment Request"
+              title="Payment Request"
               icon="document-text"
               onPress={() => navigation.navigate('PaymentRequestsList' as never)}
               variant="outline"

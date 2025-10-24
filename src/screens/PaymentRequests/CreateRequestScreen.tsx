@@ -144,10 +144,10 @@ const CreateRequestScreen = () => {
             {image ? (
               <Image source={{ uri: image.uri }} style={styles.previewImage} />
             ) : (
-              <>
+              <View style={styles.imagePickerContent}>
                 <Ionicons name="camera-outline" size={32} color={theme.colors.textSecondary} />
                 <Text style={styles.imagePickerText}>Tap to select an image</Text>
-              </>
+              </View>
             )}
           </TouchableOpacity>
           {isUploading && (
@@ -159,7 +159,7 @@ const CreateRequestScreen = () => {
 
           <View style={styles.buttonContainer}>
             <PrimaryButton
-              title={isLoading ? 'Creating...' : 'Create Payment Request'}
+              title={isLoading ? 'Creating...' : 'Create Payment'}
               onPress={handleSubmit}
               isLoading={isLoading}
               disabled={isLoading}
@@ -205,6 +205,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: theme.colors.surface,
+  },
+  imagePickerContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   imagePickerText: {
     marginTop: theme.spacing.s8,

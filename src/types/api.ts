@@ -100,6 +100,25 @@ export interface TransactionResponse {
   timestamp?: string;
 }
 
+// Transaction history item from the backend
+export interface TransactionHistoryItem {
+  id: string;
+  anchor_transfer_id?: string;
+  sender_id: string;
+  recipient_id?: string;
+  source_account_id: string;
+  destination_account_id?: string;
+  destination_beneficiary_id?: string;
+  type: string;
+  category: string;
+  status: string;
+  amount: number;
+  fee: number;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // User's receiving preference for incoming transfers
 export interface ReceivingPreference {
   user_id: string;

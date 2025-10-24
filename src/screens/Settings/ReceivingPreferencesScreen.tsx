@@ -144,7 +144,7 @@ const ReceivingPreferencesScreen = () => {
             <Text style={styles.loadingText}>Loading preferences...</Text>
           </View>
         ) : (
-          <>
+          <View>
             {/* Receiving Account Toggle */}
             <View style={styles.preferenceCard}>
               <View style={styles.preferenceHeader}>
@@ -254,7 +254,7 @@ const ReceivingPreferencesScreen = () => {
                 </Text>
               </View>
             </View>
-          </>
+          </View>
         )}
       </ScrollView>
     </ScreenWrapper>

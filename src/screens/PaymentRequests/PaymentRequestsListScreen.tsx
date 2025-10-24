@@ -29,6 +29,7 @@ import { theme } from '@/constants/theme';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { Ionicons } from '@expo/vector-icons';
 import ActionButton from '@/components/ActionButton';
+import AppHeader from '@/components/AppHeader';
 
 const PaymentRequestItem = React.memo(({ item }: { item: PaymentRequest }) => {
   const isFulfilled = item.status === 'fulfilled';
@@ -183,18 +184,25 @@ const PaymentRequestsListScreen = () => {
 
   return (
     <View style={styles.container}>
-      {renderContent()}
+      <AppHeader
+        title="Payment Requests"
+        subtitle="Manage your outstanding requests"
+        icon="document-text"
+        showBack
+      />
 
-      {/* Create New Payment Request Button */}
-      <View style={styles.buttonContainer}>
-        <ActionButton
-          title="Create New Payment Request"
-          icon="add-circle"
-          variant="primary"
-          size="large"
-          onPress={() => navigation.navigate('CreatePaymentRequest' as never)}
-          style={styles.createButton}
-        />
+      <View style={styles.contentWrapper}>
+        {renderContent()}
+
+        <View style={styles.inlineButtonContainer}>
+          <ActionButton
+            title="Create New Payment"
+            variant="primary"
+            size="medium"
+            onPress={() => navigation.navigate('CreatePaymentRequest' as never)}
+            style={styles.createButton}
+          />
+        </View>
       </View>
     </View>
   );
@@ -205,9 +213,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
+  contentWrapper: {
+    flex: 1,
+    paddingHorizontal: theme.spacing.s16,
+    paddingVertical: theme.spacing.s16,
+    gap: theme.spacing.s16,
+  },
   listContainer: {
-    padding: theme.spacing.s16,
-    paddingBottom: theme.spacing.s24,
+    paddingBottom: theme.spacing.s16,
   },
   loadingContainer: {
     flex: 1,
@@ -310,12 +323,9 @@ const styles = StyleSheet.create({
   separator: {
     height: theme.spacing.s12,
   },
-  buttonContainer: {
-    padding: theme.spacing.s16,
+  inlineButtonContainer: {
+    paddingTop: theme.spacing.s16,
     paddingBottom: theme.spacing.s24,
-    backgroundColor: theme.colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
   },
   createButton: {
     width: '100%',

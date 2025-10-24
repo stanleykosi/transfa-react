@@ -27,6 +27,7 @@ import {
   ViewStyle,
   StyleProp,
   TextStyle,
+  Platform,
 } from 'react-native';
 import { theme } from '@/constants/theme';
 
@@ -68,12 +69,23 @@ const PrimaryButton: React.FC<PrimaryButtonProps> = ({
 const styles = StyleSheet.create({
   button: {
     backgroundColor: theme.colors.primary,
-    paddingVertical: theme.spacing.s16,
+    paddingVertical: theme.spacing.s12,
     paddingHorizontal: theme.spacing.s24,
     borderRadius: theme.radii.md,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 56, // Ensures consistent height even with ActivityIndicator
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: {
+        elevation: 3,
+      },
+    }),
   },
   disabled: {
     backgroundColor: theme.colors.disabled,

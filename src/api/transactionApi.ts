@@ -26,6 +26,7 @@ import {
   P2PTransferPayload,
   SelfTransferPayload,
   TransactionResponse,
+  TransactionHistoryItem,
   Beneficiary,
   ReceivingPreference,
   UpdateReceivingPreferencePayload,
@@ -214,18 +215,12 @@ export const useSetDefaultBeneficiary = (
  */
 export const useAccountBalance = () => {
   const fetchAccountBalance = async (): Promise<AccountBalance> => {
-    console.log(
-      'Fetching account balance from:',
-      `${TRANSACTION_SERVICE_URL}/transactions/account/balance`
-    );
     try {
       const { data } = await apiClient.get<AccountBalance>('/transactions/account/balance', {
         baseURL: TRANSACTION_SERVICE_URL,
       });
-      console.log('Account balance response:', data);
       return data;
     } catch (error) {
-      console.error('Error fetching account balance:', error);
       throw error;
     }
   };
@@ -248,24 +243,18 @@ export const useAccountBalance = () => {
  * @returns A TanStack Query object for the transaction history.
  */
 export const useTransactionHistory = () => {
-  const fetchTransactionHistory = async (): Promise<TransactionResponse[]> => {
-    console.log(
-      'Fetching transaction history from:',
-      `${TRANSACTION_SERVICE_URL}/transactions/transactions`
-    );
+  const fetchTransactionHistory = async (): Promise<TransactionHistoryItem[]> => {
     try {
-      const { data } = await apiClient.get<TransactionResponse[]>('/transactions/transactions', {
+      const { data } = await apiClient.get<TransactionHistoryItem[]>('/transactions/transactions', {
         baseURL: TRANSACTION_SERVICE_URL,
       });
-      console.log('Transaction history response:', data);
       return data;
     } catch (error) {
-      console.error('Error fetching transaction history:', error);
       throw error;
     }
   };
 
-  return useQuery<TransactionResponse[], Error>({
+  return useQuery<TransactionHistoryItem[], Error>({
     queryKey: [TRANSACTIONS_QUERY_KEY],
     queryFn: fetchTransactionHistory,
     staleTime: 1000 * 30, // 30 seconds - transactions are considered fresh for 30 seconds
@@ -287,7 +276,6 @@ export const TRANSACTION_FEES_QUERY_KEY = 'transaction-fees';
 const feesQuery = queryOptions<TransactionFeeResponse, Error>({
   queryKey: [TRANSACTION_FEES_QUERY_KEY],
   queryFn: async (): Promise<TransactionFeeResponse> => {
-    console.log('Fetching transaction fees from:', `${TRANSACTION_SERVICE_URL}/transactions/fees`);
     const { data } = await apiClient.get<TransactionFeeResponse>('/transactions/fees', {
       baseURL: TRANSACTION_SERVICE_URL,
     });

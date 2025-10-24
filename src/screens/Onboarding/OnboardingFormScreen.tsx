@@ -231,7 +231,7 @@ const OnboardingFormScreen = () => {
           />
 
           {userType === 'personal' ? (
-            <>
+            <View>
               <FormInput
                 label="First Name *"
                 value={firstName}
@@ -281,9 +281,9 @@ const OnboardingFormScreen = () => {
                 onChangeText={setCountry}
                 placeholder="Country"
               />
-            </>
+            </View>
           ) : (
-            <>
+            <View>
               <FormInput
                 label="Registered Business Name"
                 value={businessName}
@@ -296,7 +296,7 @@ const OnboardingFormScreen = () => {
                 onChangeText={setRcNumber}
                 placeholder="Enter your registration number"
               />
-            </>
+            </View>
           )}
 
           <View style={styles.buttonContainer}>

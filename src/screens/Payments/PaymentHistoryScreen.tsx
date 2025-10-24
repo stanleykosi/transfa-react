@@ -24,6 +24,13 @@ import { theme } from '@/constants/theme';
 import { useTransactionHistory, useUserProfile } from '@/api/transactionApi';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { Ionicons } from '@expo/vector-icons';
+import AppHeader from '@/components/AppHeader';
+
+interface PaymentHistoryScreenProps {
+  showBack?: boolean;
+  title?: string;
+  subtitle?: string;
+}
 
 interface TransactionItemProps {
   transaction: {
@@ -202,7 +209,11 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
 // Move separator component outside of render
 const ItemSeparatorComponent = () => <View style={styles.separator} />;
 
-const PaymentHistoryScreen = () => {
+const PaymentHistoryScreen: React.FC<PaymentHistoryScreenProps> = ({
+  showBack = true,
+  title = 'Payments',
+  subtitle = 'View all your payment transactions',
+}) => {
   const [refreshing, setRefreshing] = useState(false);
 
   // Get user profile with UUID for correct transaction direction logic
@@ -255,38 +266,38 @@ const PaymentHistoryScreen = () => {
     </View>
   );
 
-  if ((isLoading || isLoadingProfile) && !refreshing) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={theme.colors.primary} />
-        <Text style={styles.loadingText}>Loading transactions...</Text>
-      </View>
-    );
-  }
-
-  if (error && !transactions) {
-    return renderErrorState();
-  }
-
   return (
     <View style={styles.container}>
-      <FlatList
-        data={transactions || []}
-        renderItem={renderTransaction}
-        keyExtractor={(item) => item.id}
-        ListEmptyComponent={renderEmptyState}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            colors={[theme.colors.primary]}
-            tintColor={theme.colors.primary}
+      <AppHeader title={title} subtitle={subtitle} icon="receipt" showBack={showBack} />
+
+      <View style={styles.contentWrapper}>
+        {(isLoading || isLoadingProfile) && !refreshing ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={theme.colors.primary} />
+            <Text style={styles.loadingText}>Loading transactions...</Text>
+          </View>
+        ) : error && !transactions ? (
+          renderErrorState()
+        ) : (
+          <FlatList
+            data={transactions || []}
+            renderItem={renderTransaction}
+            keyExtractor={(item) => item.id}
+            ListEmptyComponent={renderEmptyState}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                colors={[theme.colors.primary]}
+                tintColor={theme.colors.primary}
+              />
+            }
+            contentContainerStyle={styles.listContainer}
+            showsVerticalScrollIndicator={false}
+            ItemSeparatorComponent={ItemSeparatorComponent}
           />
-        }
-        contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={false}
-        ItemSeparatorComponent={ItemSeparatorComponent}
-      />
+        )}
+      </View>
     </View>
   );
 };
@@ -296,9 +307,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
+  contentWrapper: {
+    flex: 1,
+    paddingHorizontal: theme.spacing.s16,
+    paddingVertical: theme.spacing.s16,
+  },
   listContainer: {
     flexGrow: 1,
-    paddingHorizontal: theme.spacing.s16,
     paddingVertical: theme.spacing.s12,
   },
   // Transaction Item
@@ -358,7 +373,7 @@ const styles = StyleSheet.create({
   amountText: {
     fontSize: theme.fontSizes.lg,
     fontWeight: theme.fontWeights.bold,
-    marginBottom: theme.spacing.s2,
+    marginBottom: theme.spacing.s4,
   },
   feeText: {
     fontSize: theme.fontSizes.xs,
@@ -377,7 +392,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    marginRight: theme.spacing.s6,
+    marginRight: theme.spacing.s8,
   },
   statusText: {
     fontSize: theme.fontSizes.sm,

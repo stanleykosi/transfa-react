@@ -149,12 +149,7 @@ const AppStack = () => {
       <Stack.Screen
         name="PaymentRequestsList"
         component={PaymentRequestsListScreen}
-        options={{
-          title: 'Payment Requests',
-          headerShown: true,
-          headerStyle: { backgroundColor: theme.colors.surface },
-          headerTitleStyle: { color: theme.colors.textPrimary, fontWeight: 'bold' },
-        }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="CreatePaymentRequest"
