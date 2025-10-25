@@ -30,26 +30,26 @@ import (
 	"github.com/transfa/transaction-service/internal/domain"
 	"github.com/transfa/transaction-service/internal/store"
 	"github.com/transfa/transaction-service/pkg/anchorclient"
-	"github.com/transfa/transaction-service/pkg/rabbitmq"
+	rmrabbit "github.com/transfa/transaction-service/pkg/rabbitmq"
 )
 
 const (
 	FreeTierTransferLimit = 5
-	SubscriptionFee       = 100000 // 1000 NGN in kobo
-	defaultTransactionFee = 500    // 5 NGN in kobo (failsafe)
+	SubscriptionFee       = 100000
+	defaultTransactionFee = 500
 )
 
 // Service provides the core business logic for transactions.
 type Service struct {
 	repo               store.Repository
 	anchorClient       *anchorclient.Client
-	eventProducer      rabbitmq.Publisher
+	eventProducer      rmrabbit.Publisher
+	transferConsumer   *TransferStatusConsumer
 	adminAccountID     string
 	transactionFeeKobo int64
 }
 
-// NewService creates a new transaction service instance.
-func NewService(repo store.Repository, anchor *anchorclient.Client, producer rabbitmq.Publisher, adminAccountID string, transactionFeeKobo int64) *Service {
+func NewService(repo store.Repository, anchor *anchorclient.Client, producer rmrabbit.Publisher, adminAccountID string, transactionFeeKobo int64) *Service {
 	if transactionFeeKobo <= 0 {
 		log.Printf("INFO: Using default transaction fee %d kobo", defaultTransactionFee)
 		transactionFeeKobo = defaultTransactionFee
@@ -59,13 +59,21 @@ func NewService(repo store.Repository, anchor *anchorclient.Client, producer rab
 		log.Printf("WARN: Admin account ID not provided; fee collection will be disabled")
 	}
 
-	return &Service{
+	svc := &Service{
 		repo:               repo,
 		anchorClient:       anchor,
 		eventProducer:      producer,
 		adminAccountID:     adminAccountID,
 		transactionFeeKobo: transactionFeeKobo,
 	}
+
+	svc.transferConsumer = NewTransferStatusConsumer(repo)
+
+	return svc
+}
+
+func (s *Service) TransferStatusConsumer() *TransferStatusConsumer {
+	return s.transferConsumer
 }
 
 // GetTransactionFee returns the configured transaction fee in kobo.
@@ -261,9 +269,17 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		return nil, fmt.Errorf("anchor transfer failed: %w", err)
 	}
 
-	// 7. Update transaction with final status from Anchor
-	s.repo.UpdateTransactionStatusAndFee(ctx, txRecord.ID, anchorResp.Data.ID, "completed", txRecord.Fee)
-	txRecord.Status = "completed"
+	// 7. Update transaction metadata; final status driven by webhook
+    if anchorResp != nil {
+        transferID := anchorResp.Data.ID
+        txRecord.AnchorTransferID = &transferID
+        if txRecord.TransferType == "" {
+            txRecord.TransferType = "nip"
+        }
+        s.repo.UpdateTransactionStatusAndFee(ctx, txRecord.ID, transferID, "processing", txRecord.Fee)
+    }
+
+	txRecord.Status = "processing"
 
 	return txRecord, nil
 }
@@ -296,6 +312,12 @@ func (s *Service) performInternalTransfer(ctx context.Context, txRecord *domain.
 
 	if err := s.repo.UpdateTransactionDestinations(ctx, txRecord.ID, &recipientAccount.ID, nil); err != nil {
 		log.Printf("WARN: Failed to persist destination account for transaction %s: %v", txRecord.ID, err)
+	}
+
+	if transferResp != nil {
+		transferID := transferResp.Data.ID
+		txRecord.AnchorTransferID = &transferID
+		txRecord.TransferType = "book"
 	}
 
 	return transferResp, nil
@@ -415,9 +437,15 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 		return nil, fmt.Errorf("anchor NIP transfer failed: %w", err)
 	}
 
-	// 6. Update transaction with final status
-	s.repo.UpdateTransactionStatusAndFee(ctx, txRecord.ID, anchorResp.Data.ID, "completed", txRecord.Fee)
-	txRecord.Status = "completed"
+// 6. Update transaction metadata; final status comes from webhook
+if anchorResp != nil {
+	transferID := anchorResp.Data.ID
+	txRecord.AnchorTransferID = &transferID
+	txRecord.TransferType = "nip"
+	s.repo.UpdateTransactionStatusAndFee(ctx, txRecord.ID, transferID, "processing", txRecord.Fee)
+}
+
+txRecord.Status = "processing"
 
 	return txRecord, nil
 }
@@ -491,6 +519,22 @@ func (s *Service) GetTransactionHistory(ctx context.Context, userID uuid.UUID) (
 	return s.repo.FindTransactionsByUserID(ctx, userID)
 }
 
+// GetTransactionByID retrieves a single transaction by its ID, ensuring it belongs to the requester.
+func (s *Service) GetTransactionByID(ctx context.Context, userID uuid.UUID, transactionID uuid.UUID) (*domain.Transaction, error) {
+	tx, err := s.repo.FindTransactionByID(ctx, transactionID)
+	if err != nil {
+		return nil, err
+	}
+
+	if tx.SenderID != userID {
+		if tx.RecipientID == nil || *tx.RecipientID != userID {
+			return nil, store.ErrTransactionNotFound
+		}
+	}
+
+	return tx, nil
+}
+
 // ProcessSubscriptionFee handles the logic for debiting subscription fees.
 // This is called by the scheduler-service for monthly billing.
 func (s *Service) ProcessSubscriptionFee(ctx context.Context, userID uuid.UUID, amount int64, reason string) (*domain.Transaction, error) {
@@ -537,7 +581,7 @@ func (s *Service) ProcessSubscriptionFee(ctx context.Context, userID uuid.UUID, 
 	}
 
 	// 5. Publish subscription fee event to RabbitMQ for other services
-	event := rabbitmq.SubscriptionFeeEvent{
+	event := rmrabbit.SubscriptionFeeEvent{
 		UserID:    user.ID,
 		Amount:    amount,
 		Reason:    reason,

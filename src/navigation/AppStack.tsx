@@ -19,17 +19,19 @@
 
 import React, { useEffect, useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { NavigatorScreenParams } from '@react-navigation/native';
+import { View, ActivityIndicator } from 'react-native';
+import { useAuth, useUser } from '@clerk/clerk-expo';
+
 import AppTabs, { AppTabsParamList } from './AppTabs';
 import OnboardingFormScreen from '@/screens/Onboarding/OnboardingFormScreen';
 import PayUserScreen from '@/screens/PaymentFlow/PayUserScreen';
 import SelfTransferScreen from '@/screens/PaymentFlow/SelfTransferScreen';
+import TransferStatusScreen from '@/screens/PaymentFlow/TransferStatusScreen';
 import CreateRequestScreen from '@/screens/PaymentRequests/CreateRequestScreen';
 import PaymentRequestSuccessScreen from '@/screens/PaymentRequests/PaymentRequestSuccessScreen';
 import PaymentRequestsListScreen from '@/screens/PaymentRequests/PaymentRequestsListScreen';
-import { NavigatorScreenParams } from '@react-navigation/native';
-import { useAuth, useUser } from '@clerk/clerk-expo';
 import apiClient from '@/api/apiClient';
-import { View, ActivityIndicator } from 'react-native';
 import { theme } from '@/constants/theme';
 
 // Define the parameter list for the AppStack routes for type safety.
@@ -40,6 +42,16 @@ export type AppStackParamList = {
   CreateAccount: undefined;
   PayUser: undefined;
   SelfTransfer: undefined;
+  TransferStatus: {
+    transactionId: string;
+    amount: number;
+    fee: number;
+    description?: string;
+    recipientUsername?: string;
+    transferType?: string;
+    initialStatus?: 'pending' | 'failed';
+    failureReason?: string;
+  };
   PaymentRequestsList: undefined; // New screen for viewing payment request history
   CreatePaymentRequest: undefined;
   PaymentRequestSuccess: { requestId: string };
@@ -144,6 +156,11 @@ const AppStack = () => {
       <Stack.Screen
         name="SelfTransfer"
         component={SelfTransferScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="TransferStatus"
+        component={TransferStatusScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen

@@ -178,3 +178,13 @@ export interface CreatePaymentRequestPayload {
   description?: string;
   image_url?: string;
 }
+
+export interface TransactionStatusResponse {
+  id: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  amount: number;
+  fee: number;
+  failure_reason?: string;
+  anchor_reason?: string;
+  transfer_type?: string;
+}

@@ -24,6 +24,10 @@ import (
 type Transaction struct {
 	ID                       uuid.UUID  `json:"id"`
 	AnchorTransferID         *string    `json:"anchor_transfer_id"`
+	TransferType             string     `json:"transfer_type"`
+	FailureReason            *string    `json:"failure_reason,omitempty"`
+	AnchorSessionID          *string    `json:"anchor_session_id,omitempty"`
+	AnchorReason             *string    `json:"anchor_reason,omitempty"`
 	SenderID                 uuid.UUID  `json:"sender_id"`
 	RecipientID              *uuid.UUID `json:"recipient_id,omitempty"`
 	SourceAccountID          uuid.UUID  `json:"source_account_id"`

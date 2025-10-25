@@ -26,6 +26,7 @@ import {
   P2PTransferPayload,
   SelfTransferPayload,
   TransactionResponse,
+  TransactionStatusResponse,
   TransactionHistoryItem,
   Beneficiary,
   ReceivingPreference,
@@ -401,3 +402,6 @@ export const useUserProfile = () => {
     retry: 2,
   });
 };
+
+export const fetchTransactionStatus = (transactionId: string) =>
+  apiClient.get<TransactionStatusResponse>(`/transactions/${transactionId}`);

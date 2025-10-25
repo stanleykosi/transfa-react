@@ -10,7 +10,7 @@
  * - react-native-image-picker: For the Asset type definition.
  */
 import 'react-native-get-random-values'; // Required for uuid
-import { createClient } from '@supabase/supabase-js';
+import { SupabaseClient, createClient } from '@supabase/supabase-js';
 import { Clerk } from '@clerk/clerk-expo';
 import type { Asset } from 'react-native-image-picker';
 
@@ -24,7 +24,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 
 // Initialize the Supabase client.
 // We provide a custom global fetch that includes the Clerk JWT for authentication.
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: false, // We're managing auth via Clerk, not Supabase Auth.
   },

@@ -19,6 +19,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/transfa/transaction-service/internal/app"
 	"github.com/transfa/transaction-service/internal/domain"
@@ -459,6 +460,52 @@ func (h *TransactionHandlers) GetTransactionHistoryHandler(w http.ResponseWriter
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(transactions)
+}
+
+// GetTransactionByIDHandler handles requests to fetch an individual transaction by UUID.
+func (h *TransactionHandlers) GetTransactionByIDHandler(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := GetClerkUserID(r.Context())
+	if !ok {
+		h.writeError(w, http.StatusInternalServerError, "Could not get user ID from context")
+		return
+	}
+
+	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
+	if err != nil {
+		log.Printf("GetTransactionByID: failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		h.writeError(w, http.StatusBadRequest, "User not found")
+		return
+	}
+	requestorID, err := uuid.Parse(internalIDStr)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+
+	transactionIDStr := chi.URLParam(r, "id")
+	if transactionIDStr == "" {
+		h.writeError(w, http.StatusBadRequest, "Transaction ID is required")
+		return
+	}
+
+	transactionID, err := uuid.Parse(transactionIDStr)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid transaction ID format")
+		return
+	}
+
+	tx, err := h.service.GetTransactionByID(r.Context(), requestorID, transactionID)
+	if err != nil {
+		if errors.Is(err, store.ErrTransactionNotFound) {
+			h.writeError(w, http.StatusNotFound, "Transaction not found")
+			return
+		}
+		log.Printf("GetTransactionByID: failed to fetch transaction %s for user %s: %v", transactionID, requestorID, err)
+		h.writeError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, tx)
 }
 
 // SubscriptionFeeHandler handles internal requests to debit subscription fees.

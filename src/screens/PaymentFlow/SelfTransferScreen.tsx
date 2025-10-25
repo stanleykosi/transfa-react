@@ -25,7 +25,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -44,14 +43,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { Beneficiary } from '@/types/api';
 import BeneficiaryDropdown from '@/components/BeneficiaryDropdown';
 import { formatCurrency, nairaToKobo } from '@/utils/formatCurrency';
+import { AppNavigationProp } from '@/types/navigation';
 
 const SelfTransferScreen = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<AppNavigationProp>();
   const [selectedBeneficiary, setSelectedBeneficiary] = useState<Beneficiary | null>(null);
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
 
-  // Fetch real wallet balance
   const { data: accountBalance, isLoading: isLoadingBalance } = useAccountBalance();
   const walletBalanceInKobo = accountBalance?.available_balance || 0;
 
@@ -74,22 +73,24 @@ const SelfTransferScreen = () => {
 
   const { mutate: sendWithdrawal, isPending: isSending } = useSelfTransfer({
     onSuccess: (data) => {
-      Alert.alert(
-        'Withdrawal Initiated',
-        `Your withdrawal is being processed. Transaction ID: ${data.transaction_id}`,
-        [
-          {
-            text: 'OK',
-            onPress: () => navigation.goBack(),
-          },
-        ]
-      );
+      navigation.navigate('TransferStatus', {
+        transactionId: data.transaction_id,
+        amount: data.amount ?? nairaToKobo(parseFloat(amount)),
+        fee: data.fee ?? fees?.self_fee_kobo ?? 0,
+        description,
+        transferType: 'self_transfer',
+      });
     },
     onError: (error) => {
-      Alert.alert(
-        'Withdrawal Failed',
-        error.message || 'An error occurred while processing your withdrawal. Please try again.'
-      );
+      navigation.navigate('TransferStatus', {
+        transactionId: '',
+        amount: nairaToKobo(parseFloat(amount)),
+        fee: fees?.self_fee_kobo ?? 0,
+        description,
+        transferType: 'self_transfer',
+        initialStatus: 'failed',
+        failureReason: error.message,
+      });
     },
   });
 
@@ -97,33 +98,54 @@ const SelfTransferScreen = () => {
     const amountInKobo = nairaToKobo(parseFloat(amount));
 
     if (!selectedBeneficiary) {
-      Alert.alert('Invalid Input', 'Please select a destination account.');
+      navigation.navigate('TransferStatus', {
+        transactionId: '',
+        amount: amountInKobo,
+        fee: fees?.self_fee_kobo ?? 0,
+        description,
+        transferType: 'self_transfer',
+        initialStatus: 'failed',
+        failureReason: 'Please select a destination account.',
+      });
       return;
     }
 
     if (!amount.trim() || isNaN(amountInKobo) || amountInKobo <= 0) {
-      Alert.alert('Invalid Input', 'Please enter a valid amount.');
+      navigation.navigate('TransferStatus', {
+        transactionId: '',
+        amount: amountInKobo,
+        fee: fees?.self_fee_kobo ?? 0,
+        description,
+        transferType: 'self_transfer',
+        initialStatus: 'failed',
+        failureReason: 'Please enter a valid amount.',
+      });
       return;
     }
 
     if (amountInKobo > walletBalanceInKobo) {
-      Alert.alert('Insufficient Funds', 'The amount exceeds your wallet balance.');
+      navigation.navigate('TransferStatus', {
+        transactionId: '',
+        amount: amountInKobo,
+        fee: fees?.self_fee_kobo ?? 0,
+        description,
+        transferType: 'self_transfer',
+        initialStatus: 'failed',
+        failureReason: 'The amount exceeds your wallet balance.',
+      });
       return;
     }
 
-    // Validate description field for Anchor API compliance
-    if (!description.trim()) {
-      Alert.alert('Invalid Input', 'Please enter a description for this transfer.');
-      return;
-    }
-
-    if (description.trim().length < 3) {
-      Alert.alert('Invalid Input', 'Description must be at least 3 characters long.');
-      return;
-    }
-
-    if (description.trim().length > 100) {
-      Alert.alert('Invalid Input', 'Description must be less than 100 characters.');
+    if (!description.trim() || description.trim().length < 3 || description.trim().length > 100) {
+      navigation.navigate('TransferStatus', {
+        transactionId: '',
+        amount: amountInKobo,
+        fee: fees?.self_fee_kobo ?? 0,
+        description,
+        transferType: 'self_transfer',
+        initialStatus: 'failed',
+        failureReason: 'Description must be between 3 and 100 characters.',
+      });
       return;
     }
 
@@ -139,12 +161,7 @@ const SelfTransferScreen = () => {
   };
 
   const amountInKobo = nairaToKobo(parseFloat(amount)) || 0;
-  const feeInKobo = useMemo(() => {
-    if (!fees) {
-      return 0;
-    }
-    return fees.self_fee_kobo ?? 0;
-  }, [fees]);
+  const feeInKobo = useMemo(() => fees?.self_fee_kobo ?? 0, [fees]);
   const totalAmountInKobo = amountInKobo + feeInKobo;
 
   return (

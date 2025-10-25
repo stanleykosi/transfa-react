@@ -23,7 +23,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -39,9 +38,10 @@ import { useP2PTransfer, useTransactionFees } from '@/api/transactionApi';
 import PinInputModal from '@/components/PinInputModal';
 import { Ionicons } from '@expo/vector-icons';
 import { formatCurrency, nairaToKobo } from '@/utils/formatCurrency';
+import { AppNavigationProp } from '@/types/navigation';
 
 const PayUserScreen = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<AppNavigationProp>();
   const [username, setUsername] = useState('');
   const [amount, setAmount] = useState('');
   const [description, setDescription] = useState('');
@@ -59,22 +59,26 @@ const PayUserScreen = () => {
 
   const { mutate: sendPayment, isPending: isSending } = useP2PTransfer({
     onSuccess: (data) => {
-      Alert.alert(
-        'Payment Initiated',
-        `Your payment is being processed. Transaction ID: ${data.transaction_id}`,
-        [
-          {
-            text: 'OK',
-            onPress: () => navigation.goBack(),
-          },
-        ]
-      );
+      navigation.navigate('TransferStatus', {
+        transactionId: data.transaction_id,
+        amount: data.amount ?? nairaToKobo(parseFloat(amount)),
+        fee: data.fee ?? fees?.p2p_fee_kobo ?? 0,
+        description,
+        recipientUsername: username,
+        transferType: 'p2p',
+      });
     },
     onError: (error) => {
-      Alert.alert(
-        'Payment Failed',
-        error.message || 'An error occurred while processing your payment. Please try again.'
-      );
+      navigation.navigate('TransferStatus', {
+        transactionId: '',
+        amount: nairaToKobo(parseFloat(amount)),
+        fee: fees?.p2p_fee_kobo ?? 0,
+        description,
+        recipientUsername: username,
+        transferType: 'p2p',
+        initialStatus: 'failed',
+        failureReason: error.message,
+      });
     },
   });
 
@@ -82,28 +86,44 @@ const PayUserScreen = () => {
     const amountInKobo = nairaToKobo(parseFloat(amount));
 
     if (!username.trim()) {
-      Alert.alert('Invalid Input', 'Please enter a recipient username.');
+      navigation.navigate('TransferStatus', {
+        transactionId: '',
+        amount: amountInKobo,
+        fee: fees?.p2p_fee_kobo ?? 0,
+        description,
+        recipientUsername: username,
+        transferType: 'p2p',
+        initialStatus: 'failed',
+        failureReason: 'Please enter a recipient username.',
+      });
       return;
     }
 
     if (!amount.trim() || isNaN(amountInKobo) || amountInKobo <= 0) {
-      Alert.alert('Invalid Input', 'Please enter a valid amount.');
+      navigation.navigate('TransferStatus', {
+        transactionId: '',
+        amount: amountInKobo,
+        fee: fees?.p2p_fee_kobo ?? 0,
+        description,
+        recipientUsername: username,
+        transferType: 'p2p',
+        initialStatus: 'failed',
+        failureReason: 'Please enter a valid amount.',
+      });
       return;
     }
 
-    // Validate description field for Anchor API compliance
-    if (!description.trim()) {
-      Alert.alert('Invalid Input', 'Please enter a description for this transfer.');
-      return;
-    }
-
-    if (description.trim().length < 3) {
-      Alert.alert('Invalid Input', 'Description must be at least 3 characters long.');
-      return;
-    }
-
-    if (description.trim().length > 100) {
-      Alert.alert('Invalid Input', 'Description must be less than 100 characters.');
+    if (!description.trim() || description.trim().length < 3 || description.trim().length > 100) {
+      navigation.navigate('TransferStatus', {
+        transactionId: '',
+        amount: amountInKobo,
+        fee: fees?.p2p_fee_kobo ?? 0,
+        description,
+        recipientUsername: username,
+        transferType: 'p2p',
+        initialStatus: 'failed',
+        failureReason: 'Description must be between 3 and 100 characters.',
+      });
       return;
     }
 
@@ -115,17 +135,11 @@ const PayUserScreen = () => {
       });
     };
 
-    // Trigger the secure action flow (biometrics/PIN)
     triggerSecureAction(action);
   };
 
   const amountInKobo = nairaToKobo(parseFloat(amount)) || 0;
-  const feeInKobo = useMemo(() => {
-    if (!fees) {
-      return 0;
-    }
-    return fees.p2p_fee_kobo ?? 0;
-  }, [fees]);
+  const feeInKobo = useMemo(() => fees?.p2p_fee_kobo ?? 0, [fees]);
   const totalAmountInKobo = amountInKobo + feeInKobo;
 
   return (

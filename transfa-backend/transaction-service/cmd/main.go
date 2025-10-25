@@ -21,6 +21,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -31,7 +34,7 @@ import (
 	"github.com/transfa/transaction-service/internal/config"
 	"github.com/transfa/transaction-service/internal/store"
 	"github.com/transfa/transaction-service/pkg/anchorclient"
-	"github.com/transfa/transaction-service/pkg/rabbitmq"
+	rmrabbit "github.com/transfa/transaction-service/pkg/rabbitmq"
 )
 
 func main() {
@@ -46,22 +49,22 @@ func main() {
 	log.Printf("Using SERVER_PORT: %s", cfg.ServerPort)
 
 	// Establish a connection pool to the PostgreSQL database with retry logic.
-	config, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	poolConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatalf("unable to parse database URL: %v", err)
 	}
 
 	// Configure connection pool for high-traffic scenarios (100k+ users)
 	// Align with account-service configuration for consistency
-	config.MaxConns = 100
-	config.MinConns = 20
-	config.MaxConnLifetime = 30 * time.Minute
-	config.MaxConnIdleTime = 5 * time.Minute
+	poolConfig.MaxConns = 100
+	poolConfig.MinConns = 20
+	poolConfig.MaxConnLifetime = 30 * time.Minute
+	poolConfig.MaxConnIdleTime = 5 * time.Minute
 
 	// Disable prepared statement caching to prevent conflicts
-	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+	poolConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 
-	dbpool, err := pgxpool.NewWithConfig(context.Background(), config)
+	dbpool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
 	if err != nil {
 		log.Fatalf("unable to connect to database: %v", err)
 	}
@@ -70,7 +73,7 @@ func main() {
 
 	// Initialize the RabbitMQ producer to publish events.
 	// This service only needs to publish, so we use a producer.
-	rabbitProducer, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL)
+	rabbitProducer, err := rmrabbit.NewEventProducer(cfg.RabbitMQURL)
 	if err != nil {
 		log.Printf("WARNING: Failed to connect to RabbitMQ at startup: %v. Continuing without MQ.", err)
 		rabbitProducer = nil
@@ -100,7 +103,49 @@ func main() {
 	// Use the same pattern as account-service - bind to all interfaces
 	serverAddr := fmt.Sprintf(":%s", cfg.ServerPort)
 	log.Printf("Starting server on %s", serverAddr)
-	if err := http.ListenAndServe(serverAddr, router); err != nil {
-		log.Fatalf("could not start server: %v", err)
+
+	// Wire up the new consumer: create a RabbitMQ consumer, bind to transfer status events, and ensure graceful shutdown.
+	transferConsumer := transactionService.TransferStatusConsumer()
+
+	rabbitConsumer, err := rmrabbit.NewConsumer(cfg.RabbitMQURL)
+	if err != nil {
+		log.Fatalf("could not initialize RabbitMQ consumer: %v", err)
 	}
+	defer rabbitConsumer.Close()
+
+	transferBindings := map[string]func([]byte) bool{
+		"transfer.status.nip.successful": transferConsumer.HandleMessage,
+		"transfer.status.nip.failed":     transferConsumer.HandleMessage,
+		"transfer.status.book.successful": transferConsumer.HandleMessage,
+		"transfer.status.book.failed":     transferConsumer.HandleMessage,
+	}
+
+	if err := rabbitConsumer.ConsumeWithBindings("transfa.events", cfg.TransferEventQueue, transferBindings); err != nil {
+		log.Fatalf("failed to start transfer consumer: %v", err)
+	}
+
+	server := &http.Server{
+		Addr:    serverAddr,
+		Handler: router,
+	}
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("could not start server: %v", err)
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	<-stop
+	log.Println("Shutting down transaction-service...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
+
+	log.Println("Shutdown complete.")
 }

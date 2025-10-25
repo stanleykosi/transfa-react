@@ -30,6 +30,7 @@ var (
 	ErrBeneficiaryNotFound  = errors.New("beneficiary not found")
 	ErrSubscriptionNotFound = errors.New("subscription not found")
 	ErrInsufficientFunds    = errors.New("insufficient funds")
+	ErrTransactionNotFound  = errors.New("transaction not found")
 )
 
 // PostgresRepository is a concrete implementation of the Repository interface for PostgreSQL.
@@ -269,10 +270,46 @@ func (r *PostgresRepository) IncrementMonthlyUsage(ctx context.Context, userID u
 // CreateTransaction inserts a new transaction record into the database.
 func (r *PostgresRepository) CreateTransaction(ctx context.Context, tx *domain.Transaction) error {
 	query := `
-		INSERT INTO transactions (id, sender_id, recipient_id, source_account_id, destination_account_id, destination_beneficiary_id, type, category, status, amount, fee, description)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		INSERT INTO transactions (
+			id,
+			sender_id,
+			recipient_id,
+			source_account_id,
+			destination_account_id,
+			destination_beneficiary_id,
+			type,
+			category,
+			status,
+			amount,
+			fee,
+			description,
+			anchor_transfer_id,
+			transfer_type,
+			failure_reason,
+			anchor_session_id,
+			anchor_reason
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 	`
-	_, err := r.db.Exec(ctx, query, tx.ID, tx.SenderID, tx.RecipientID, tx.SourceAccountID, tx.DestinationAccountID, tx.DestinationBeneficiaryID, tx.Type, tx.Category, tx.Status, tx.Amount, tx.Fee, tx.Description)
+	_, err := r.db.Exec(ctx, query,
+		tx.ID,
+		tx.SenderID,
+		tx.RecipientID,
+		tx.SourceAccountID,
+		tx.DestinationAccountID,
+		tx.DestinationBeneficiaryID,
+		tx.Type,
+		tx.Category,
+		tx.Status,
+		tx.Amount,
+		tx.Fee,
+		tx.Description,
+		tx.AnchorTransferID,
+		tx.TransferType,
+		tx.FailureReason,
+		tx.AnchorSessionID,
+		tx.AnchorReason,
+	)
 	return err
 }
 
@@ -287,6 +324,133 @@ func (r *PostgresRepository) UpdateTransactionStatus(ctx context.Context, transa
 func (r *PostgresRepository) UpdateTransactionStatusAndFee(ctx context.Context, transactionID uuid.UUID, anchorTransferID, status string, fee int64) error {
 	query := `UPDATE transactions SET status = $1, anchor_transfer_id = $2, fee = $3, updated_at = NOW() WHERE id = $4`
 	_, err := r.db.Exec(ctx, query, status, anchorTransferID, fee, transactionID)
+	return err
+}
+
+// UpdateTransactionMetadata updates additional fields such as failure reason and session IDs.
+func (r *PostgresRepository) UpdateTransactionMetadata(ctx context.Context, transactionID uuid.UUID, metadata UpdateTransactionMetadataParams) error {
+	query := `
+		UPDATE transactions
+		SET
+			status = COALESCE($1, status),
+			anchor_transfer_id = COALESCE($2, anchor_transfer_id),
+			transfer_type = COALESCE($3, transfer_type),
+			failure_reason = COALESCE($4, failure_reason),
+			anchor_session_id = COALESCE($5, anchor_session_id),
+			anchor_reason = COALESCE($6, anchor_reason),
+			updated_at = NOW()
+		WHERE id = $7
+	`
+	_, err := r.db.Exec(ctx, query,
+		metadata.Status,
+		metadata.AnchorTransferID,
+		metadata.TransferType,
+		metadata.FailureReason,
+		metadata.AnchorSessionID,
+		metadata.AnchorReason,
+		transactionID,
+	)
+	return err
+}
+
+func (r *PostgresRepository) FindTransactionByAnchorTransferID(ctx context.Context, anchorTransferID string) (*domain.Transaction, error) {
+	query := `
+		SELECT id, anchor_transfer_id, sender_id, recipient_id, source_account_id,
+		       destination_account_id, destination_beneficiary_id, type, category, status,
+		       amount, fee, description, transfer_type, failure_reason, anchor_session_id,
+		       anchor_reason, created_at, updated_at
+		FROM transactions
+		WHERE anchor_transfer_id = $1
+	`
+	var tx domain.Transaction
+	err := r.db.QueryRow(ctx, query, anchorTransferID).Scan(
+		&tx.ID,
+		&tx.AnchorTransferID,
+		&tx.SenderID,
+		&tx.RecipientID,
+		&tx.SourceAccountID,
+		&tx.DestinationAccountID,
+		&tx.DestinationBeneficiaryID,
+		&tx.Type,
+		&tx.Category,
+		&tx.Status,
+		&tx.Amount,
+		&tx.Fee,
+		&tx.Description,
+		&tx.TransferType,
+		&tx.FailureReason,
+		&tx.AnchorSessionID,
+		&tx.AnchorReason,
+		&tx.CreatedAt,
+		&tx.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrTransactionNotFound
+		}
+		return nil, err
+	}
+	return &tx, nil
+}
+
+func (r *PostgresRepository) FindTransactionByID(ctx context.Context, transactionID uuid.UUID) (*domain.Transaction, error) {
+    query := `
+        SELECT id, anchor_transfer_id, sender_id, recipient_id, source_account_id,
+               destination_account_id, destination_beneficiary_id, type, category, status,
+               amount, fee, description, transfer_type, failure_reason, anchor_session_id,
+               anchor_reason, created_at, updated_at
+        FROM transactions
+        WHERE id = $1
+    `
+    var tx domain.Transaction
+    err := r.db.QueryRow(ctx, query, transactionID).Scan(
+        &tx.ID,
+        &tx.AnchorTransferID,
+        &tx.SenderID,
+        &tx.RecipientID,
+        &tx.SourceAccountID,
+        &tx.DestinationAccountID,
+        &tx.DestinationBeneficiaryID,
+        &tx.Type,
+        &tx.Category,
+        &tx.Status,
+        &tx.Amount,
+        &tx.Fee,
+        &tx.Description,
+        &tx.TransferType,
+        &tx.FailureReason,
+        &tx.AnchorSessionID,
+        &tx.AnchorReason,
+        &tx.CreatedAt,
+        &tx.UpdatedAt,
+    )
+    if err != nil {
+        if err == pgx.ErrNoRows {
+            return nil, ErrTransactionNotFound
+        }
+        return nil, err
+    }
+    return &tx, nil
+}
+
+
+func (r *PostgresRepository) RefundTransactionFee(ctx context.Context, transactionID uuid.UUID, userID uuid.UUID, fee int64) error {
+	if fee <= 0 {
+		return nil
+	}
+	_, err := r.db.Exec(ctx, "UPDATE accounts SET balance = balance + $1 WHERE user_id = $2 AND account_type = 'primary'", fee, userID)
+	return err
+}
+
+func (r *PostgresRepository) MarkTransactionAsFailed(ctx context.Context, transactionID uuid.UUID, anchorTransferID, failureReason string) error {
+	query := `UPDATE transactions SET status = 'failed', anchor_transfer_id = COALESCE($2, anchor_transfer_id), failure_reason = COALESCE($3, failure_reason), updated_at = NOW() WHERE id = $1`
+	_, err := r.db.Exec(ctx, query, transactionID, anchorTransferID, failureReason)
+	return err
+}
+
+func (r *PostgresRepository) MarkTransactionAsCompleted(ctx context.Context, transactionID uuid.UUID, anchorTransferID string) error {
+	query := `UPDATE transactions SET status = 'completed', anchor_transfer_id = COALESCE($2, anchor_transfer_id), updated_at = NOW() WHERE id = $1`
+	_, err := r.db.Exec(ctx, query, transactionID, anchorTransferID)
 	return err
 }
 

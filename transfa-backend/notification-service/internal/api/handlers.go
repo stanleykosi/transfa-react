@@ -20,6 +20,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -30,6 +31,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -140,51 +142,16 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 5. Process the event based on its type.
 	ctx := r.Context()
 
-	eventRouting := map[string]string{
-		"customer.identification.approved":     "customer.verified",
-		"customer.identification.rejected":     "customer.tier.status",
-		"customer.identification.manualReview": "customer.tier.status",
-		"customer.identification.error":        "customer.tier.status",
-		"customer.created":                     "customer.lifecycle",
-		"account.initiated":                    "account.lifecycle",
-		"account.opened":                       "account.lifecycle",
-	}
-
-	routingKey, known := eventRouting[event.Event]
-	if !known {
+	if handler, ok := h.routeEvent(ctx, event, anchorCustomerID); ok {
+		if err := handler(); err != nil {
+			log.Printf("[%s] Failed to process event %s: %v", requestID, event.Event, err)
+			http.Error(w, "Internal server error during event processing", http.StatusInternalServerError)
+			return
+		}
+	} else {
 		log.Printf("[%s] Unhandled webhook event type: %s", requestID, event.Event)
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Webhook received"))
-		return
 	}
 
-	var message any
-	switch event.Event {
-	case "customer.identification.approved":
-		message = domain.CustomerVerifiedEvent{AnchorCustomerID: anchorCustomerID}
-	case "customer.identification.rejected":
-		reason := extractReason(event.Data.Attributes)
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_rejected", Reason: nullableString(reason)}
-	case "customer.identification.manualReview":
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_manual_review"}
-	case "customer.identification.error":
-		reason := extractReason(event.Data.Attributes)
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_error", Reason: nullableString(reason)}
-	case "customer.created":
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_customer_created"}
-	case "account.initiated":
-		message = domain.AccountLifecycleEvent{AnchorCustomerID: anchorCustomerID, EventType: "account_initiated", ResourceID: event.Data.ID}
-	case "account.opened":
-		message = domain.AccountLifecycleEvent{AnchorCustomerID: anchorCustomerID, EventType: "account_opened", ResourceID: event.Data.ID}
-	}
-
-	if err := h.producer.Publish(ctx, "customer_events", routingKey, message); err != nil {
-		log.Printf("[%s] Failed to publish %s: %v", requestID, routingKey, err)
-		http.Error(w, "Internal server error during event processing", http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("[%s] Published message to exchange 'customer_events' with routing key '%s'", requestID, routingKey)
 	log.Printf("[%s] Webhook processed successfully in %v", requestID, time.Since(startTime))
 	
 	w.WriteHeader(http.StatusOK)
@@ -430,4 +397,229 @@ func (h *WebhookHandler) isDuplicateEvent(eventID, eventType string) bool {
 	// Mark this event as processed
 	h.processedEvents[eventKey] = time.Now()
 	return false
+}
+
+func (h *WebhookHandler) routeEvent(ctx context.Context, event domain.AnchorWebhookEvent, anchorCustomerID string) (func() error, bool) {
+	if routingKey, message, ok := h.buildCustomerEvent(event, anchorCustomerID); ok {
+		return func() error {
+			if message == nil {
+				return nil
+			}
+			return h.producer.Publish(ctx, "customer_events", routingKey, message)
+		}, true
+	}
+
+	if payload, ok := h.buildTransferEvent(event, anchorCustomerID); ok {
+		routingKey := fmt.Sprintf("transfer.status.%s.%s", safeSegment(payload.TransferType, "unknown"), safeSegment(payload.Status, "unknown"))
+		return func() error {
+			return h.producer.Publish(ctx, "transfa.events", routingKey, payload)
+		}, true
+	}
+
+	return nil, false
+}
+
+func (h *WebhookHandler) buildCustomerEvent(event domain.AnchorWebhookEvent, anchorCustomerID string) (string, any, bool) {
+	eventRouting := map[string]string{
+		"customer.identification.approved":     "customer.verified",
+		"customer.identification.rejected":     "customer.tier.status",
+		"customer.identification.manualReview": "customer.tier.status",
+		"customer.identification.error":        "customer.tier.status",
+		"customer.created":                     "customer.lifecycle",
+		"account.initiated":                    "account.lifecycle",
+		"account.opened":                       "account.lifecycle",
+	}
+
+	routingKey, ok := eventRouting[event.Event]
+	if !ok {
+		return "", nil, false
+	}
+
+	var message any
+	switch event.Event {
+	case "customer.identification.approved":
+		message = domain.CustomerVerifiedEvent{AnchorCustomerID: anchorCustomerID}
+	case "customer.identification.rejected":
+		reason := extractReason(event.Data.Attributes)
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_rejected", Reason: nullableString(reason)}
+	case "customer.identification.manualReview":
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_manual_review"}
+	case "customer.identification.error":
+		reason := extractReason(event.Data.Attributes)
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_error", Reason: nullableString(reason)}
+	case "customer.created":
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_customer_created"}
+	case "account.initiated":
+		message = domain.AccountLifecycleEvent{AnchorCustomerID: anchorCustomerID, EventType: "account_initiated", ResourceID: event.Data.ID}
+	case "account.opened":
+		message = domain.AccountLifecycleEvent{AnchorCustomerID: anchorCustomerID, EventType: "account_opened", ResourceID: event.Data.ID}
+	default:
+		return "", nil, false
+	}
+
+	return routingKey, message, true
+}
+
+func (h *WebhookHandler) buildTransferEvent(event domain.AnchorWebhookEvent, anchorCustomerID string) (domain.TransferStatusEvent, bool) {
+	if !(strings.HasPrefix(event.Event, "nip.transfer") || strings.HasPrefix(event.Event, "book.transfer") || strings.HasPrefix(event.Event, "transaction.")) {
+		return domain.TransferStatusEvent{}, false
+	}
+
+	payload := domain.TransferStatusEvent{
+		EventID:          event.Data.ID,
+		EventType:        event.Event,
+		AnchorCustomerID: anchorCustomerID,
+		OccurredAt:       event.CreatedAt,
+	}
+
+	if rel, ok := event.Data.Relationships["transfer"]; ok {
+		var transferRef domain.RelationshipData
+		if err := json.Unmarshal(rel.Data, &transferRef); err == nil && transferRef.ID != "" {
+			payload.AnchorTransferID = transferRef.ID
+		}
+	}
+
+	if rel, ok := event.Data.Relationships["account"]; ok {
+		var accountRef domain.RelationshipData
+		if err := json.Unmarshal(rel.Data, &accountRef); err == nil && accountRef.ID != "" {
+			payload.AnchorAccountID = accountRef.ID
+		}
+	}
+
+	if rel, ok := event.Data.Relationships["customer"]; ok && payload.AnchorCustomerID == "" {
+		var customerRef domain.RelationshipData
+		if err := json.Unmarshal(rel.Data, &customerRef); err == nil && customerRef.ID != "" {
+			payload.AnchorCustomerID = customerRef.ID
+		}
+	}
+
+	if rel, ok := event.Data.Relationships["counterParty"]; ok {
+		var counterpartyRef domain.RelationshipData
+		if err := json.Unmarshal(rel.Data, &counterpartyRef); err == nil {
+			payload.CounterpartyID = counterpartyRef.ID
+		}
+	}
+
+	for _, included := range event.Included {
+		typeLower := strings.ToLower(included.Type)
+		switch typeLower {
+		case "nip_transfer", "book_transfer":
+			payload.TransferType = transferTypeFromIncluded(included.Type, payload.TransferType)
+			if status, ok := stringFromMap(included.Attributes, "status"); ok {
+				payload.Status = strings.ToLower(status)
+			}
+			if reason, ok := stringFromMap(included.Attributes, "reason"); ok {
+				payload.Reason = decodeReason(reason)
+			}
+			if amount, ok := int64FromMap(included.Attributes, "amount"); ok {
+				payload.Amount = amount
+			}
+			if currency, ok := stringFromMap(included.Attributes, "currency"); ok {
+				payload.Currency = currency
+			}
+			if sessionID, ok := stringFromMap(included.Attributes, "sessionId"); ok {
+				payload.SessionID = sessionID
+			}
+		case "niptransferhistory", "booktransferhistory", "nip_transfer_history", "book_transfer_history":
+			if status, ok := stringFromMap(included.Attributes, "status"); ok {
+				payload.Status = strings.ToLower(status)
+			}
+			if message, ok := stringFromMap(included.Attributes, "message"); ok {
+				payload.Reason = decodeReason(message)
+			}
+		}
+	}
+
+	if payload.TransferType == "" {
+		if strings.HasPrefix(event.Event, "nip.") {
+			payload.TransferType = "nip"
+		} else if strings.HasPrefix(event.Event, "book.") {
+			payload.TransferType = "book"
+		}
+	}
+
+	if payload.Status == "" {
+		parts := strings.Split(event.Event, ".")
+		payload.Status = parts[len(parts)-1]
+	}
+
+	if payload.Reason == "" {
+		if reason, ok := stringFromMap(event.Data.Attributes, "message"); ok {
+			payload.Reason = decodeReason(reason)
+		} else if reason, ok := stringFromMap(event.Data.Attributes, "detail"); ok {
+			payload.Reason = decodeReason(reason)
+		}
+	}
+
+	return payload, true
+}
+
+func transferTypeFromIncluded(rawType, current string) string {
+	if current != "" {
+		return current
+	}
+	switch strings.ToLower(rawType) {
+	case "nip_transfer":
+		return "nip"
+	case "book_transfer":
+		return "book"
+	default:
+		return current
+	}
+}
+
+func stringFromMap(attrs map[string]interface{}, key string) (string, bool) {
+	if attrs == nil {
+		return "", false
+	}
+	if value, ok := attrs[key]; ok {
+		switch v := value.(type) {
+		case string:
+			return v, true
+		case fmt.Stringer:
+			return v.String(), true
+		}
+	}
+	return "", false
+}
+
+func int64FromMap(attrs map[string]interface{}, key string) (int64, bool) {
+	if attrs == nil {
+		return 0, false
+	}
+	value, ok := attrs[key]
+	if !ok {
+		return 0, false
+	}
+	switch v := value.(type) {
+	case float64:
+		return int64(v), true
+	case float32:
+		return int64(v), true
+	case int64:
+		return v, true
+	case int:
+		return int64(v), true
+	case json.Number:
+		parsed, err := v.Int64()
+		if err == nil {
+			return parsed, true
+		}
+	}
+	return 0, false
+}
+
+func decodeReason(input string) string {
+	if decoded, err := url.QueryUnescape(input); err == nil {
+		return decoded
+	}
+	return input
+}
+
+func safeSegment(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
 }
