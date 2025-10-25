@@ -15,21 +15,19 @@ const mapSupabaseRecordToStatus = (record: any): TransactionStatusResponse => ({
 });
 
 export const useTransactionStatus = (transactionId: string, enablePolling = true) =>
-  useQuery<TransactionStatusResponse | null, Error>(
-    ['transaction-status', transactionId],
-    async () => {
+  useQuery<TransactionStatusResponse | null, Error>({
+    queryKey: ['transaction-status', transactionId],
+    queryFn: async () => {
       if (!transactionId) {
         return null;
       }
       const { data } = await fetchTransactionStatus(transactionId);
       return data;
     },
-    {
-      enabled: Boolean(transactionId),
-      refetchInterval: enablePolling ? 5000 : false,
-      refetchOnWindowFocus: enablePolling,
-    }
-  );
+    enabled: Boolean(transactionId),
+    refetchInterval: enablePolling ? 5000 : false,
+    refetchOnWindowFocus: enablePolling,
+  });
 
 export const useTransactionStatusSubscription = (transactionId?: string) => {
   const queryClient = useQueryClient();

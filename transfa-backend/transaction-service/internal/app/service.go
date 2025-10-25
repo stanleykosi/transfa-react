@@ -152,7 +152,7 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		RecipientID:     &recipient.ID,
 		SourceAccountID: senderAccount.ID,
 		Type:            "p2p",
-		Status:          "pending",
+		Status:          "processing",
 		Amount:          req.Amount,
 		Fee:             s.transactionFeeKobo,
 		Description:     req.Description,
@@ -399,7 +399,7 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 		SourceAccountID:          senderAccount.ID,
 		DestinationBeneficiaryID: &beneficiary.ID,
 		Type:                     "self_transfer",
-		Status:                   "pending",
+		Status:                   "processing",
 		Amount:                   req.Amount,
 		Fee:                      s.transactionFeeKobo,
 		Description:              req.Description,
@@ -445,7 +445,7 @@ if anchorResp != nil {
 	s.repo.UpdateTransactionStatusAndFee(ctx, txRecord.ID, transferID, "processing", txRecord.Fee)
 }
 
-txRecord.Status = "processing"
+	txRecord.Status = "processing"
 
 	return txRecord, nil
 }

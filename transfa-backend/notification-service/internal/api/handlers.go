@@ -88,6 +88,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Cannot read request body", http.StatusBadRequest)
 		return
 	}
+	log.Printf("[%s] Raw webhook body: %s", requestID, string(body))
 	// Restore the body for subsequent reads.
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
 
@@ -102,8 +103,16 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var event domain.AnchorWebhookEvent
 	if err := json.Unmarshal(body, &event); err != nil {
 		log.Printf("[%s] Error decoding webhook JSON: %v", requestID, err)
-		http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
-		return
+		var fallback map[string]any
+		if err := json.Unmarshal(body, &fallback); err == nil {
+			if evt, ok := fallback["event"].(string); ok {
+				event.Event = evt
+			}
+		}
+		if event.Event == "" {
+			http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
+			return
+		}
 	}
 	if event.Event == "" {
 		var raw map[string]interface{}

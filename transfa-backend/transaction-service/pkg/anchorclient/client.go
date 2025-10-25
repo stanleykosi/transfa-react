@@ -14,6 +14,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"time"
 )
@@ -178,16 +180,24 @@ func (c *Client) doTransfer(ctx context.Context, payload interface{}) (*Transfer
 	}
 	defer resp.Body.Close()
 
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read transfer response: %w", err)
+	}
+
+	log.Printf("Anchor transfer response status: %d body: %s", resp.StatusCode, string(bodyBytes))
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var errResp ErrorResponse
-		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		if err := json.Unmarshal(bodyBytes, &errResp); err != nil {
+			log.Printf("Anchor transfer error body: %s", string(bodyBytes))
 			return nil, fmt.Errorf("failed to decode error response (status %d)", resp.StatusCode)
 		}
 		return nil, &errResp
 	}
 
 	var successResp TransferResponse
-	if err := json.NewDecoder(resp.Body).Decode(&successResp); err != nil {
+	if err := json.Unmarshal(bodyBytes, &successResp); err != nil {
 		return nil, fmt.Errorf("failed to decode success response: %w", err)
 	}
 
