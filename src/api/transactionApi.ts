@@ -404,4 +404,6 @@ export const useUserProfile = () => {
 };
 
 export const fetchTransactionStatus = (transactionId: string) =>
-  apiClient.get<TransactionStatusResponse>(`/transactions/${transactionId}`);
+  apiClient.get<TransactionStatusResponse>(`/transactions/transactions/${transactionId}`, {
+    baseURL: TRANSACTION_SERVICE_URL,
+  });

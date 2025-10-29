@@ -56,7 +56,7 @@ export const useTransactionStatusSubscription = (transactionId?: string) => {
           queryClient.setQueryData<TransactionStatusResponse | null>(
             ['transaction-status', transactionId],
             (prev) => ({
-              ...(prev ?? null),
+              ...(prev ?? {}),
               ...mapped,
             })
           );
