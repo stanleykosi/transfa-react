@@ -152,7 +152,7 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		RecipientID:     &recipient.ID,
 		SourceAccountID: senderAccount.ID,
 		Type:            "p2p",
-		Status:          "processing",
+		Status:          "pending",
 		Amount:          req.Amount,
 		Fee:             s.transactionFeeKobo,
 		Description:     req.Description,
@@ -276,7 +276,18 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
         if txRecord.TransferType == "" {
             txRecord.TransferType = "nip"
         }
-        s.repo.UpdateTransactionStatusAndFee(ctx, txRecord.ID, transferID, "processing", txRecord.Fee)
+
+		metadata := store.UpdateTransactionMetadataParams{
+			AnchorTransferID: &transferID,
+		}
+		if txRecord.TransferType != "" {
+			typeCopy := txRecord.TransferType
+			metadata.TransferType = &typeCopy
+		}
+
+		if err := s.repo.UpdateTransactionMetadata(ctx, txRecord.ID, metadata); err != nil {
+			log.Printf("WARN: failed to persist transfer metadata for %s: %v", txRecord.ID, err)
+		}
     }
 
 	txRecord.Status = "processing"
@@ -399,7 +410,7 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 		SourceAccountID:          senderAccount.ID,
 		DestinationBeneficiaryID: &beneficiary.ID,
 		Type:                     "self_transfer",
-		Status:                   "processing",
+		Status:                   "pending",
 		Amount:                   req.Amount,
 		Fee:                      s.transactionFeeKobo,
 		Description:              req.Description,
@@ -442,7 +453,16 @@ if anchorResp != nil {
 	transferID := anchorResp.Data.ID
 	txRecord.AnchorTransferID = &transferID
 	txRecord.TransferType = "nip"
-	s.repo.UpdateTransactionStatusAndFee(ctx, txRecord.ID, transferID, "processing", txRecord.Fee)
+
+	metadata := store.UpdateTransactionMetadataParams{
+		AnchorTransferID: &transferID,
+	}
+	typeCopy := txRecord.TransferType
+	metadata.TransferType = &typeCopy
+
+	if err := s.repo.UpdateTransactionMetadata(ctx, txRecord.ID, metadata); err != nil {
+		log.Printf("WARN: failed to persist transfer metadata for %s: %v", txRecord.ID, err)
+	}
 }
 
 	txRecord.Status = "processing"
