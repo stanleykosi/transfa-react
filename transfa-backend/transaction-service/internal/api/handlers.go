@@ -31,6 +31,39 @@ type TransactionHandlers struct {
 	service *app.Service
 }
 
+// transferInitiationResponse is sent back to the mobile client immediately after a transfer
+// request has been accepted by the transaction-service. It mirrors the structure expected
+// by the React Native app (`TransactionResponse` in src/types/api.ts) so that the frontend
+// can reliably read the transaction identifier and other metadata without additional
+// transformation.
+type transferInitiationResponse struct {
+	TransactionID    string  `json:"transaction_id"`
+	Status           string  `json:"status"`
+	Message          string  `json:"message"`
+	Amount           int64   `json:"amount,omitempty"`
+	Fee              int64   `json:"fee,omitempty"`
+	AnchorTransferID *string `json:"anchor_transfer_id,omitempty"`
+	TransferType     string  `json:"transfer_type,omitempty"`
+	FailureReason    *string `json:"failure_reason,omitempty"`
+	AnchorSessionID  *string `json:"anchor_session_id,omitempty"`
+	AnchorReason     *string `json:"anchor_reason,omitempty"`
+}
+
+func buildTransferInitiationResponse(tx *domain.Transaction, message string) transferInitiationResponse {
+	return transferInitiationResponse{
+		TransactionID:    tx.ID.String(),
+		Status:           tx.Status,
+		Message:          message,
+		Amount:           tx.Amount,
+		Fee:              tx.Fee,
+		AnchorTransferID: tx.AnchorTransferID,
+		TransferType:     tx.TransferType,
+		FailureReason:    tx.FailureReason,
+		AnchorSessionID:  tx.AnchorSessionID,
+		AnchorReason:     tx.AnchorReason,
+	}
+}
+
 // NewTransactionHandlers creates a new instance of TransactionHandlers.
 func NewTransactionHandlers(service *app.Service) *TransactionHandlers {
 	return &TransactionHandlers{service: service}
@@ -87,10 +120,8 @@ func (h *TransactionHandlers) P2PTransferHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Respond with the created transaction.
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(tx)
+	response := buildTransferInitiationResponse(tx, "Transfer initiated")
+	h.writeJSON(w, http.StatusCreated, response)
 }
 
 // SelfTransferHandler handles requests for self-transfers (withdrawals).
@@ -142,10 +173,8 @@ func (h *TransactionHandlers) SelfTransferHandler(w http.ResponseWriter, r *http
 		return
 	}
 
-	// Respond with the created transaction.
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(tx)
+	response := buildTransferInitiationResponse(tx, "Transfer initiated")
+	h.writeJSON(w, http.StatusCreated, response)
 }
 
 // ListBeneficiariesHandler handles requests to list user's beneficiaries.
