@@ -419,7 +419,9 @@ func (h *WebhookHandler) routeEvent(ctx context.Context, event domain.AnchorWebh
 	}
 
 	if payload, ok := h.buildTransferEvent(event, anchorCustomerID); ok {
-		routingKey := fmt.Sprintf("transfer.status.%s.%s", safeSegment(payload.TransferType, "unknown"), safeSegment(payload.Status, "unknown"))
+		normalizedStatus := normalizeTransferStatus(payload.Status)
+		routingKey := fmt.Sprintf("transfer.status.%s.%s", safeSegment(payload.TransferType, "unknown"), safeSegment(normalizedStatus, "unknown"))
+		payload.Status = normalizedStatus
 		return func() error {
 			return h.producer.Publish(ctx, "transfa.events", routingKey, payload)
 		}, true
@@ -631,4 +633,18 @@ func safeSegment(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func normalizeTransferStatus(status string) string {
+	s := strings.TrimSpace(strings.ToLower(status))
+	switch s {
+	case "completed", "success", "successful":
+		return "successful"
+	case "fail", "failed", "failure":
+		return "failed"
+	case "initiated", "pending", "processing", "in_progress":
+		return "processing"
+	default:
+		return s
+	}
 }
