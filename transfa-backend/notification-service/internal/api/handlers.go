@@ -77,9 +77,9 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if requestID == "" {
 		requestID = fmt.Sprintf("req_%d", time.Now().UnixNano())
 	}
-	
+
 	log.Printf("[%s] Webhook request started from %s", requestID, r.RemoteAddr)
-	
+
 	// 1. Read the request body. We need to read it once for signature validation
 	// and then again for decoding, so we buffer it.
 	body, err := io.ReadAll(r.Body)
@@ -162,7 +162,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[%s] Webhook processed successfully in %v", requestID, time.Since(startTime))
-	
+
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Webhook received"))
 }
@@ -208,174 +208,32 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
 		return true
 	}
 
-
 	header := strings.TrimSpace(signatureHeader)
 	if header == "" {
 		log.Println("Missing x-anchor-signature header")
 		return false
 	}
 
-	// Calculate expected signatures
-	sha1Mac := hmac.New(sha1.New, []byte(h.secret))
-	sha1Mac.Write(body)
-	sha1Expected := sha1Mac.Sum(nil)
-	sha1Base64 := base64.StdEncoding.EncodeToString(sha1Expected)
-
-	sha256Mac := hmac.New(sha256.New, []byte(h.secret))
-	sha256Mac.Write(body)
-	sha256Expected := sha256Mac.Sum(nil)
-	sha256Base64 := base64.StdEncoding.EncodeToString(sha256Expected)
-	sha256Hex := hex.EncodeToString(sha256Expected)
-
-	// Try different secret variations in case of encoding issues
-	secretVariations := []string{
-		h.secret,
-		strings.TrimSpace(h.secret),
-		strings.Trim(h.secret, "\"'"),
-	}
-	
-	// If secret looks like it might be base64 encoded, try decoding it
-	if decoded, err := base64.StdEncoding.DecodeString(h.secret); err == nil {
-		secretVariations = append(secretVariations, string(decoded))
-	}
-
-	log.Printf("Debug signature check: provided=%s | expected sha1=%s | expected sha256=%s", header, sha1Base64, sha256Hex)
-
-	// 1. Try direct string comparison first (most common cases)
-	if header == sha1Base64 {
-		log.Println("Signature matched sha1 base64 (primary)")
-		return true
-	}
-	if header == sha256Hex {
-		log.Println("Signature matched sha256 hex (primary)")
-		return true
-	}
-	if header == sha256Base64 {
-		log.Println("Signature matched sha256 base64 (primary)")
-		return true
-	}
-
-	// 1.5. Try with different secret variations
-	for i, secret := range secretVariations {
-		if secret == h.secret {
-			continue // Already tried above
+	secretCandidates := buildSecretCandidates(h.secret)
+	var baseline expectedSignatures
+	for idx, secret := range secretCandidates {
+		expected := buildExpectedSignatures(secret, body)
+		if idx == 0 {
+			baseline = expected
+			log.Printf("Debug signature check: provided=%s | expected sha1=%s | expected sha256=%s", header, expected.sha1.base64, expected.sha256.hexLower)
 		}
-		
-		// Calculate signatures with this secret variation
-		sha1MacVar := hmac.New(sha1.New, []byte(secret))
-		sha1MacVar.Write(body)
-		sha1ExpectedVar := sha1MacVar.Sum(nil)
-		sha1Base64Var := base64.StdEncoding.EncodeToString(sha1ExpectedVar)
 
-		sha256MacVar := hmac.New(sha256.New, []byte(secret))
-		sha256MacVar.Write(body)
-		sha256ExpectedVar := sha256MacVar.Sum(nil)
-		sha256Base64Var := base64.StdEncoding.EncodeToString(sha256ExpectedVar)
-		sha256HexVar := hex.EncodeToString(sha256ExpectedVar)
-
-		if header == sha1Base64Var {
-			log.Printf("Signature matched sha1 base64 with secret variation %d", i)
-			return true
-		}
-		if header == sha256HexVar {
-			log.Printf("Signature matched sha256 hex with secret variation %d", i)
-			return true
-		}
-		if header == sha256Base64Var {
-			log.Printf("Signature matched sha256 base64 with secret variation %d", i)
-			return true
-		}
-	}
-
-	// 2. Try base64 decoding and byte comparison
-	if decoded, err := base64.StdEncoding.DecodeString(header); err == nil {
-		if hmac.Equal(decoded, sha1Expected) {
-			log.Println("Signature matched decoded sha1 bytes")
-			return true
-		}
-		if hmac.Equal(decoded, sha256Expected) {
-			log.Println("Signature matched decoded sha256 bytes")
-			return true
-		}
-	}
-
-	// 3. Try hex decoding
-	if decoded, err := hex.DecodeString(header); err == nil {
-		if hmac.Equal(decoded, sha1Expected) {
-			log.Println("Signature matched hex decoded sha1")
-			return true
-		}
-		if hmac.Equal(decoded, sha256Expected) {
-			log.Println("Signature matched hex decoded sha256")
-			return true
-		}
-	}
-
-	// 4. Handle comma-separated signatures (multiple signatures in header)
-	parts := strings.Split(header, ",")
-	for _, part := range parts {
-		sig := strings.TrimSpace(part)
-		lower := strings.ToLower(sig)
-
-		// Handle prefixed signatures
-		if strings.HasPrefix(lower, "sha256=") {
-			providedHex := strings.TrimSpace(sig[7:])
-			if providedBytes, err := hex.DecodeString(providedHex); err == nil {
-				if hmac.Equal(providedBytes, sha256Expected) {
-					log.Println("Signature matched sha256 prefix")
-					return true
-				}
+		if signatureMatches(header, expected) {
+			if idx > 0 {
+				log.Printf("Signature matched using secret variation index %d", idx)
+			} else {
+				log.Println("Signature matched")
 			}
-			continue
-		}
-
-		if strings.HasPrefix(lower, "sha1=") {
-			candidate := strings.TrimSpace(sig[5:])
-			if strings.EqualFold(candidate, sha1Base64) {
-				log.Println("Signature matched sha1 prefix")
-				return true
-			}
-			if decoded, err := base64.StdEncoding.DecodeString(candidate); err == nil {
-				if hmac.Equal(decoded, sha1Expected) {
-					log.Println("Signature matched sha1 prefix (decoded b64)")
-					return true
-				}
-			}
-			continue
-		}
-
-		// Try direct comparison for each part
-		if strings.EqualFold(sig, sha1Base64) {
-			log.Println("Signature matched sha1 base64 in parts")
-			return true
-		}
-		if strings.EqualFold(sig, sha256Hex) {
-			log.Println("Signature matched sha256 hex in parts")
-			return true
-		}
-		if strings.EqualFold(sig, sha256Base64) {
-			log.Println("Signature matched sha256 base64 in parts")
 			return true
 		}
 	}
 
-	// 5. Legacy support for base64-encoded hex strings
-	if decoded, err := base64.StdEncoding.DecodeString(header); err == nil {
-		if len(decoded) == len(sha1Expected)*2 {
-			if hexCandidate, err := hex.DecodeString(string(decoded)); err == nil && hmac.Equal(hexCandidate, sha1Expected) {
-				log.Println("Signature matched base64-encoded sha1 hex")
-				return true
-			}
-		}
-		if len(decoded) == len(sha256Expected)*2 {
-			if hexCandidate, err := hex.DecodeString(string(decoded)); err == nil && hmac.Equal(hexCandidate, sha256Expected) {
-				log.Println("Signature matched base64-encoded sha256 hex")
-				return true
-			}
-		}
-	}
-
-	log.Printf("Signature mismatch. Provided header: %s | Expected sha1=%s or sha256=%s", header, sha1Base64, sha256Hex)
+	log.Printf("Signature mismatch. Provided header: %s | Expected sha1=%s or sha256=%s", header, baseline.sha1.base64, baseline.sha256.hexLower)
 	return false
 }
 
@@ -384,7 +242,7 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
 func (h *WebhookHandler) isDuplicateEvent(eventID, eventType string) bool {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
-	
+
 	// Clean up old entries (older than 1 hour) to prevent memory leaks
 	cutoff := time.Now().Add(-1 * time.Hour)
 	for id, timestamp := range h.processedEvents {
@@ -392,17 +250,17 @@ func (h *WebhookHandler) isDuplicateEvent(eventID, eventType string) bool {
 			delete(h.processedEvents, id)
 		}
 	}
-	
+
 	// Create a unique key for this event
 	eventKey := fmt.Sprintf("%s:%s", eventID, eventType)
-	
+
 	// Check if we've seen this event recently (within 5 minutes)
 	if timestamp, exists := h.processedEvents[eventKey]; exists {
 		if time.Since(timestamp) < 5*time.Minute {
 			return true
 		}
 	}
-	
+
 	// Mark this event as processed
 	h.processedEvents[eventKey] = time.Now()
 	return false
@@ -647,4 +505,207 @@ func normalizeTransferStatus(status string) string {
 	default:
 		return s
 	}
+}
+
+type expectedSignatures struct {
+	sha1   signatureExpectations
+	sha256 signatureExpectations
+}
+
+type signatureExpectations struct {
+	rawBytes []byte
+	variants map[string]struct{}
+	base64   string
+	hexLower string
+	hexUpper string
+}
+
+func buildSecretCandidates(secret string) []string {
+	seen := make(map[string]struct{})
+	result := make([]string, 0, 4)
+	add := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+
+	add(secret)
+	add(strings.Trim(secret, "\"'"))
+
+	if decoded, err := base64.StdEncoding.DecodeString(secret); err == nil {
+		add(string(decoded))
+	}
+
+	return result
+}
+
+func buildExpectedSignatures(secret string, body []byte) expectedSignatures {
+	sha1Mac := hmac.New(sha1.New, []byte(secret))
+	sha1Mac.Write(body)
+	sha1Raw := sha1Mac.Sum(nil)
+
+	sha256Mac := hmac.New(sha256.New, []byte(secret))
+	sha256Mac.Write(body)
+	sha256Raw := sha256Mac.Sum(nil)
+
+	return expectedSignatures{
+		sha1:   newSignatureExpectations(sha1Raw),
+		sha256: newSignatureExpectations(sha256Raw),
+	}
+}
+
+func newSignatureExpectations(raw []byte) signatureExpectations {
+	hexLower := hex.EncodeToString(raw)
+	hexUpper := strings.ToUpper(hexLower)
+	base64Std := base64.StdEncoding.EncodeToString(raw)
+	base64Raw := base64.RawStdEncoding.EncodeToString(raw)
+	base64URL := base64.URLEncoding.EncodeToString(raw)
+	base64URLRaw := base64.RawURLEncoding.EncodeToString(raw)
+	base64HexLower := base64.StdEncoding.EncodeToString([]byte(hexLower))
+	base64HexUpper := base64.StdEncoding.EncodeToString([]byte(hexUpper))
+
+	variants := map[string]struct{}{
+		strings.ToLower(hexLower):       {},
+		strings.ToLower(hexUpper):       {},
+		strings.ToLower(base64Std):      {},
+		strings.ToLower(base64Raw):      {},
+		strings.ToLower(base64URL):      {},
+		strings.ToLower(base64URLRaw):   {},
+		strings.ToLower(base64HexLower): {},
+		strings.ToLower(base64HexUpper): {},
+	}
+
+	return signatureExpectations{
+		rawBytes: raw,
+		variants: variants,
+		base64:   base64Std,
+		hexLower: hexLower,
+		hexUpper: hexUpper,
+	}
+}
+
+func signatureMatches(header string, expected expectedSignatures) bool {
+	parts := strings.Split(header, ",")
+	for _, part := range parts {
+		candidate := strings.TrimSpace(part)
+		if candidate == "" {
+			continue
+		}
+
+		lower := strings.ToLower(candidate)
+		algo := ""
+		switch {
+		case strings.HasPrefix(lower, "sha256="):
+			candidate = strings.TrimSpace(candidate[7:])
+			algo = "sha256"
+		case strings.HasPrefix(lower, "sha1="):
+			candidate = strings.TrimSpace(candidate[5:])
+			algo = "sha1"
+		}
+
+		switch algo {
+		case "sha256":
+			if expected.sha256.matches(candidate) {
+				return true
+			}
+		case "sha1":
+			if expected.sha1.matches(candidate) {
+				return true
+			}
+		default:
+			if expected.sha256.matches(candidate) || expected.sha1.matches(candidate) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (s signatureExpectations) matches(candidate string) bool {
+	normalized := strings.TrimSpace(candidate)
+	if normalized == "" {
+		return false
+	}
+
+	lower := strings.ToLower(normalized)
+	if _, ok := s.variants[lower]; ok {
+		return true
+	}
+
+	if isHexString(normalized) {
+		if decoded, err := hex.DecodeString(normalized); err == nil {
+			if hmac.Equal(decoded, s.rawBytes) {
+				return true
+			}
+		}
+	}
+
+	for _, decoded := range decodeBase64Variants(normalized) {
+		if len(decoded) == 0 {
+			continue
+		}
+		if hmac.Equal(decoded, s.rawBytes) {
+			return true
+		}
+		decodedStr := strings.TrimSpace(string(decoded))
+		if decodedStr == "" {
+			continue
+		}
+		if _, ok := s.variants[strings.ToLower(decodedStr)]; ok {
+			return true
+		}
+		if isHexString(decodedStr) {
+			if bytes, err := hex.DecodeString(decodedStr); err == nil && hmac.Equal(bytes, s.rawBytes) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func decodeBase64Variants(value string) [][]byte {
+	encodings := []*base64.Encoding{
+		base64.StdEncoding,
+		base64.RawStdEncoding,
+		base64.URLEncoding,
+		base64.RawURLEncoding,
+	}
+
+	results := make([][]byte, 0, len(encodings))
+	seen := make(map[string]struct{})
+	for _, enc := range encodings {
+		decoded, err := enc.DecodeString(value)
+		if err != nil {
+			continue
+		}
+		key := string(decoded)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		results = append(results, decoded)
+	}
+
+	return results
+}
+
+func isHexString(input string) bool {
+	if len(input)%2 != 0 || len(input) == 0 {
+		return false
+	}
+	for _, r := range input {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F') {
+			continue
+		}
+		return false
+	}
+	return true
 }

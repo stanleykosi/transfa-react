@@ -46,8 +46,26 @@ export const useTransactionStatus = (transactionId: string, enablePolling = true
       return data;
     },
     enabled: Boolean(transactionId),
-    refetchInterval: enablePolling ? 5000 : false,
-    refetchOnWindowFocus: enablePolling,
+    refetchInterval: (query) => {
+      if (!enablePolling) {
+        return false;
+      }
+      const data = query.state.data as TransactionStatusResponse | null;
+      if (!data) {
+        return 5000;
+      }
+      return data.status === 'completed' || data.status === 'failed' ? false : 5000;
+    },
+    refetchOnWindowFocus: (query) => {
+      if (!enablePolling) {
+        return false;
+      }
+      const data = query.state.data as TransactionStatusResponse | null;
+      if (!data) {
+        return true;
+      }
+      return data.status !== 'completed' && data.status !== 'failed';
+    },
     select: (result) => {
       if (!result) {
         return result;
