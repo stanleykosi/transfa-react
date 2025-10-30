@@ -43,7 +43,7 @@ import (
 // WebhookHandler processes incoming webhooks from Anchor.
 type WebhookHandler struct {
 	producer        *rabbitmq.EventProducer
-	secret          string
+	secrets         []string
 	processedEvents map[string]time.Time
 	mutex           sync.RWMutex
 }
@@ -65,7 +65,7 @@ func extractReason(attrs map[string]interface{}) string {
 func NewWebhookHandler(producer *rabbitmq.EventProducer, secret string) *WebhookHandler {
 	return &WebhookHandler{
 		producer:        producer,
-		secret:          secret,
+		secrets:         parseWebhookSecrets(secret),
 		processedEvents: make(map[string]time.Time),
 	}
 }
@@ -93,7 +93,8 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
 
 	// 2. Validate the signature for security.
-	if !h.isValidSignature(r.Header.Get("x-anchor-signature"), body) {
+	timestamp := r.Header.Get("x-anchor-timestamp")
+	if !h.isValidSignature(r.Header.Get("x-anchor-signature"), body, timestamp) {
 		log.Printf("[%s] Error: Invalid webhook signature", requestID)
 		http.Error(w, "Invalid signature", http.StatusUnauthorized)
 		return
@@ -202,8 +203,9 @@ func extractAnchorCustomerID(event domain.AnchorWebhookEvent) string {
 
 // isValidSignature validates the HMAC signature of the webhook with improved robustness.
 // This function handles multiple signature formats that Anchor might send.
-func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) bool {
-	if h.secret == "" {
+
+func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte, timestamp string) bool {
+	if len(h.secrets) == 0 {
 		log.Println("Warning: ANCHOR_WEBHOOK_SECRET is not set. Skipping signature validation.")
 		return true
 	}
@@ -214,10 +216,25 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
 		return false
 	}
 
-	secretCandidates := buildSecretCandidates(h.secret)
+	if strings.TrimSpace(timestamp) == "" {
+		log.Println("Missing x-anchor-timestamp header")
+		return false
+	}
+
+	var signaturePayloadBuilder strings.Builder
+	signaturePayloadBuilder.Grow(len(timestamp) + 1 + len(body))
+	signaturePayloadBuilder.WriteString(timestamp)
+	signaturePayloadBuilder.WriteByte('.')
+	signaturePayloadBuilder.Write(body)
+	signaturePayload := []byte(signaturePayloadBuilder.String())
+
+	secretCandidates := make([]string, 0, len(h.secrets)*3)
+	for _, secret := range h.secrets {
+		secretCandidates = append(secretCandidates, buildSecretCandidates(secret)...)
+	}
 	var baseline expectedSignatures
 	for idx, secret := range secretCandidates {
-		expected := buildExpectedSignatures(secret, body)
+		expected := buildExpectedSignatures(secret, signaturePayload)
 		if idx == 0 {
 			baseline = expected
 			log.Printf("Debug signature check: provided=%s | expected sha1=%s | expected sha256=%s", header, expected.sha1.base64, expected.sha256.hexLower)
@@ -545,13 +562,53 @@ func buildSecretCandidates(secret string) []string {
 	return result
 }
 
-func buildExpectedSignatures(secret string, body []byte) expectedSignatures {
+func parseWebhookSecrets(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+
+	splitFn := func(r rune) bool {
+		switch r {
+		case ',', ';', '|':
+			return true
+		default:
+			return false
+		}
+	}
+
+	parts := strings.FieldsFunc(raw, splitFn)
+	if len(parts) == 0 {
+		return []string{strings.TrimSpace(raw)}
+	}
+
+	ordered := make([]string, 0, len(parts))
+	seen := make(map[string]struct{})
+	for _, part := range parts {
+		candidate := strings.TrimSpace(part)
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		ordered = append(ordered, candidate)
+	}
+
+	if len(ordered) == 0 {
+		ordered = append(ordered, strings.TrimSpace(raw))
+	}
+
+	return ordered
+}
+
+func buildExpectedSignatures(secret string, payload []byte) expectedSignatures {
 	sha1Mac := hmac.New(sha1.New, []byte(secret))
-	sha1Mac.Write(body)
+	sha1Mac.Write(payload)
 	sha1Raw := sha1Mac.Sum(nil)
 
 	sha256Mac := hmac.New(sha256.New, []byte(secret))
-	sha256Mac.Write(body)
+	sha256Mac.Write(payload)
 	sha256Raw := sha256Mac.Sum(nil)
 
 	return expectedSignatures{
