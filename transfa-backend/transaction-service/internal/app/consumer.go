@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -46,6 +47,10 @@ func (c *TransferStatusConsumer) HandleMessage(body []byte) bool {
 func (c *TransferStatusConsumer) processEvent(ctx context.Context, event domain.TransferStatusEvent) error {
 	tx, err := c.repo.FindTransactionByAnchorTransferID(ctx, event.AnchorTransferID)
 	if err != nil {
+		if errors.Is(err, store.ErrTransactionNotFound) {
+			log.Printf("transfer-consumer: no transaction found for anchor transfer %s; acknowledging", event.AnchorTransferID)
+			return nil
+		}
 		return fmt.Errorf("lookup transaction: %w", err)
 	}
 
