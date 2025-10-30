@@ -94,6 +94,10 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 2. Validate the signature for security.
 	timestamp := r.Header.Get("x-anchor-timestamp")
+	if strings.TrimSpace(timestamp) == "" {
+		log.Printf("[%s] Warning: Missing x-anchor-timestamp header. Headers: %+v", requestID, r.Header)
+	}
+
 	if !h.isValidSignature(r.Header.Get("x-anchor-signature"), body, timestamp) {
 		log.Printf("[%s] Error: Invalid webhook signature", requestID)
 		http.Error(w, "Invalid signature", http.StatusUnauthorized)
@@ -216,41 +220,63 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte, t
 		return false
 	}
 
-	if strings.TrimSpace(timestamp) == "" {
-		log.Println("Missing x-anchor-timestamp header")
-		return false
+	trimmedTimestamp := strings.TrimSpace(timestamp)
+
+	type payloadAttempt struct {
+		name    string
+		payload []byte
 	}
 
-	var signaturePayloadBuilder strings.Builder
-	signaturePayloadBuilder.Grow(len(timestamp) + 1 + len(body))
-	signaturePayloadBuilder.WriteString(timestamp)
-	signaturePayloadBuilder.WriteByte('.')
-	signaturePayloadBuilder.Write(body)
-	signaturePayload := []byte(signaturePayloadBuilder.String())
+	attempts := make([]payloadAttempt, 0, 2)
+
+	if trimmedTimestamp != "" {
+		var builder strings.Builder
+		builder.Grow(len(trimmedTimestamp) + 1 + len(body))
+		builder.WriteString(trimmedTimestamp)
+		builder.WriteByte('.')
+		builder.Write(body)
+		attempts = append(attempts, payloadAttempt{name: "timestamp", payload: []byte(builder.String())})
+	}
+
+	// Always attempt legacy body-only validation as a fallback for environments
+	// where Anchor does not yet include the timestamp header.
+	attempts = append(attempts, payloadAttempt{name: "legacy", payload: body})
 
 	secretCandidates := make([]string, 0, len(h.secrets)*3)
 	for _, secret := range h.secrets {
 		secretCandidates = append(secretCandidates, buildSecretCandidates(secret)...)
 	}
-	var baseline expectedSignatures
-	for idx, secret := range secretCandidates {
-		expected := buildExpectedSignatures(secret, signaturePayload)
-		if idx == 0 {
-			baseline = expected
-			log.Printf("Debug signature check: provided=%s | expected sha1=%s | expected sha256=%s", header, expected.sha1.base64, expected.sha256.hexLower)
-		}
 
-		if signatureMatches(header, expected) {
-			if idx > 0 {
-				log.Printf("Signature matched using secret variation index %d", idx)
-			} else {
-				log.Println("Signature matched")
+	var baseline expectedSignatures
+	baselineSet := false
+
+	for attemptIdx, attempt := range attempts {
+		for idx, secret := range secretCandidates {
+			expected := buildExpectedSignatures(secret, attempt.payload)
+			if !baselineSet {
+				baseline = expected
+				baselineSet = true
+				log.Printf("Debug signature check (%s payload): provided=%s | expected sha1=%s | expected sha256=%s", attempt.name, header, expected.sha1.base64, expected.sha256.hexLower)
 			}
-			return true
+
+			if signatureMatches(header, expected) {
+				if attemptIdx > 0 {
+					log.Printf("Signature matched using %s payload fallback", attempt.name)
+				} else if idx > 0 {
+					log.Printf("Signature matched using secret variation index %d", idx)
+				} else {
+					log.Println("Signature matched")
+				}
+				return true
+			}
 		}
 	}
 
-	log.Printf("Signature mismatch. Provided header: %s | Expected sha1=%s or sha256=%s", header, baseline.sha1.base64, baseline.sha256.hexLower)
+	if baselineSet {
+		log.Printf("Signature mismatch after %d attempt(s). Provided header: %s | Expected sha1=%s or sha256=%s", len(attempts), header, baseline.sha1.base64, baseline.sha256.hexLower)
+	} else {
+		log.Printf("Signature mismatch: unable to compute expectations for header %s", header)
+	}
 	return false
 }
 
