@@ -98,6 +98,18 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[%s] Warning: Missing x-anchor-timestamp header. Headers: %+v", requestID, r.Header)
 	}
 
+	if len(h.secrets) == 0 {
+		log.Printf("[%s] Warning: No webhook secrets configured. Headers: %+v", requestID, r.Header)
+	} else if len(h.secrets) <= 5 {
+		lengths := make([]int, len(h.secrets))
+		for i, secret := range h.secrets {
+			lengths[i] = len(secret)
+		}
+		log.Printf("[%s] Webhook secret count=%d lengths=%v", requestID, len(h.secrets), lengths)
+	} else {
+		log.Printf("[%s] Webhook secret count=%d (lengths suppressed)", requestID, len(h.secrets))
+	}
+
 	if !h.isValidSignature(r.Header.Get("x-anchor-signature"), body, timestamp) {
 		log.Printf("[%s] Error: Invalid webhook signature", requestID)
 		http.Error(w, "Invalid signature", http.StatusUnauthorized)
