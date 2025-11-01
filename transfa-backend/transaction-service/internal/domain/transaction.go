@@ -145,3 +145,61 @@ type CreatePaymentRequestPayload struct {
 	Description *string `json:"description,omitempty"`
 	ImageURL    *string `json:"image_url,omitempty"`
 }
+
+// MoneyDrop represents the state of a money drop in the database.
+type MoneyDrop struct {
+	ID                   uuid.UUID `json:"id" db:"id"`
+	CreatorID            uuid.UUID `json:"creator_id" db:"creator_id"`
+	Status               string    `json:"status" db:"status"`
+	AmountPerClaim       int64     `json:"amount_per_claim" db:"amount_per_claim"`
+	TotalClaimsAllowed   int       `json:"total_claims_allowed" db:"total_claims_allowed"`
+	ClaimsMadeCount      int       `json:"claims_made_count" db:"claims_made_count"`
+	ExpiryTimestamp      time.Time `json:"expiry_timestamp" db:"expiry_timestamp"`
+	FundingSourceAccountID uuid.UUID `json:"funding_source_account_id" db:"funding_source_account_id"`
+	MoneyDropAccountID   uuid.UUID `json:"money_drop_account_id" db:"money_drop_account_id"`
+	CreatedAt            time.Time `json:"created_at" db:"created_at"`
+}
+
+// MoneyDropClaim represents a single claim made against a money drop.
+type MoneyDropClaim struct {
+	ID         uuid.UUID `json:"id" db:"id"`
+	DropID     uuid.UUID `json:"drop_id" db:"drop_id"`
+	ClaimantID uuid.UUID `json:"claimant_id" db:"claimant_id"`
+	ClaimedAt  time.Time `json:"claimed_at" db:"claimed_at"`
+}
+
+// CreateMoneyDropRequest defines the payload for creating a new money drop.
+type CreateMoneyDropRequest struct {
+	AmountPerClaim   int64 `json:"amount_per_claim" binding:"required,gt=0"`
+	NumberOfPeople   int   `json:"number_of_people" binding:"required,gt=0"`
+	ExpiryInMinutes  int   `json:"expiry_in_minutes" binding:"required,gt=0"`
+}
+
+// CreateMoneyDropResponse is the successful response after creating a money drop.
+type CreateMoneyDropResponse struct {
+	MoneyDropID      string    `json:"money_drop_id"`
+	QRCodeContent    string    `json:"qr_code_content"`
+	ShareableLink    string    `json:"shareable_link"`
+	TotalAmount      int64     `json:"total_amount"`
+	AmountPerClaim   int64     `json:"amount_per_claim"`
+	NumberOfPeople   int       `json:"number_of_people"`
+	Fee               int64     `json:"fee"` // Fee charged for creating the money drop
+	ExpiryTimestamp  time.Time `json:"expiry_timestamp"`
+}
+
+// ClaimMoneyDropResponse is the successful response after claiming a money drop.
+type ClaimMoneyDropResponse struct {
+	Message         string `json:"message"`
+	AmountClaimed   int64  `json:"amount_claimed"`
+	CreatorUsername string `json:"creator_username"`
+}
+
+// MoneyDropDetails represents the details of a money drop for display.
+type MoneyDropDetails struct {
+	ID              uuid.UUID `json:"id"`
+	CreatorUsername string    `json:"creator_username"`
+	AmountPerClaim  int64     `json:"amount_per_claim"`
+	Status          string    `json:"status"`
+	IsClaimable     bool      `json:"is_claimable"`
+	Message         string    `json:"message"`
+}

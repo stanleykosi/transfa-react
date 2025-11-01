@@ -437,8 +437,9 @@ func (h *TransactionHandlers) GetAccountBalanceHandler(w http.ResponseWriter, r 
 // GetFeesHandler returns the currently configured transaction fees.
 func (h *TransactionHandlers) GetFeesHandler(w http.ResponseWriter, r *http.Request) {
 	fees := map[string]int64{
-		"p2p_fee_kobo":  h.service.GetTransactionFee(),
-		"self_fee_kobo": h.service.GetTransactionFee(),
+		"p2p_fee_kobo":       h.service.GetTransactionFee(),
+		"self_fee_kobo":      h.service.GetTransactionFee(),
+		"money_drop_fee_kobo": h.service.GetMoneyDropFee(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")

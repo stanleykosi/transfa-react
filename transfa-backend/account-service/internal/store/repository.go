@@ -20,10 +20,13 @@ import (
 // AccountRepository defines the contract for database operations related to accounts and users.
 type AccountRepository interface {
 	CreateAccount(ctx context.Context, account *domain.Account) (string, error)
+	UpdateAccount(ctx context.Context, accountID string, anchorAccountID, virtualNUBAN, bankName string) error
 	FindUserIDByAnchorCustomerID(ctx context.Context, anchorID string) (string, error)
 	FindUserIDByClerkUserID(ctx context.Context, clerkUserID string) (string, error)
 	FindAccountByUserID(ctx context.Context, userID string) (*domain.Account, error)
 	UpdateTierStatus(ctx context.Context, userID, stage, status string, reason *string) error
+	FindAnchorCustomerIDByUserID(ctx context.Context, userID string) (string, error)
+	FindMoneyDropAccountByUserID(ctx context.Context, userID string) (*domain.Account, error)
 }
 
 // BeneficiaryRepository defines the contract for database operations related to beneficiaries.

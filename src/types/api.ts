@@ -188,3 +188,39 @@ export interface TransactionStatusResponse {
   anchor_reason?: string;
   transfer_type?: string;
 }
+
+// =================================================================
+// Money Drop Types
+// =================================================================
+
+export interface CreateMoneyDropPayload {
+  amount_per_claim: number; // in kobo
+  number_of_people: number;
+  expiry_in_minutes: number;
+}
+
+export interface MoneyDropResponse {
+  money_drop_id: string;
+  qr_code_content: string;
+  shareable_link: string;
+  total_amount: number;
+  amount_per_claim: number;
+  number_of_people: number;
+  fee: number; // Fee charged for creating the money drop (in kobo)
+  expiry_timestamp: string;
+}
+
+export interface ClaimMoneyDropResponse {
+  message: string;
+  amount_claimed: number;
+  creator_username: string;
+}
+
+export interface MoneyDropDetails {
+  id: string;
+  creator_username: string;
+  amount_per_claim: number;
+  status: 'active' | 'completed' | 'expired_and_refunded';
+  is_claimable: boolean;
+  message: string;
+}

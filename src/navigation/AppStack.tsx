@@ -31,6 +31,9 @@ import TransferStatusScreen from '@/screens/PaymentFlow/TransferStatusScreen';
 import CreateRequestScreen from '@/screens/PaymentRequests/CreateRequestScreen';
 import PaymentRequestSuccessScreen from '@/screens/PaymentRequests/PaymentRequestSuccessScreen';
 import PaymentRequestsListScreen from '@/screens/PaymentRequests/PaymentRequestsListScreen';
+import CreateDropWizardScreen from '@/screens/MoneyDrop/CreateDropWizardScreen';
+import MoneyDropSuccessScreen from '@/screens/MoneyDrop/MoneyDropSuccessScreen';
+import ClaimDropScreen from '@/screens/MoneyDrop/ClaimDropScreen';
 import apiClient from '@/api/apiClient';
 import { theme } from '@/constants/theme';
 
@@ -55,6 +58,10 @@ export type AppStackParamList = {
   PaymentRequestsList: undefined; // New screen for viewing payment request history
   CreatePaymentRequest: undefined;
   PaymentRequestSuccess: { requestId: string };
+  // Money Drop Screens
+  CreateDropWizard: undefined;
+  MoneyDropSuccess: { dropDetails: import('@/types/api').MoneyDropResponse };
+  ClaimDrop: { dropId: string };
 };
 
 const Stack = createNativeStackNavigator<AppStackParamList>();
@@ -178,6 +185,18 @@ const AppStack = () => {
         component={PaymentRequestSuccessScreen}
         options={{ headerShown: false, gestureEnabled: false }}
       />
+      {/* Money Drop Screens */}
+      <Stack.Screen
+        name="CreateDropWizard"
+        component={CreateDropWizardScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="MoneyDropSuccess"
+        component={MoneyDropSuccessScreen}
+        options={{ headerShown: false, gestureEnabled: false }}
+      />
+      <Stack.Screen name="ClaimDrop" component={ClaimDropScreen} options={{ headerShown: false }} />
     </Stack.Navigator>
   );
 };

@@ -66,6 +66,16 @@ type Repository interface {
     MarkTransactionAsFailed(ctx context.Context, transactionID uuid.UUID, anchorTransferID, failureReason string) error
     MarkTransactionAsCompleted(ctx context.Context, transactionID uuid.UUID, anchorTransferID string) error
     RefundTransactionFee(ctx context.Context, transactionID uuid.UUID, userID uuid.UUID, fee int64) error
+
+	// Money Drop methods
+	FindMoneyDropAccountByUserID(ctx context.Context, userID uuid.UUID) (*domain.Account, error)
+	CreateAccount(ctx context.Context, account *domain.Account) (*domain.Account, error)
+	CreateMoneyDrop(ctx context.Context, drop *domain.MoneyDrop) (*domain.MoneyDrop, error)
+	FindMoneyDropByID(ctx context.Context, dropID uuid.UUID) (*domain.MoneyDrop, error)
+	FindMoneyDropCreatorByDropID(ctx context.Context, dropID uuid.UUID) (*domain.User, error)
+	ClaimMoneyDropAtomic(ctx context.Context, dropID, claimantID, claimantAccountID, moneyDropAccountID uuid.UUID, amount int64) error
+	FindExpiredAndCompletedMoneyDrops(ctx context.Context) ([]domain.MoneyDrop, error)
+	UpdateMoneyDropStatus(ctx context.Context, dropID uuid.UUID, status string) error
 }
 
 type UpdateTransactionMetadataParams struct {

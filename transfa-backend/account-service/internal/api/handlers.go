@@ -136,6 +136,44 @@ func (h *BankHandler) ListBanks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, banks)
 }
 
+// InternalAccountHandler holds dependencies for internal account-related handlers.
+type InternalAccountHandler struct {
+	service *app.AccountService
+}
+
+// NewInternalAccountHandler creates a new InternalAccountHandler.
+func NewInternalAccountHandler(service *app.AccountService) *InternalAccountHandler {
+	return &InternalAccountHandler{service: service}
+}
+
+// CreateMoneyDropAccountRequest defines the request payload for creating a money drop account.
+type CreateMoneyDropAccountRequest struct {
+	UserID string `json:"user_id"`
+}
+
+// CreateMoneyDropAccount handles the internal endpoint for creating a money drop account.
+// This is a server-to-server endpoint (no authentication required for internal services).
+func (h *InternalAccountHandler) CreateMoneyDropAccount(w http.ResponseWriter, r *http.Request) {
+	var req CreateMoneyDropAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.UserID == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+
+	account, err := h.service.CreateMoneyDropAccount(r.Context(), req.UserID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, account)
+}
+
 // writeJSON is a helper to write JSON responses.
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")

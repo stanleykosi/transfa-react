@@ -15,6 +15,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -771,4 +772,232 @@ func (r *PostgresRepository) GetPaymentRequestByID(ctx context.Context, requestI
 		return nil, err
 	}
 	return &request, nil
+}
+
+// Money Drop Implementations
+
+// FindMoneyDropAccountByUserID retrieves the money drop account for a user.
+func (r *PostgresRepository) FindMoneyDropAccountByUserID(ctx context.Context, userID uuid.UUID) (*domain.Account, error) {
+	var account domain.Account
+	query := `
+		SELECT id, user_id, anchor_account_id, balance
+		FROM accounts
+		WHERE user_id = $1 AND account_type = 'money_drop'
+	`
+	err := r.db.QueryRow(ctx, query, userID).Scan(
+		&account.ID, &account.UserID, &account.AnchorAccountID, &account.Balance)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrAccountNotFound
+		}
+		return nil, err
+	}
+	return &account, nil
+}
+
+// CreateAccount creates a new account in the database.
+// Note: This method creates a money_drop account type.
+func (r *PostgresRepository) CreateAccount(ctx context.Context, account *domain.Account) (*domain.Account, error) {
+	query := `
+		INSERT INTO accounts (user_id, anchor_account_id, virtual_nuban, account_type, balance, status)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id
+	`
+	err := r.db.QueryRow(ctx, query,
+		account.UserID, account.AnchorAccountID, "", "money_drop", account.Balance, "active",
+	).Scan(&account.ID)
+	if err != nil {
+		return nil, err
+	}
+	return account, nil
+}
+
+// CreateMoneyDrop creates a new money drop record in the database.
+func (r *PostgresRepository) CreateMoneyDrop(ctx context.Context, drop *domain.MoneyDrop) (*domain.MoneyDrop, error) {
+	query := `
+		INSERT INTO money_drops (
+			creator_id, status, amount_per_claim, total_claims_allowed,
+			claims_made_count, expiry_timestamp, funding_source_account_id, money_drop_account_id
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id, created_at
+	`
+	err := r.db.QueryRow(ctx, query,
+		drop.CreatorID, drop.Status, drop.AmountPerClaim, drop.TotalClaimsAllowed,
+		drop.ClaimsMadeCount, drop.ExpiryTimestamp, drop.FundingSourceAccountID, drop.MoneyDropAccountID,
+	).Scan(&drop.ID, &drop.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return drop, nil
+}
+
+// FindMoneyDropByID retrieves a money drop by its ID.
+func (r *PostgresRepository) FindMoneyDropByID(ctx context.Context, dropID uuid.UUID) (*domain.MoneyDrop, error) {
+	var drop domain.MoneyDrop
+	query := `
+		SELECT id, creator_id, status, amount_per_claim, total_claims_allowed,
+		       claims_made_count, expiry_timestamp, funding_source_account_id,
+		       money_drop_account_id, created_at
+		FROM money_drops
+		WHERE id = $1
+	`
+	err := r.db.QueryRow(ctx, query, dropID).Scan(
+		&drop.ID, &drop.CreatorID, &drop.Status, &drop.AmountPerClaim,
+		&drop.TotalClaimsAllowed, &drop.ClaimsMadeCount, &drop.ExpiryTimestamp,
+		&drop.FundingSourceAccountID, &drop.MoneyDropAccountID, &drop.CreatedAt)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, errors.New("money drop not found")
+		}
+		return nil, err
+	}
+	return &drop, nil
+}
+
+// FindMoneyDropCreatorByDropID retrieves the creator of a money drop.
+func (r *PostgresRepository) FindMoneyDropCreatorByDropID(ctx context.Context, dropID uuid.UUID) (*domain.User, error) {
+	var user domain.User
+	query := `
+		SELECT u.id, u.username, u.allow_sending, u.anchor_customer_id
+		FROM users u
+		INNER JOIN money_drops md ON u.id = md.creator_id
+		WHERE md.id = $1
+	`
+	err := r.db.QueryRow(ctx, query, dropID).Scan(
+		&user.ID, &user.Username, &user.AllowSending, &user.AnchorCustomerID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+// ClaimMoneyDropAtomic performs an atomic claim operation on a money drop.
+func (r *PostgresRepository) ClaimMoneyDropAtomic(ctx context.Context, dropID, claimantID, claimantAccountID, moneyDropAccountID uuid.UUID, amount int64) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// 1. Lock the money_drops row and validate the claim
+	var claimsMade, totalAllowed int
+	var status string
+	var expiry time.Time
+	query := `
+		SELECT claims_made_count, total_claims_allowed, status, expiry_timestamp
+		FROM money_drops
+		WHERE id = $1
+		FOR UPDATE
+	`
+	err = tx.QueryRow(ctx, query, dropID).Scan(&claimsMade, &totalAllowed, &status, &expiry)
+	if err != nil {
+		return fmt.Errorf("failed to get and lock money drop: %w", err)
+	}
+
+	if status != "active" {
+		return errors.New("money drop is not active")
+	}
+	if time.Now().After(expiry) {
+		return errors.New("money drop has expired")
+	}
+	if claimsMade >= totalAllowed {
+		return errors.New("money drop has been fully claimed")
+	}
+
+	// 2. Check if this user has already claimed
+	var claimCount int
+	claimCheckQuery := `
+		SELECT COUNT(*)
+		FROM money_drop_claims
+		WHERE drop_id = $1 AND claimant_id = $2
+	`
+	err = tx.QueryRow(ctx, claimCheckQuery, dropID, claimantID).Scan(&claimCount)
+	if err != nil {
+		return fmt.Errorf("failed to check existing claims: %w", err)
+	}
+	if claimCount > 0 {
+		return errors.New("you have already claimed this money drop")
+	}
+
+	// 3. Update the money_drops table
+	updateQuery := `
+		UPDATE money_drops
+		SET claims_made_count = claims_made_count + 1
+		WHERE id = $1
+	`
+	_, err = tx.Exec(ctx, updateQuery, dropID)
+	if err != nil {
+		return fmt.Errorf("failed to update money drop claim count: %w", err)
+	}
+
+	// 4. Insert into money_drop_claims table
+	insertClaimQuery := `
+		INSERT INTO money_drop_claims (drop_id, claimant_id, claimed_at)
+		VALUES ($1, $2, NOW())
+	`
+	_, err = tx.Exec(ctx, insertClaimQuery, dropID, claimantID)
+	if err != nil {
+		return fmt.Errorf("failed to insert claim record: %w", err)
+	}
+
+	// 5. Log the transaction within the same DB transaction for consistency
+	logTxQuery := `
+		INSERT INTO transactions (
+			sender_id, recipient_id, source_account_id, destination_account_id,
+			type, category, status, amount, fee, description
+		)
+		SELECT creator_id, $1, $2, $3, 'money_drop_claim', 'Money Drop', 'pending', $4, 0, 'Money Drop Claim'
+		FROM money_drops
+		WHERE id = $5
+	`
+	_, err = tx.Exec(ctx, logTxQuery, claimantID, moneyDropAccountID, claimantAccountID, amount, dropID)
+	if err != nil {
+		return fmt.Errorf("failed to log money drop claim transaction: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
+// FindExpiredAndCompletedMoneyDrops finds all expired or fully claimed money drops.
+func (r *PostgresRepository) FindExpiredAndCompletedMoneyDrops(ctx context.Context) ([]domain.MoneyDrop, error) {
+	var drops []domain.MoneyDrop
+	query := `
+		SELECT id, creator_id, amount_per_claim, total_claims_allowed,
+		       claims_made_count, expiry_timestamp, funding_source_account_id,
+		       money_drop_account_id, created_at
+		FROM money_drops
+		WHERE status = 'active'
+		  AND (expiry_timestamp <= NOW() OR claims_made_count >= total_claims_allowed)
+	`
+	rows, err := r.db.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var drop domain.MoneyDrop
+		err := rows.Scan(
+			&drop.ID, &drop.CreatorID, &drop.AmountPerClaim, &drop.TotalClaimsAllowed,
+			&drop.ClaimsMadeCount, &drop.ExpiryTimestamp, &drop.FundingSourceAccountID,
+			&drop.MoneyDropAccountID, &drop.CreatedAt)
+		if err != nil {
+			return nil, err
+		}
+		drop.Status = "active" // Will be updated by scheduler
+		drops = append(drops, drop)
+	}
+
+	return drops, nil
+}
+
+// UpdateMoneyDropStatus updates the status of a money drop.
+func (r *PostgresRepository) UpdateMoneyDropStatus(ctx context.Context, dropID uuid.UUID, status string) error {
+	query := `UPDATE money_drops SET status = $1 WHERE id = $2`
+	_, err := r.db.Exec(ctx, query, status, dropID)
+	return err
 }

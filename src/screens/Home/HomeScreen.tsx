@@ -288,6 +288,15 @@ const HomeScreen = () => {
               size="large"
               style={styles.actionButton}
             />
+
+            <ActionButton
+              title="Money Drop"
+              icon="gift"
+              onPress={() => navigation.navigate('CreateDropWizard' as never)}
+              variant="outline"
+              size="large"
+              style={styles.actionButton}
+            />
           </View>
         </View>
 

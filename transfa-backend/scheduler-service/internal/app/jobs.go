@@ -22,11 +22,14 @@ type Repository interface {
 	UpdateSubscriptionAfterBilling(ctx context.Context, subID string, newStartDate, newEndDate time.Time) error
 	SetSubscriptionStatusToLapsed(ctx context.Context, subID string) error
 	ResetAllMonthlyUsageCounts(ctx context.Context) (int64, error)
+	GetExpiredAndCompletedMoneyDrops(ctx context.Context) ([]domain.MoneyDrop, error)
+	UpdateMoneyDropStatus(ctx context.Context, dropID string, status string) error
 }
 
 // TransactionClient defines the interface for communicating with the transaction service.
 type TransactionClient interface {
 	DebitSubscriptionFee(ctx context.Context, userID string, amount int64) error
+	RefundMoneyDrop(ctx context.Context, dropID, creatorID string, amount int64) error
 }
 
 // Jobs contains the logic for all scheduled tasks.
@@ -106,4 +109,54 @@ func (j *Jobs) ResetMonthlyTransferUsage() {
 	}
 
 	j.logger.Info("monthly transfer usage reset job finished", "users_affected", rowsAffected)
+}
+
+// ProcessMoneyDropExpiry is the job that handles refunding expired or completed money drops.
+func (j *Jobs) ProcessMoneyDropExpiry() {
+	j.logger.Info("starting money drop expiry job")
+	ctx := context.Background()
+
+	// 1. Fetch all expired or completed money drops
+	drops, err := j.repo.GetExpiredAndCompletedMoneyDrops(ctx)
+	if err != nil {
+		j.logger.Error("failed to get expired money drops", "error", err)
+		return
+	}
+
+	if len(drops) == 0 {
+		j.logger.Info("no expired or completed money drops to process")
+		return
+	}
+
+	j.logger.Info("found money drops to process", "count", len(drops))
+
+	// 2. Process each drop
+	for _, drop := range drops {
+		j.logger.Info("processing money drop", "drop_id", drop.ID, "creator_id", drop.CreatorID)
+
+		// Calculate remaining balance
+		totalAmount := drop.AmountPerClaim * int64(drop.TotalClaimsAllowed)
+		claimedAmount := drop.AmountPerClaim * int64(drop.ClaimsMadeCount)
+		remainingBalance := totalAmount - claimedAmount
+
+		if remainingBalance > 0 {
+			j.logger.Info("refunding remaining balance", "drop_id", drop.ID, "amount", remainingBalance)
+
+			// Call transaction-service to refund the balance
+			err := j.txClient.RefundMoneyDrop(ctx, drop.ID, drop.CreatorID, remainingBalance)
+			if err != nil {
+				j.logger.Error("failed to refund money drop", "drop_id", drop.ID, "error", err)
+				continue // Move to next drop
+			}
+		}
+
+		// Mark the drop as processed
+		if err := j.repo.UpdateMoneyDropStatus(ctx, drop.ID, "expired_and_refunded"); err != nil {
+			j.logger.Error("failed to update money drop status", "drop_id", drop.ID, "error", err)
+		} else {
+			j.logger.Info("successfully processed money drop", "drop_id", drop.ID)
+		}
+	}
+
+	j.logger.Info("money drop expiry job finished")
 }

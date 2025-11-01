@@ -30,6 +30,14 @@ func NewRouter(cfg *config.Config, service *app.AccountService) http.Handler {
 
 	beneficiaryHandler := NewBeneficiaryHandler(service)
 	bankHandler := NewBankHandler(service)
+	internalAccountHandler := NewInternalAccountHandler(service)
+
+	// Internal routes (no authentication required for service-to-service communication)
+	r.Route("/internal", func(r chi.Router) {
+		r.Route("/accounts", func(r chi.Router) {
+			r.Post("/money-drop", internalAccountHandler.CreateMoneyDropAccount)
+		})
+	})
 
 	// Group routes that require authentication
 	r.Group(func(r chi.Router) {

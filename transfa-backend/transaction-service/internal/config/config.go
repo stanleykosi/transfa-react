@@ -29,8 +29,10 @@ type Config struct {
 	AnchorAPIBaseURL      string `mapstructure:"ANCHOR_API_BASE_URL"`
 	AnchorAPIKey          string `mapstructure:"ANCHOR_API_KEY"`
 	ClerkJWKSURL          string `mapstructure:"CLERK_JWKS_URL"`
+	AccountServiceURL     string `mapstructure:"ACCOUNT_SERVICE_URL"`
 	AdminAccountID        string `mapstructure:"ADMIN_ACCOUNT_ID"`
 	P2PTransactionFeeKobo int64  `mapstructure:"P2P_TRANSACTION_FEE_KOBO"`
+	MoneyDropFeeKobo      int64  `mapstructure:"MONEY_DROP_FEE_KOBO"`
 }
 
 // LoadConfig reads configuration from environment variables from the given path.
@@ -50,6 +52,7 @@ func LoadConfig(path string) (config Config, err error) {
     viper.SetDefault("TRANSFER_EVENT_QUEUE", "transaction_service.transfer_updates")
     viper.SetDefault("ADMIN_ACCOUNT_ID", "17568857819889-anc_acc")
     viper.SetDefault("P2P_TRANSACTION_FEE_KOBO", 500)
+    viper.SetDefault("MONEY_DROP_FEE_KOBO", 0) // Default: no fee (can be configured)
 
 	// Bind environment variables explicitly to ensure they appear in Unmarshal
 	_ = viper.BindEnv("SERVER_PORT")
@@ -59,10 +62,14 @@ func LoadConfig(path string) (config Config, err error) {
 	_ = viper.BindEnv("ANCHOR_API_BASE_URL")
 	_ = viper.BindEnv("ANCHOR_API_KEY")
 	_ = viper.BindEnv("CLERK_JWKS_URL")
+	_ = viper.BindEnv("ACCOUNT_SERVICE_URL")
 	_ = viper.BindEnv("ADMIN_ACCOUNT_ID")
 	_ = viper.BindEnv("P2P_TRANSACTION_FEE_KOBO")
 	_ = viper.BindEnv("P2P_TRANSACTION_FEE")
 	_ = viper.BindEnv("P2P_TRANSACTION_FEE_NAIRA")
+	_ = viper.BindEnv("MONEY_DROP_FEE_KOBO")
+	_ = viper.BindEnv("MONEY_DROP_FEE")
+	_ = viper.BindEnv("MONEY_DROP_FEE_NAIRA")
 
 	// Attempt to read the config file. It's okay if it doesn't exist.
 	if err = viper.ReadInConfig(); err != nil {
@@ -105,6 +112,34 @@ func LoadConfig(path string) (config Config, err error) {
 	if config.P2PTransactionFeeKobo < 0 {
 		log.Printf("Warning: negative P2P transaction fee configured (%d). Coercing to 0.", config.P2PTransactionFeeKobo)
 		config.P2PTransactionFeeKobo = 0
+	}
+
+	// Allow specifying money drop fee in whole currency units via MONEY_DROP_FEE or MONEY_DROP_FEE_NAIRA.
+	if viper.IsSet("MONEY_DROP_FEE") {
+		feeStr := strings.TrimSpace(viper.GetString("MONEY_DROP_FEE"))
+		if feeStr != "" {
+			feeValue, parseErr := strconv.ParseFloat(feeStr, 64)
+			if parseErr != nil {
+				log.Printf("Warning: invalid MONEY_DROP_FEE value %q: %v", feeStr, parseErr)
+			} else {
+				config.MoneyDropFeeKobo = int64(math.Round(feeValue * 100))
+			}
+		}
+	} else if viper.IsSet("MONEY_DROP_FEE_NAIRA") {
+		feeStr := strings.TrimSpace(viper.GetString("MONEY_DROP_FEE_NAIRA"))
+		if feeStr != "" {
+			feeValue, parseErr := strconv.ParseFloat(feeStr, 64)
+			if parseErr != nil {
+				log.Printf("Warning: invalid MONEY_DROP_FEE_NAIRA value %q: %v", feeStr, parseErr)
+			} else {
+				config.MoneyDropFeeKobo = int64(math.Round(feeValue * 100))
+			}
+		}
+	}
+
+	if config.MoneyDropFeeKobo < 0 {
+		log.Printf("Warning: negative money drop fee configured (%d). Coercing to 0.", config.MoneyDropFeeKobo)
+		config.MoneyDropFeeKobo = 0
 	}
 
 	return

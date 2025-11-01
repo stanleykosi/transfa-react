@@ -66,10 +66,18 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 			r.Get("/", h.ListPaymentRequestsHandler)       // List all of user's payment requests
 			r.Get("/{id}", h.GetPaymentRequestByIDHandler) // Get a specific payment request
 		})
+
+		// Money Drop routes
+		r.Route("/money-drops", func(r chi.Router) {
+			r.Post("/", h.CreateMoneyDropHandler)                    // Create a new money drop
+			r.Post("/{drop_id}/claim", h.ClaimMoneyDropHandler)      // Claim a money drop
+			r.Get("/{drop_id}/details", h.GetMoneyDropDetailsHandler) // Get money drop details
+		})
 	})
 
 	// Internal endpoints (no authentication required for service-to-service communication)
 	r.Post("/subscription-fee", h.SubscriptionFeeHandler)
+	r.Post("/internal/money-drops/refund", h.RefundMoneyDropHandler)
 
 	return r
 }

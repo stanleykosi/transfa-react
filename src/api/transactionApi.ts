@@ -35,6 +35,10 @@ import {
   AccountBalance,
   PaymentRequest,
   CreatePaymentRequestPayload,
+  CreateMoneyDropPayload,
+  MoneyDropResponse,
+  ClaimMoneyDropResponse,
+  MoneyDropDetails,
 } from '@/types/api';
 
 // Transaction service URL from environment variables with fallback
@@ -49,6 +53,7 @@ const DEFAULT_BENEFICIARY_QUERY_KEY = 'default-beneficiary';
 const ACCOUNT_BALANCE_QUERY_KEY = 'account-balance';
 const PAYMENT_REQUESTS_QUERY_KEY = 'paymentRequests';
 const USER_PROFILE_QUERY_KEY = 'user-profile';
+const MONEY_DROP_QUERY_KEY = 'moneyDrop';
 
 /**
  * Custom hook to perform a Peer-to-Peer (P2P) transfer to another Transfa user.
@@ -270,6 +275,7 @@ export const useTransactionHistory = () => {
 export interface TransactionFeeResponse {
   p2p_fee_kobo: number;
   self_fee_kobo: number;
+  money_drop_fee_kobo: number;
 }
 
 export const TRANSACTION_FEES_QUERY_KEY = 'transaction-fees';
@@ -407,3 +413,94 @@ export const fetchTransactionStatus = (transactionId: string) =>
   apiClient.get<TransactionStatusResponse>(`/transactions/transactions/${transactionId}`, {
     baseURL: TRANSACTION_SERVICE_URL,
   });
+
+// =================================================================
+// Money Drop Hooks
+// =================================================================
+
+/**
+ * Custom hook to create a new Money Drop.
+ * @param options Optional mutation options.
+ * @returns A TanStack Mutation object for the create action.
+ */
+export const useCreateMoneyDrop = (
+  options?: UseMutationOptions<MoneyDropResponse, Error, CreateMoneyDropPayload>
+) => {
+  const queryClient = useQueryClient();
+
+  const createMoneyDropMutation = async (
+    payload: CreateMoneyDropPayload
+  ): Promise<MoneyDropResponse> => {
+    const { data } = await apiClient.post<MoneyDropResponse>('/transactions/money-drops', payload, {
+      baseURL: TRANSACTION_SERVICE_URL,
+    });
+    return data;
+  };
+
+  return useMutation<MoneyDropResponse, Error, CreateMoneyDropPayload>({
+    mutationFn: createMoneyDropMutation,
+    onSuccess: () => {
+      // After creating a drop, invalidate account balance to reflect the funding debit.
+      queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
+    },
+    ...options,
+  });
+};
+
+/**
+ * Custom hook to claim a Money Drop.
+ * @param options Optional mutation options.
+ * @returns A TanStack Mutation object for the claim action.
+ */
+export const useClaimMoneyDrop = (
+  options?: UseMutationOptions<ClaimMoneyDropResponse, Error, { dropId: string }>
+) => {
+  const queryClient = useQueryClient();
+
+  const claimMoneyDropMutation = async ({
+    dropId,
+  }: {
+    dropId: string;
+  }): Promise<ClaimMoneyDropResponse> => {
+    const { data } = await apiClient.post<ClaimMoneyDropResponse>(
+      `/transactions/money-drops/${dropId}/claim`,
+      {},
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
+    return data;
+  };
+
+  return useMutation<ClaimMoneyDropResponse, Error, { dropId: string }>({
+    mutationFn: claimMoneyDropMutation,
+    onSuccess: () => {
+      // After claiming, invalidate account balance to reflect the credit.
+      queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
+    },
+    ...options,
+  });
+};
+
+/**
+ * Custom hook to fetch details about a specific money drop for the claim screen.
+ * @param dropId The ID of the money drop.
+ * @returns A TanStack Query object with the money drop details.
+ */
+export const useMoneyDropDetails = (dropId: string | null) => {
+  const fetchDetails = async (): Promise<MoneyDropDetails> => {
+    const { data } = await apiClient.get<MoneyDropDetails>(
+      `/transactions/money-drops/${dropId}/details`,
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
+    return data;
+  };
+
+  return useQuery<MoneyDropDetails, Error>({
+    queryKey: [MONEY_DROP_QUERY_KEY, dropId],
+    queryFn: fetchDetails,
+    enabled: !!dropId, // Only run query if dropId is present
+  });
+};

@@ -53,6 +53,14 @@ func (s *Scheduler) Start() {
 		s.logger.Info("scheduled usage reset job", "schedule", s.config.ResetUsageJobSchedule)
 	}
 
+	// Schedule the money drop expiry job
+	_, err = s.cron.AddFunc(s.config.MoneyDropExpirySchedule, s.jobs.ProcessMoneyDropExpiry)
+	if err != nil {
+		s.logger.Error("failed to schedule money drop expiry job", "error", err)
+	} else {
+		s.logger.Info("scheduled money drop expiry job", "schedule", s.config.MoneyDropExpirySchedule)
+	}
+
 	s.cron.Start()
 }
 

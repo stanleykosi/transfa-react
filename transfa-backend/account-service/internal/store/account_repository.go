@@ -15,6 +15,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 
 	"github.com/jackc/pgx/v5"
@@ -128,6 +129,22 @@ func (r *PostgresAccountRepository) CreateAccount(ctx context.Context, account *
 	return accountID, nil
 }
 
+// UpdateAccount updates an existing account with Anchor account details.
+func (r *PostgresAccountRepository) UpdateAccount(ctx context.Context, accountID string, anchorAccountID, virtualNUBAN, bankName string) error {
+	query := `
+		UPDATE accounts 
+		SET anchor_account_id = $1, virtual_nuban = $2, bank_name = $3, updated_at = NOW()
+		WHERE id = $4
+	`
+	_, err := r.db.Exec(ctx, query, anchorAccountID, virtualNUBAN, bankName, accountID)
+	if err != nil {
+		log.Printf("Error updating account %s: %v", accountID, err)
+		return err
+	}
+	log.Printf("Successfully updated account %s with Anchor account ID %s", accountID, anchorAccountID)
+	return nil
+}
+
 func (r *PostgresAccountRepository) UpdateTierStatus(ctx context.Context, userID, stage, status string, reason *string) error {
 	query := `
 		INSERT INTO onboarding_status (user_id, stage, status, reason)
@@ -141,5 +158,55 @@ func (r *PostgresAccountRepository) UpdateTierStatus(ctx context.Context, userID
 		return err
 	}
 	return nil
+}
+
+// FindAnchorCustomerIDByUserID retrieves the Anchor customer ID for a given user ID.
+func (r *PostgresAccountRepository) FindAnchorCustomerIDByUserID(ctx context.Context, userID string) (string, error) {
+	query := `SELECT anchor_customer_id FROM users WHERE id = $1`
+	var anchorCustomerID string
+	err := r.db.QueryRow(ctx, query, userID).Scan(&anchorCustomerID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", fmt.Errorf("user not found: %w", err)
+		}
+		return "", err
+	}
+	if anchorCustomerID == "" {
+		return "", fmt.Errorf("user %s does not have an anchor customer ID", userID)
+	}
+	return anchorCustomerID, nil
+}
+
+// FindMoneyDropAccountByUserID retrieves the money drop account for a user.
+func (r *PostgresAccountRepository) FindMoneyDropAccountByUserID(ctx context.Context, userID string) (*domain.Account, error) {
+	query := `
+		SELECT id, user_id, anchor_account_id, virtual_nuban, bank_name, account_type, balance, status, created_at, updated_at
+		FROM accounts 
+		WHERE user_id = $1 AND account_type = 'money_drop'
+		LIMIT 1
+	`
+	
+	var account domain.Account
+	err := r.db.QueryRow(ctx, query, userID).Scan(
+		&account.ID,
+		&account.UserID,
+		&account.AnchorAccountID,
+		&account.VirtualNUBAN,
+		&account.BankName,
+		&account.Type,
+		&account.Balance,
+		&account.Status,
+		&account.CreatedAt,
+		&account.UpdatedAt,
+	)
+	
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil // No account found, not an error
+		}
+		return nil, err
+	}
+	
+	return &account, nil
 }
 

@@ -73,3 +73,37 @@ func (c *Client) DebitSubscriptionFee(ctx context.Context, userID string, amount
 
 	return nil
 }
+
+// RefundMoneyDrop calls the transaction-service to refund a money drop.
+func (c *Client) RefundMoneyDrop(ctx context.Context, dropID, creatorID string, amount int64) error {
+	url := fmt.Sprintf("%s/transactions/internal/money-drops/refund", c.baseURL)
+
+	payload := domain.RefundPayload{
+		DropID:    dropID,
+		CreatorID: creatorID,
+		Amount:    amount,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal refund payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to execute request to transaction service: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("transaction service returned error status %d", resp.StatusCode)
+	}
+
+	return nil
+}

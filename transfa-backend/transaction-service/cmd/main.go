@@ -33,6 +33,7 @@ import (
 	"github.com/transfa/transaction-service/internal/app"
 	"github.com/transfa/transaction-service/internal/config"
 	"github.com/transfa/transaction-service/internal/store"
+	"github.com/transfa/transaction-service/pkg/accountclient"
 	"github.com/transfa/transaction-service/pkg/anchorclient"
 	rmrabbit "github.com/transfa/transaction-service/pkg/rabbitmq"
 )
@@ -86,11 +87,15 @@ func main() {
 	anchorClient := anchorclient.NewClient(cfg.AnchorAPIBaseURL, cfg.AnchorAPIKey)
 	log.Println("Anchor API client initialized.")
 
+	// Initialize the client for the account-service.
+	accountClient := accountclient.NewClient(cfg.AccountServiceURL)
+	log.Println("Account service client initialized.")
+
 	// Initialize the data access layer (repository).
 	repository := store.NewPostgresRepository(dbpool)
 
 	// Initialize the core application service with its dependencies.
-	transactionService := app.NewService(repository, anchorClient, rabbitProducer, cfg.AdminAccountID, cfg.P2PTransactionFeeKobo)
+	transactionService := app.NewService(repository, anchorClient, accountClient, rabbitProducer, cfg.AdminAccountID, cfg.P2PTransactionFeeKobo, cfg.MoneyDropFeeKobo)
 
 	// Initialize the API handlers.
 	transactionHandlers := api.NewTransactionHandlers(transactionService)

@@ -269,3 +269,121 @@ func maskAccountNumber(accountNumber string) string {
 	}
 	return "****"
 }
+
+// CreateMoneyDropAccountResponse defines the response from creating a money drop account.
+type CreateMoneyDropAccountResponse struct {
+	AccountID       string `json:"account_id"`
+	AnchorAccountID string `json:"anchor_account_id"`
+	VirtualNUBAN    string `json:"virtual_nuban"`
+	BankName        string `json:"bank_name"`
+}
+
+// CreateMoneyDropAccount creates a new Anchor deposit account for money drops.
+// This method creates a separate Anchor account that will be used exclusively for money drop operations.
+func (s *AccountService) CreateMoneyDropAccount(ctx context.Context, userID string) (*CreateMoneyDropAccountResponse, error) {
+	// 1. Check if user already has a money drop account
+	existingAccount, err := s.accountRepo.FindMoneyDropAccountByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check for existing money drop account: %w", err)
+	}
+	if existingAccount != nil && existingAccount.AnchorAccountID != "" {
+		// User already has a money drop account with Anchor account
+		return &CreateMoneyDropAccountResponse{
+			AccountID:       existingAccount.ID,
+			AnchorAccountID: existingAccount.AnchorAccountID,
+			VirtualNUBAN:    existingAccount.VirtualNUBAN,
+			BankName:        existingAccount.BankName,
+		}, nil
+	}
+
+	// 2. Get user's Anchor customer ID
+	anchorCustomerID, err := s.accountRepo.FindAnchorCustomerIDByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get anchor customer ID: %w", err)
+	}
+
+	// 3. Create Anchor deposit account for money drops
+	accountReq := domain.CreateDepositAccountRequest{
+		Data: domain.RequestData{
+			Type: "DepositAccount",
+			Attributes: domain.DepositAccountAttributes{
+				ProductName: "SAVINGS",
+			},
+			Relationships: map[string]interface{}{
+				"customer": domain.CustomerRelationshipData{
+					Data: struct {
+						ID   string `json:"id"`
+						Type string `json:"type"`
+					}{
+						ID:   anchorCustomerID,
+						Type: "IndividualCustomer",
+					},
+				},
+			},
+		},
+	}
+
+	anchorAccount, err := s.anchorClient.CreateDepositAccount(ctx, accountReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Anchor deposit account: %w", err)
+	}
+	log.Printf("Successfully created Anchor DepositAccount %s for money drops", anchorAccount.Data.ID)
+
+	// 4. Get Virtual NUBAN for the account
+	nubanInfo, err := s.anchorClient.GetVirtualNUBANForAccount(ctx, anchorAccount.Data.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch VirtualNUBAN: %w", err)
+	}
+	log.Printf("Successfully fetched VirtualNUBAN: %s, Bank: %s", nubanInfo.AccountNumber, nubanInfo.BankName)
+
+	// 5. Get bank name
+	bankName := nubanInfo.BankName
+	if bankName == "" {
+		if attributesMap, ok := anchorAccount.Data.Attributes.(map[string]interface{}); ok {
+			if bankData, exists := attributesMap["bank"]; exists {
+				if bankMap, ok := bankData.(map[string]interface{}); ok {
+					if name, exists := bankMap["name"]; exists {
+						if nameStr, ok := name.(string); ok {
+							bankName = nameStr
+						}
+					}
+				}
+			}
+		}
+		if bankName == "" {
+			bankName = "Unknown Bank"
+		}
+	}
+
+	// 6. Create or update account record in database
+	var accountID string
+	if existingAccount != nil {
+		// Update existing account with Anchor details
+		accountID = existingAccount.ID
+		if err := s.accountRepo.UpdateAccount(ctx, accountID, anchorAccount.Data.ID, nubanInfo.AccountNumber, bankName); err != nil {
+			return nil, fmt.Errorf("failed to update account with Anchor details: %w", err)
+		}
+	} else {
+		// Create new account record
+		newAccount := &domain.Account{
+			UserID:          userID,
+			AnchorAccountID: anchorAccount.Data.ID,
+			VirtualNUBAN:    nubanInfo.AccountNumber,
+			BankName:        bankName,
+			Type:            domain.MoneyDropAccount,
+		}
+		accountID, err = s.accountRepo.CreateAccount(ctx, newAccount)
+		if err != nil {
+			return nil, fmt.Errorf("failed to save account to database: %w", err)
+		}
+	}
+
+	log.Printf("Successfully created money drop account for user %s", userID)
+
+	return &CreateMoneyDropAccountResponse{
+		AccountID:       accountID,
+		AnchorAccountID: anchorAccount.Data.ID,
+		VirtualNUBAN:    nubanInfo.AccountNumber,
+		BankName:        bankName,
+	}, nil
+}

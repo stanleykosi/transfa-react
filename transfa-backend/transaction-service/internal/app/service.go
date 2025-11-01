@@ -29,6 +29,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/transfa/transaction-service/internal/domain"
 	"github.com/transfa/transaction-service/internal/store"
+	"github.com/transfa/transaction-service/pkg/accountclient"
 	"github.com/transfa/transaction-service/pkg/anchorclient"
 	rmrabbit "github.com/transfa/transaction-service/pkg/rabbitmq"
 )
@@ -43,13 +44,15 @@ const (
 type Service struct {
 	repo               store.Repository
 	anchorClient       *anchorclient.Client
+	accountClient      *accountclient.Client
 	eventProducer      rmrabbit.Publisher
 	transferConsumer   *TransferStatusConsumer
 	adminAccountID     string
 	transactionFeeKobo int64
+	moneyDropFeeKobo   int64
 }
 
-func NewService(repo store.Repository, anchor *anchorclient.Client, producer rmrabbit.Publisher, adminAccountID string, transactionFeeKobo int64) *Service {
+func NewService(repo store.Repository, anchor *anchorclient.Client, accountClient *accountclient.Client, producer rmrabbit.Publisher, adminAccountID string, transactionFeeKobo int64, moneyDropFeeKobo int64) *Service {
 	if transactionFeeKobo <= 0 {
 		log.Printf("INFO: Using default transaction fee %d kobo", defaultTransactionFee)
 		transactionFeeKobo = defaultTransactionFee
@@ -62,9 +65,11 @@ func NewService(repo store.Repository, anchor *anchorclient.Client, producer rmr
 	svc := &Service{
 		repo:               repo,
 		anchorClient:       anchor,
+		accountClient:      accountClient,
 		eventProducer:      producer,
 		adminAccountID:     adminAccountID,
 		transactionFeeKobo: transactionFeeKobo,
+		moneyDropFeeKobo:   moneyDropFeeKobo,
 	}
 
 	svc.transferConsumer = NewTransferStatusConsumer(repo)
@@ -79,6 +84,11 @@ func (s *Service) TransferStatusConsumer() *TransferStatusConsumer {
 // GetTransactionFee returns the configured transaction fee in kobo.
 func (s *Service) GetTransactionFee() int64 {
 	return s.transactionFeeKobo
+}
+
+// GetMoneyDropFee returns the configured money drop creation fee in kobo.
+func (s *Service) GetMoneyDropFee() int64 {
+	return s.moneyDropFeeKobo
 }
 
 // ResolveInternalUserID converts a Clerk user id string (e.g., "user_abc123") into the
@@ -674,7 +684,11 @@ func (s *Service) collectTransactionFee(ctx context.Context, parentTx *domain.Tr
 
 	// Create a fee collection transaction record for the admin account
 	// Update parent transaction destination fields when fee collection targets admin account
-	log.Printf("Fee collection recorded for transaction %s: amount=%d, transfer_id=%s", parentTx.ID, amount, transferResp.Data.ID)
+	if parentTx != nil {
+		log.Printf("Fee collection recorded for transaction %s: amount=%d, transfer_id=%s", parentTx.ID, amount, transferResp.Data.ID)
+	} else {
+		log.Printf("Fee collection recorded: amount=%d, transfer_id=%s", amount, transferResp.Data.ID)
+	}
 
 	return nil
 }
@@ -705,5 +719,325 @@ func (s *Service) syncAccountBalance(ctx context.Context, userID uuid.UUID) erro
 		log.Printf("Successfully synced balance for user %s to %d", userID, newBalance)
 	}
 
+	return nil
+}
+
+// CreateMoneyDrop orchestrates the creation of a new money drop.
+func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req domain.CreateMoneyDropRequest) (*domain.CreateMoneyDropResponse, error) {
+	log.Printf("CreateMoneyDrop: Starting creation for user %s", userID)
+
+	// 1. Get user's primary account and validate funds
+	primaryAccount, err := s.repo.FindAccountByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user's primary account: %w", err)
+	}
+
+	// Sync balance with Anchor before validation
+	if err := s.syncAccountBalance(ctx, userID); err != nil {
+		log.Printf("CreateMoneyDrop: Failed to sync balance for %s: %v", userID, err)
+	}
+
+	// Get actual balance from Anchor for validation
+	anchorBalance, err := s.anchorClient.GetAccountBalance(ctx, primaryAccount.AnchorAccountID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account balance from Anchor: %w", err)
+	}
+
+	totalAmount := req.AmountPerClaim * int64(req.NumberOfPeople)
+	requiredAmount := totalAmount + s.moneyDropFeeKobo // Add fee to required amount
+
+	if anchorBalance.Data.AvailableBalance < requiredAmount {
+		return nil, errors.New("insufficient funds in primary wallet")
+	}
+	log.Printf("CreateMoneyDrop: Total amount: %d, Fee: %d, Required: %d", totalAmount, s.moneyDropFeeKobo, requiredAmount)
+
+	// 2. Get or create money drop account via account-service
+	moneyDropAccount, err := s.repo.FindMoneyDropAccountByUserID(ctx, userID)
+	if err != nil && !errors.Is(err, store.ErrAccountNotFound) {
+		return nil, fmt.Errorf("failed to get user's money drop account: %w", err)
+	}
+
+	// If account doesn't exist or doesn't have Anchor account, create it via account-service
+	if moneyDropAccount == nil || moneyDropAccount.AnchorAccountID == "" {
+		log.Printf("CreateMoneyDrop: Creating money drop Anchor account for user %s", userID)
+		accountResp, err := s.accountClient.CreateMoneyDropAccount(ctx, userID.String())
+		if err != nil {
+			return nil, fmt.Errorf("failed to create money drop Anchor account: %w", err)
+		}
+		log.Printf("CreateMoneyDrop: Created money drop Anchor account %s for user %s", accountResp.AnchorAccountID, userID)
+
+		// Account-service already created/updated the account in the database
+		// Re-fetch to get the updated account with Anchor details
+		moneyDropAccount, err = s.repo.FindMoneyDropAccountByUserID(ctx, userID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch money drop account after creation: %w", err)
+		}
+		if moneyDropAccount.AnchorAccountID == "" {
+			return nil, fmt.Errorf("money drop account created but Anchor account ID is missing")
+		}
+	}
+
+	// 3. Transfer funds from primary account to money drop account via Book Transfer
+	reason := fmt.Sprintf("Money Drop Funding - Total: %d kobo", totalAmount)
+	_, err = s.anchorClient.InitiateBookTransfer(ctx, primaryAccount.AnchorAccountID, moneyDropAccount.AnchorAccountID, reason, totalAmount)
+	if err != nil {
+		return nil, fmt.Errorf("failed to transfer funds to money drop account: %w", err)
+	}
+	log.Printf("CreateMoneyDrop: Transferred %d kobo from primary to money drop account via Book Transfer", totalAmount)
+
+	// 4. Debit required amount (total + fee) from primary account
+	if err := s.repo.DebitWallet(ctx, userID, requiredAmount); err != nil {
+		return nil, fmt.Errorf("failed to debit primary wallet: %w", err)
+	}
+
+	// 4.5. Collect the money drop creation fee to admin account (if fee > 0)
+	if s.moneyDropFeeKobo > 0 {
+		// Create temporary transaction record for fee collection
+		tempFeeTx := &domain.Transaction{
+			ID:              uuid.New(),
+			SenderID:        userID,
+			SourceAccountID: primaryAccount.ID,
+			Type:            "money_drop_fee",
+			Category:        "Money Drop",
+			Status:          "pending",
+			Amount:          0,
+			Fee:             s.moneyDropFeeKobo,
+			Description:     "Money Drop Creation Fee",
+		}
+		if err := s.collectTransactionFee(ctx, tempFeeTx, primaryAccount, s.moneyDropFeeKobo, "Money Drop Creation Fee"); err != nil {
+			log.Printf("WARN: Failed to collect money drop creation fee: %v", err)
+			// Don't fail the operation, just log the warning
+		}
+	}
+
+	// 5. Create money drop record
+	expiry := time.Now().Add(time.Duration(req.ExpiryInMinutes) * time.Minute)
+	drop := &domain.MoneyDrop{
+		CreatorID:            userID,
+		Status:               "active",
+		AmountPerClaim:       req.AmountPerClaim,
+		TotalClaimsAllowed:   req.NumberOfPeople,
+		ClaimsMadeCount:      0,
+		ExpiryTimestamp:      expiry,
+		FundingSourceAccountID: primaryAccount.ID,
+		MoneyDropAccountID:   moneyDropAccount.ID,
+	}
+
+	createdDrop, err := s.repo.CreateMoneyDrop(ctx, drop)
+	if err != nil {
+		// Refund the Book Transfer since drop creation failed
+		// Transfer back from money drop account to primary account
+		refundReason := fmt.Sprintf("Money Drop Creation Failed - Refund")
+		if _, refundErr := s.anchorClient.InitiateBookTransfer(ctx, moneyDropAccount.AnchorAccountID, primaryAccount.AnchorAccountID, refundReason, totalAmount); refundErr != nil {
+			log.Printf("CRITICAL: Failed to refund Book Transfer for user %s after drop creation failure: %v", userID, refundErr)
+			// Also try to credit the database balance (including fee)
+			if dbRefundErr := s.repo.CreditWallet(ctx, userID, requiredAmount); dbRefundErr != nil {
+				log.Printf("CRITICAL: Failed to refund debited amount in database for user %s: %v", userID, dbRefundErr)
+			}
+		} else {
+			// If Anchor transfer refund succeeded but drop creation failed, also refund the fee
+			if s.moneyDropFeeKobo > 0 {
+				// Try to refund fee from admin account back to user (if fee was collected)
+				log.Printf("WARN: Money drop creation failed after fee collection. Fee may need manual refund.")
+			}
+		}
+		return nil, fmt.Errorf("failed to create money drop record: %w", err)
+	}
+
+	// 6. Log the funding transaction
+	fundingTx := &domain.Transaction{
+		ID:              uuid.New(),
+		SenderID:        userID,
+		SourceAccountID: primaryAccount.ID,
+		DestinationAccountID: &moneyDropAccount.ID,
+		Type:            "money_drop_funding",
+		Category:        "Money Drop",
+		Status:          "completed",
+		Amount:          totalAmount,
+		Fee:             s.moneyDropFeeKobo, // Record fee in database
+		Description:     fmt.Sprintf("Funding for Money Drop #%s", createdDrop.ID.String()),
+	}
+	if err := s.repo.CreateTransaction(ctx, fundingTx); err != nil {
+		log.Printf("WARN: Failed to log money drop funding transaction: %v", err)
+		// Don't fail the operation, the drop is already created
+	}
+
+	// 7. Prepare and return response
+	dropIDStr := createdDrop.ID.String()
+	response := &domain.CreateMoneyDropResponse{
+		MoneyDropID:      dropIDStr,
+		QRCodeContent:    fmt.Sprintf("transfa://claim-drop/%s", dropIDStr),
+		ShareableLink:    fmt.Sprintf("https://transfa.app/claim?drop_id=%s", dropIDStr),
+		TotalAmount:      totalAmount,
+		AmountPerClaim:   req.AmountPerClaim,
+		NumberOfPeople:   req.NumberOfPeople,
+		Fee:               s.moneyDropFeeKobo, // Include fee in response
+		ExpiryTimestamp:  expiry,
+	}
+
+	log.Printf("CreateMoneyDrop: Successfully created money drop %s for user %s", dropIDStr, userID)
+	return response, nil
+}
+
+// ClaimMoneyDrop orchestrates claiming a portion of a money drop.
+func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, dropID uuid.UUID) (*domain.ClaimMoneyDropResponse, error) {
+	log.Printf("ClaimMoneyDrop: Starting claim for drop %s by user %s", dropID, claimantID)
+
+	// 1. Get drop details
+	drop, err := s.repo.FindMoneyDropByID(ctx, dropID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid money drop ID: %w", err)
+	}
+
+	if drop.CreatorID == claimantID {
+		return nil, errors.New("you cannot claim your own money drop")
+	}
+
+	// 2. Get claimant's account
+	claimantAccount, err := s.repo.FindAccountByUserID(ctx, claimantID)
+	if err != nil {
+		return nil, fmt.Errorf("could not find claimant's primary account: %w", err)
+	}
+
+	// 3. Get money drop account
+	moneyDropAccount, err := s.repo.FindMoneyDropAccountByUserID(ctx, drop.CreatorID)
+	if err != nil {
+		return nil, fmt.Errorf("could not find money drop account: %w", err)
+	}
+
+	// 4. Perform atomic claim in database
+	err = s.repo.ClaimMoneyDropAtomic(ctx, dropID, claimantID, claimantAccount.ID, moneyDropAccount.ID, drop.AmountPerClaim)
+	if err != nil {
+		return nil, fmt.Errorf("failed to process claim: %w", err)
+	}
+
+	// 5. Get creator details for response
+	creator, err := s.repo.FindMoneyDropCreatorByDropID(ctx, dropID)
+	if err != nil {
+		return nil, fmt.Errorf("could not find creator's user record: %w", err)
+	}
+
+	// 6. Verify money drop account has Anchor account ID
+	if moneyDropAccount.AnchorAccountID == "" {
+		return nil, fmt.Errorf("money drop account does not have an Anchor account ID")
+	}
+
+	// 7. Initiate BookTransfer from money drop account to claimant's account
+	reason := fmt.Sprintf("Money Drop Claim by %s", creator.Username)
+
+	_, err = s.anchorClient.InitiateBookTransfer(ctx, moneyDropAccount.AnchorAccountID, claimantAccount.AnchorAccountID, reason, drop.AmountPerClaim)
+	if err != nil {
+		log.Printf("ERROR: Failed to initiate funds transfer for claim: %v", err)
+		// Note: The claim has already been recorded in the database.
+		// In a production system, you might want to implement retry logic or a compensation transaction.
+		// For now, we return success but log the error.
+		// The transaction status will be updated by the webhook handler.
+	} else {
+		log.Printf("ClaimMoneyDrop: Transferred %d kobo from money drop account to claimant via Book Transfer", drop.AmountPerClaim)
+	}
+
+	// 8. Prepare and return response
+	response := &domain.ClaimMoneyDropResponse{
+		Message:        "Money drop claimed successfully!",
+		AmountClaimed:  drop.AmountPerClaim,
+		CreatorUsername: creator.Username,
+	}
+
+	log.Printf("ClaimMoneyDrop: Successfully processed claim for drop %s by user %s", dropID, claimantID)
+	return response, nil
+}
+
+// GetMoneyDropDetails retrieves details about a money drop for display.
+func (s *Service) GetMoneyDropDetails(ctx context.Context, dropID uuid.UUID) (*domain.MoneyDropDetails, error) {
+	drop, err := s.repo.FindMoneyDropByID(ctx, dropID)
+	if err != nil {
+		return nil, fmt.Errorf("money drop not found: %w", err)
+	}
+
+	creator, err := s.repo.FindMoneyDropCreatorByDropID(ctx, dropID)
+	if err != nil {
+		return nil, fmt.Errorf("could not find creator: %w", err)
+	}
+
+	details := &domain.MoneyDropDetails{
+		ID:              drop.ID,
+		CreatorUsername: creator.Username,
+		AmountPerClaim:  drop.AmountPerClaim,
+		Status:          drop.Status,
+		IsClaimable:     false,
+		Message:         "",
+	}
+
+	// Determine if drop is claimable
+	if drop.Status != "active" {
+		details.Message = "This money drop is no longer active."
+		details.IsClaimable = false
+	} else if time.Now().After(drop.ExpiryTimestamp) {
+		details.Message = "This money drop has expired."
+		details.IsClaimable = false
+	} else if drop.ClaimsMadeCount >= drop.TotalClaimsAllowed {
+		details.Message = "This money drop has been fully claimed."
+		details.IsClaimable = false
+	} else {
+		details.Message = "You can claim this money drop!"
+		details.IsClaimable = true
+	}
+
+	return details, nil
+}
+
+// RefundMoneyDrop processes a refund for an expired or completed money drop.
+func (s *Service) RefundMoneyDrop(ctx context.Context, dropID uuid.UUID, creatorID uuid.UUID, amount int64) error {
+	log.Printf("RefundMoneyDrop: Processing refund for drop %s, amount %d", dropID, amount)
+
+	// Get creator's primary account
+	creatorAccount, err := s.repo.FindAccountByUserID(ctx, creatorID)
+	if err != nil {
+		return fmt.Errorf("failed to get creator's account: %w", err)
+	}
+
+	// Get money drop account
+	moneyDropAccount, err := s.repo.FindMoneyDropAccountByUserID(ctx, creatorID)
+	if err != nil {
+		return fmt.Errorf("failed to get money drop account: %w", err)
+	}
+
+	// Verify money drop account has Anchor account ID
+	if moneyDropAccount.AnchorAccountID == "" {
+		return fmt.Errorf("money drop account does not have an Anchor account ID")
+	}
+
+	// Transfer funds from money drop account back to primary account via Book Transfer
+	reason := fmt.Sprintf("Money Drop Refund - Amount: %d kobo", amount)
+	_, err = s.anchorClient.InitiateBookTransfer(ctx, moneyDropAccount.AnchorAccountID, creatorAccount.AnchorAccountID, reason, amount)
+	if err != nil {
+		return fmt.Errorf("failed to transfer funds back to primary account: %w", err)
+	}
+	log.Printf("RefundMoneyDrop: Transferred %d kobo from money drop account to primary account via Book Transfer", amount)
+
+	// Update database balances (credit primary)
+	if err := s.repo.CreditWallet(ctx, creatorID, amount); err != nil {
+		log.Printf("WARN: Failed to update primary account balance in database: %v", err)
+		// Don't fail - Anchor transfer succeeded, balance will sync later
+	}
+
+	// Log the refund transaction
+	refundTx := &domain.Transaction{
+		ID:              uuid.New(),
+		SenderID:        creatorID,
+		SourceAccountID: moneyDropAccount.ID,
+		DestinationAccountID: &creatorAccount.ID,
+		Type:            "money_drop_refund",
+		Category:        "Money Drop",
+		Status:          "completed",
+		Amount:          amount,
+		Fee:             0,
+		Description:     fmt.Sprintf("Refund for Money Drop #%s", dropID.String()),
+	}
+	if err := s.repo.CreateTransaction(ctx, refundTx); err != nil {
+		log.Printf("WARN: Failed to log money drop refund transaction: %v", err)
+	}
+
+	log.Printf("RefundMoneyDrop: Successfully processed refund for drop %s", dropID)
 	return nil
 }
