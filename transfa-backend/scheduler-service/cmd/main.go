@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/transfa/scheduler-service/internal/app"
 	"github.com/transfa/scheduler-service/internal/config"
@@ -45,6 +46,9 @@ func main() {
 	config.MinConns = 20
 	config.MaxConnLifetime = 30 * time.Minute
 	config.MaxConnIdleTime = 5 * time.Minute
+	
+	// Disable prepared statement caching to prevent conflicts
+	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 	
 	dbpool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
