@@ -144,6 +144,8 @@ func (h *TransactionHandlers) GetMoneyDropDetailsHandler(w http.ResponseWriter, 
 // RefundMoneyDropHandler handles internal requests to refund a money drop.
 // This is called by the scheduler-service and doesn't require authentication.
 func (h *TransactionHandlers) RefundMoneyDropHandler(w http.ResponseWriter, r *http.Request) {
+	log.Printf("RefundMoneyDropHandler: Received refund request at path %s", r.URL.Path)
+	
 	var req struct {
 		DropID    string `json:"drop_id"`
 		CreatorID string `json:"creator_id"`
@@ -155,6 +157,8 @@ func (h *TransactionHandlers) RefundMoneyDropHandler(w http.ResponseWriter, r *h
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
+
+	log.Printf("RefundMoneyDropHandler: Processing refund - DropID: %s, CreatorID: %s, Amount: %d", req.DropID, req.CreatorID, req.Amount)
 
 	dropID, err := uuid.Parse(req.DropID)
 	if err != nil {

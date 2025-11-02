@@ -76,6 +76,7 @@ type Repository interface {
 	ClaimMoneyDropAtomic(ctx context.Context, dropID, claimantID, claimantAccountID, moneyDropAccountID uuid.UUID, amount int64) error
 	FindExpiredAndCompletedMoneyDrops(ctx context.Context) ([]domain.MoneyDrop, error)
 	UpdateMoneyDropStatus(ctx context.Context, dropID uuid.UUID, status string) error
+	UpdateMoneyDropAccountBalance(ctx context.Context, accountID uuid.UUID, balance int64) error
 }
 
 type UpdateTransactionMetadataParams struct {

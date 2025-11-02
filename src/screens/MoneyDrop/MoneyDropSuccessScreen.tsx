@@ -27,7 +27,7 @@ import {
 } from 'react-native';
 import { RouteProp, useRoute, useNavigation } from '@react-navigation/native';
 import QRCode from 'react-native-qrcode-svg';
-import ScreenWrapper from '@/components/ScreenWrapper';
+import * as Clipboard from 'expo-clipboard';
 import PrimaryButton from '@/components/PrimaryButton';
 import Card from '@/components/Card';
 import AppHeader from '@/components/AppHeader';
@@ -36,7 +36,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { AppStackParamList } from '@/navigation/AppStack';
 import { AppNavigationProp } from '@/types/navigation';
 import { formatCurrency } from '@/utils/formatCurrency';
-// Clipboard functionality - using React Native's built-in Clipboard or fallback
 
 type MoneyDropSuccessScreenRouteProp = RouteProp<AppStackParamList, 'MoneyDropSuccess'>;
 
@@ -48,11 +47,7 @@ const MoneyDropSuccessScreen = () => {
 
   const copyToClipboard = async () => {
     try {
-      // Use Share API as fallback for copying
-      await Share.share({
-        message: dropDetails.shareable_link,
-        title: 'Money Drop Link',
-      });
+      await Clipboard.setStringAsync(dropDetails.shareable_link);
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 2000);
     } catch (error: any) {
@@ -73,67 +68,51 @@ const MoneyDropSuccessScreen = () => {
   };
 
   return (
-    <ScreenWrapper>
-      <AppHeader title="Money Drop Created" icon="checkmark-circle" />
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+    <View style={styles.container}>
+      <AppHeader
+        title="Money Drop Created"
+        subtitle="Share the link or QR code for others to claim"
+        icon="gift"
+        showBack={true}
+      />
+      <ScrollView
+        contentContainerStyle={styles.contentWrapper}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Success Icon */}
         <View style={styles.iconContainer}>
           <View style={styles.iconCircle}>
-            <Ionicons name="gift" size={48} color={theme.colors.primary} />
+            <Ionicons name="checkmark-circle" size={64} color={theme.colors.success} />
           </View>
         </View>
 
         <Text style={styles.title}>Money Drop Created Successfully!</Text>
-        <Text style={styles.subtitle}>
-          Share the QR code or link below for others to claim their portion. Funds are securely
-          stored in a dedicated account until claimed or refunded.
-        </Text>
-
-        {/* QR Code Card */}
-        <Card style={styles.qrCard}>
-          <View style={styles.qrContainer}>
-            <QRCode value={dropDetails.qr_code_content} size={220} />
-          </View>
-          <Text style={styles.qrHint}>Scan to claim</Text>
-        </Card>
 
         {/* Details Card */}
         <Card style={styles.detailsCard}>
           <View style={styles.cardHeader}>
-            <Ionicons name="information-circle" size={24} color={theme.colors.primary} />
+            <Ionicons name="information-circle" size={20} color={theme.colors.primary} />
             <Text style={styles.cardTitle}>Drop Details</Text>
           </View>
 
           <View style={styles.detailRow}>
-            <View style={styles.detailLabelContainer}>
-              <Ionicons name="cash" size={16} color={theme.colors.textSecondary} />
-              <Text style={styles.detailLabel}>Total Amount</Text>
-            </View>
+            <Text style={styles.detailLabel}>Total Amount</Text>
             <Text style={styles.detailValue}>{formatCurrency(dropDetails.total_amount)}</Text>
           </View>
 
           <View style={styles.detailRow}>
-            <View style={styles.detailLabelContainer}>
-              <Ionicons name="person" size={16} color={theme.colors.textSecondary} />
-              <Text style={styles.detailLabel}>Amount per Person</Text>
-            </View>
+            <Text style={styles.detailLabel}>Amount per Person</Text>
             <Text style={styles.detailValue}>{formatCurrency(dropDetails.amount_per_claim)}</Text>
           </View>
 
           <View style={styles.detailRow}>
-            <View style={styles.detailLabelContainer}>
-              <Ionicons name="people" size={16} color={theme.colors.textSecondary} />
-              <Text style={styles.detailLabel}>Number of People</Text>
-            </View>
+            <Text style={styles.detailLabel}>Number of People</Text>
             <Text style={styles.detailValue}>{dropDetails.number_of_people}</Text>
           </View>
 
           {dropDetails.fee > 0 && (
             <View style={styles.detailRow}>
-              <View style={styles.detailLabelContainer}>
-                <Ionicons name="card" size={16} color={theme.colors.textSecondary} />
-                <Text style={styles.detailLabel}>Creation Fee</Text>
-              </View>
+              <Text style={styles.detailLabel}>Creation Fee</Text>
               <Text style={styles.detailFee}>{formatCurrency(dropDetails.fee)}</Text>
             </View>
           )}
@@ -141,20 +120,31 @@ const MoneyDropSuccessScreen = () => {
           <View style={styles.detailDivider} />
 
           <View style={styles.detailRow}>
-            <View style={styles.detailLabelContainer}>
-              <Ionicons name="time" size={16} color={theme.colors.textSecondary} />
-              <Text style={styles.detailLabel}>Expires</Text>
-            </View>
+            <Text style={styles.detailLabel}>Expires</Text>
             <Text style={styles.detailValue}>
-              {new Date(dropDetails.expiry_timestamp).toLocaleString()}
+              {new Date(dropDetails.expiry_timestamp).toLocaleString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                hour: 'numeric',
+                minute: '2-digit',
+              })}
             </Text>
           </View>
+        </Card>
+
+        {/* QR Code Card */}
+        <Card style={styles.qrCard}>
+          <View style={styles.qrContainer}>
+            <QRCode value={dropDetails.qr_code_content} size={180} />
+          </View>
+          <Text style={styles.qrHint}>Scan QR code to claim</Text>
         </Card>
 
         {/* Share Link Card */}
         <Card style={styles.linkCard}>
           <View style={styles.cardHeader}>
-            <Ionicons name="link" size={24} color={theme.colors.primary} />
+            <Ionicons name="link" size={20} color={theme.colors.primary} />
             <Text style={styles.cardTitle}>Shareable Link</Text>
           </View>
           <TouchableOpacity
@@ -162,27 +152,27 @@ const MoneyDropSuccessScreen = () => {
             onPress={copyToClipboard}
             activeOpacity={0.7}
           >
-            <Text style={styles.linkText} numberOfLines={1}>
+            <Text style={styles.linkText} numberOfLines={1} ellipsizeMode="middle">
               {dropDetails.shareable_link}
             </Text>
             <Ionicons
               name={linkCopied ? 'checkmark-circle' : 'copy-outline'}
-              size={24}
+              size={20}
               color={linkCopied ? theme.colors.success : theme.colors.primary}
             />
           </TouchableOpacity>
           <Pressable onPress={shareLink} style={styles.shareButton}>
-            <Ionicons name="share-social-outline" size={20} color={theme.colors.primary} />
+            <Ionicons name="share-social-outline" size={18} color={theme.colors.primary} />
             <Text style={styles.shareButtonText}>Share Link</Text>
           </Pressable>
         </Card>
 
         {/* Security Note */}
         <View style={styles.securityNote}>
-          <Ionicons name="shield-checkmark" size={20} color={theme.colors.success} />
+          <Ionicons name="shield-checkmark" size={18} color={theme.colors.success} />
           <Text style={styles.securityText}>
             Funds are stored securely in a dedicated account. Unclaimed funds will be automatically
-            refunded to your wallet after expiry.
+            refunded after expiry.
           </Text>
         </View>
 
@@ -192,45 +182,44 @@ const MoneyDropSuccessScreen = () => {
           style={styles.doneButton}
         />
       </ScrollView>
-    </ScreenWrapper>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    padding: theme.spacing.s24,
-    paddingBottom: theme.spacing.s48,
+    flex: 1,
+    backgroundColor: theme.colors.background,
+  },
+  contentWrapper: {
+    paddingHorizontal: theme.spacing.s16,
+    paddingVertical: theme.spacing.s16,
+    paddingBottom: theme.spacing.s32,
   },
   iconContainer: {
     alignItems: 'center',
+    marginTop: theme.spacing.s16,
     marginBottom: theme.spacing.s24,
   },
   iconCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: theme.colors.primary + '15',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: theme.colors.success + '15',
     justifyContent: 'center',
     alignItems: 'center',
   },
   title: {
-    fontSize: theme.fontSizes['2xl'],
+    fontSize: theme.fontSizes.xl,
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
     textAlign: 'center',
-    marginBottom: theme.spacing.s8,
-  },
-  subtitle: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.textSecondary,
-    textAlign: 'center',
-    marginBottom: theme.spacing.s32,
-    lineHeight: 20,
+    marginBottom: theme.spacing.s24,
   },
   qrCard: {
-    padding: theme.spacing.s24,
+    padding: theme.spacing.s20,
     alignItems: 'center',
-    marginBottom: theme.spacing.s24,
+    marginBottom: theme.spacing.s16,
   },
   qrContainer: {
     backgroundColor: theme.colors.background,
@@ -241,12 +230,10 @@ const styles = StyleSheet.create({
   qrHint: {
     fontSize: theme.fontSizes.sm,
     color: theme.colors.textSecondary,
-    marginTop: theme.spacing.s8,
   },
   detailsCard: {
-    width: '100%',
-    padding: theme.spacing.s20,
-    marginBottom: theme.spacing.s24,
+    padding: theme.spacing.s16,
+    marginBottom: theme.spacing.s16,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -254,7 +241,7 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.s16,
   },
   cardTitle: {
-    fontSize: theme.fontSizes.lg,
+    fontSize: theme.fontSizes.base,
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
     marginLeft: theme.spacing.s8,
@@ -267,15 +254,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: theme.colors.border,
   },
-  detailLabelContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
   detailLabel: {
     fontSize: theme.fontSizes.base,
     color: theme.colors.textSecondary,
-    marginLeft: theme.spacing.s8,
   },
   detailValue: {
     fontSize: theme.fontSizes.base,
@@ -288,21 +269,20 @@ const styles = StyleSheet.create({
     fontWeight: theme.fontWeights.medium,
   },
   detailDivider: {
-    height: 2,
+    height: 1,
     backgroundColor: theme.colors.border,
     marginVertical: theme.spacing.s8,
   },
   linkCard: {
-    width: '100%',
-    padding: theme.spacing.s20,
-    marginBottom: theme.spacing.s24,
+    padding: theme.spacing.s16,
+    marginBottom: theme.spacing.s16,
   },
   linkContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: theme.colors.surface,
     borderRadius: theme.radii.md,
-    padding: theme.spacing.s16,
+    padding: theme.spacing.s12,
     borderWidth: 1,
     borderColor: theme.colors.border,
     marginBottom: theme.spacing.s12,
@@ -317,7 +297,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: theme.spacing.s12,
+    paddingVertical: theme.spacing.s8,
   },
   shareButtonText: {
     fontSize: theme.fontSizes.base,
@@ -329,7 +309,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: theme.colors.success + '15',
     borderRadius: theme.radii.md,
-    padding: theme.spacing.s16,
+    padding: theme.spacing.s12,
     marginBottom: theme.spacing.s24,
     alignItems: 'flex-start',
   },
@@ -337,11 +317,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: theme.fontSizes.sm,
     color: theme.colors.textSecondary,
-    marginLeft: theme.spacing.s12,
+    marginLeft: theme.spacing.s8,
     lineHeight: 18,
   },
   doneButton: {
-    width: '100%',
+    marginTop: theme.spacing.s8,
   },
 });
 

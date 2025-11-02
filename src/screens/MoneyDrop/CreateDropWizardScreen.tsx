@@ -24,7 +24,6 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import ScreenWrapper from '@/components/ScreenWrapper';
 import FormInput from '@/components/FormInput';
 import PrimaryButton from '@/components/PrimaryButton';
 import PinInputModal from '@/components/PinInputModal';
@@ -73,9 +72,10 @@ const CreateDropWizardScreen = () => {
   }, [amountPerClaim, numberOfPeople]);
 
   const moneyDropFee = feesData?.money_drop_fee_kobo || 0;
+  const moneyDropFeeNaira = moneyDropFee / 100; // Convert kobo to naira
   const totalWithFee = useMemo(() => {
-    return totalAmount > 0 ? totalAmount + moneyDropFee / 100 : 0; // Convert kobo to naira
-  }, [totalAmount, moneyDropFee]);
+    return totalAmount > 0 ? totalAmount + moneyDropFeeNaira : 0;
+  }, [totalAmount, moneyDropFeeNaira]);
 
   const handleCreateDrop = () => {
     const amountKobo = nairaToKobo(parseFloat(amountPerClaim));
@@ -116,13 +116,21 @@ const CreateDropWizardScreen = () => {
 
   return (
     <>
-      <ScreenWrapper style={styles.screenWrapper}>
-        <AppHeader title="Create a Money Drop" icon="gift-outline" />
+      <View style={styles.container}>
+        <AppHeader
+          title="Create a Money Drop"
+          subtitle="Set up a secure money drop for others to claim"
+          icon="gift"
+          showBack={true}
+        />
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.flex}
         >
-          <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+          <ScrollView
+            contentContainerStyle={styles.contentWrapper}
+            keyboardShouldPersistTaps="handled"
+          >
             {/* Feature Highlights Card */}
             <Card style={styles.featuresCard}>
               <View style={styles.featuresHeader}>
@@ -198,7 +206,9 @@ const CreateDropWizardScreen = () => {
                         color={theme.colors.textSecondary}
                       />
                     </View>
-                    <Text style={styles.summaryFee}>{formatCurrency(moneyDropFee)}</Text>
+                    <Text style={styles.summaryFee}>
+                      {formatCurrency(nairaToKobo(moneyDropFeeNaira))}
+                    </Text>
                   </View>
                 )}
 
@@ -218,7 +228,7 @@ const CreateDropWizardScreen = () => {
                       style={[
                         styles.balanceValue,
                         balanceData.available_balance < nairaToKobo(totalWithFee) &&
-                          styles.balanceInsufficient,
+                        styles.balanceInsufficient,
                       ]}
                     >
                       {formatCurrency(balanceData.available_balance)}
@@ -238,7 +248,7 @@ const CreateDropWizardScreen = () => {
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
-      </ScreenWrapper>
+      </View>
       <PinInputModal
         visible={isModalVisible}
         onClose={closeModal}
@@ -251,18 +261,20 @@ const CreateDropWizardScreen = () => {
 };
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+  },
   flex: {
     flex: 1,
   },
-  screenWrapper: {
-    paddingHorizontal: 0,
-  },
-  container: {
-    padding: theme.spacing.s24,
+  contentWrapper: {
+    paddingHorizontal: theme.spacing.s16,
+    paddingVertical: theme.spacing.s16,
   },
   featuresCard: {
-    marginBottom: theme.spacing.s24,
-    padding: theme.spacing.s20,
+    marginBottom: theme.spacing.s20,
+    padding: theme.spacing.s16,
   },
   featuresHeader: {
     flexDirection: 'row',
@@ -289,7 +301,7 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     marginTop: theme.spacing.s16,
-    padding: theme.spacing.s20,
+    padding: theme.spacing.s16,
   },
   summaryTitle: {
     fontSize: theme.fontSizes.lg,

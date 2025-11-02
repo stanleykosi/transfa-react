@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/transfa/scheduler-service/internal/domain"
@@ -26,8 +27,10 @@ type Client struct {
 
 // NewClient creates a new transaction service client.
 func NewClient(baseURL string) *Client {
+	// Normalize baseURL - remove trailing slash if present
+	normalizedURL := strings.TrimSuffix(baseURL, "/")
 	return &Client{
-		baseURL:    baseURL,
+		baseURL:    normalizedURL,
 		httpClient: &http.Client{Timeout: 15 * time.Second},
 	}
 }
@@ -76,7 +79,17 @@ func (c *Client) DebitSubscriptionFee(ctx context.Context, userID string, amount
 
 // RefundMoneyDrop calls the transaction-service to refund a money drop.
 func (c *Client) RefundMoneyDrop(ctx context.Context, dropID, creatorID string, amount int64) error {
-	url := fmt.Sprintf("%s/transactions/internal/money-drops/refund", c.baseURL)
+	// Handle both cases: baseURL with or without /transactions prefix
+	var url string
+	if c.baseURL == "" {
+		return fmt.Errorf("transaction service base URL is not configured")
+	}
+	// If baseURL already ends with /transactions, don't add it again
+	if strings.HasSuffix(c.baseURL, "/transactions") {
+		url = fmt.Sprintf("%s/internal/money-drops/refund", c.baseURL)
+	} else {
+		url = fmt.Sprintf("%s/transactions/internal/money-drops/refund", c.baseURL)
+	}
 
 	payload := domain.RefundPayload{
 		DropID:    dropID,
@@ -102,7 +115,12 @@ func (c *Client) RefundMoneyDrop(ctx context.Context, dropID, creatorID string, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("transaction service returned error status %d", resp.StatusCode)
+		// Read response body to get detailed error message
+		var errorBody bytes.Buffer
+		if _, err := errorBody.ReadFrom(resp.Body); err == nil {
+			return fmt.Errorf("transaction service returned error status %d: %s (URL: %s)", resp.StatusCode, errorBody.String(), url)
+		}
+		return fmt.Errorf("transaction service returned error status %d (URL: %s)", resp.StatusCode, url)
 	}
 
 	return nil

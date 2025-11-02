@@ -722,6 +722,30 @@ func (s *Service) syncAccountBalance(ctx context.Context, userID uuid.UUID) erro
 	return nil
 }
 
+// syncMoneyDropAccountBalance synchronizes the money drop account balance with Anchor API
+func (s *Service) syncMoneyDropAccountBalance(ctx context.Context, accountID uuid.UUID, anchorAccountID string) error {
+	if anchorAccountID == "" {
+		return fmt.Errorf("money drop account has no Anchor account ID")
+	}
+
+	// Get the current balance from Anchor
+	anchorBalance, err := s.anchorClient.GetAccountBalance(ctx, anchorAccountID)
+	if err != nil {
+		return fmt.Errorf("failed to get balance from Anchor: %w", err)
+	}
+
+	// Update the internal database with the Anchor balance
+	newBalance := anchorBalance.Data.AvailableBalance
+	log.Printf("Syncing money drop account balance for account %s: anchor=%d", accountID, newBalance)
+
+	if err := s.repo.UpdateMoneyDropAccountBalance(ctx, accountID, newBalance); err != nil {
+		return fmt.Errorf("failed to update money drop account balance: %w", err)
+	}
+
+	log.Printf("Successfully synced money drop account balance for account %s to %d", accountID, newBalance)
+	return nil
+}
+
 // CreateMoneyDrop orchestrates the creation of a new money drop.
 func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req domain.CreateMoneyDropRequest) (*domain.CreateMoneyDropResponse, error) {
 	log.Printf("CreateMoneyDrop: Starting creation for user %s", userID)
@@ -784,6 +808,12 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 		return nil, fmt.Errorf("failed to transfer funds to money drop account: %w", err)
 	}
 	log.Printf("CreateMoneyDrop: Transferred %d kobo from primary to money drop account via Book Transfer", totalAmount)
+
+	// 3.5. Sync money drop account balance after funding
+	if err := s.syncMoneyDropAccountBalance(ctx, moneyDropAccount.ID, moneyDropAccount.AnchorAccountID); err != nil {
+		log.Printf("WARN: Failed to sync money drop account balance after funding: %v", err)
+		// Don't fail the operation, balance will sync later
+	}
 
 	// 4. Debit required amount (total + fee) from primary account
 	if err := s.repo.DebitWallet(ctx, userID, requiredAmount); err != nil {
@@ -936,6 +966,18 @@ func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, drop
 		log.Printf("ClaimMoneyDrop: Transferred %d kobo from money drop account to claimant via Book Transfer", drop.AmountPerClaim)
 	}
 
+	// 7.5. Sync money drop account balance after claim
+	if err := s.syncMoneyDropAccountBalance(ctx, moneyDropAccount.ID, moneyDropAccount.AnchorAccountID); err != nil {
+		log.Printf("WARN: Failed to sync money drop account balance after claim: %v", err)
+		// Don't fail the operation, balance will sync later
+	}
+
+	// 7.6. Sync claimant's account balance after receiving funds
+	if err := s.syncAccountBalance(ctx, claimantID); err != nil {
+		log.Printf("WARN: Failed to sync claimant account balance after claim: %v", err)
+		// Don't fail the operation, balance will sync later
+	}
+
 	// 8. Prepare and return response
 	response := &domain.ClaimMoneyDropResponse{
 		Message:        "Money drop claimed successfully!",
@@ -1019,6 +1061,18 @@ func (s *Service) RefundMoneyDrop(ctx context.Context, dropID uuid.UUID, creator
 	if err := s.repo.CreditWallet(ctx, creatorID, amount); err != nil {
 		log.Printf("WARN: Failed to update primary account balance in database: %v", err)
 		// Don't fail - Anchor transfer succeeded, balance will sync later
+	}
+
+	// Sync money drop account balance after refund
+	if err := s.syncMoneyDropAccountBalance(ctx, moneyDropAccount.ID, moneyDropAccount.AnchorAccountID); err != nil {
+		log.Printf("WARN: Failed to sync money drop account balance after refund: %v", err)
+		// Don't fail the operation, balance will sync later
+	}
+
+	// Sync creator's primary account balance after refund
+	if err := s.syncAccountBalance(ctx, creatorID); err != nil {
+		log.Printf("WARN: Failed to sync creator account balance after refund: %v", err)
+		// Don't fail the operation, balance will sync later
 	}
 
 	// Log the refund transaction

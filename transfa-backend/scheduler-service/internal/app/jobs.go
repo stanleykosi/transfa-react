@@ -140,14 +140,15 @@ func (j *Jobs) ProcessMoneyDropExpiry() {
 		remainingBalance := totalAmount - claimedAmount
 
 		if remainingBalance > 0 {
-			j.logger.Info("refunding remaining balance", "drop_id", drop.ID, "amount", remainingBalance)
+			j.logger.Info("refunding remaining balance", "drop_id", drop.ID, "creator_id", drop.CreatorID, "amount", remainingBalance)
 
 			// Call transaction-service to refund the balance
 			err := j.txClient.RefundMoneyDrop(ctx, drop.ID, drop.CreatorID, remainingBalance)
 			if err != nil {
-				j.logger.Error("failed to refund money drop", "drop_id", drop.ID, "error", err)
+				j.logger.Error("failed to refund money drop", "drop_id", drop.ID, "creator_id", drop.CreatorID, "amount", remainingBalance, "error", err)
 				continue // Move to next drop
 			}
+			j.logger.Info("successfully refunded money drop", "drop_id", drop.ID, "amount", remainingBalance)
 		}
 
 		// Mark the drop as processed

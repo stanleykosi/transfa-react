@@ -1001,3 +1001,19 @@ func (r *PostgresRepository) UpdateMoneyDropStatus(ctx context.Context, dropID u
 	_, err := r.db.Exec(ctx, query, status, dropID)
 	return err
 }
+
+// UpdateMoneyDropAccountBalance updates the balance for a money drop account by account ID.
+func (r *PostgresRepository) UpdateMoneyDropAccountBalance(ctx context.Context, accountID uuid.UUID, balance int64) error {
+	query := `UPDATE accounts SET balance = $1, updated_at = NOW() WHERE id = $2 AND account_type = 'money_drop'`
+	result, err := r.db.Exec(ctx, query, balance, accountID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected := result.RowsAffected()
+	if rowsAffected == 0 {
+		return ErrAccountNotFound
+	}
+
+	return nil
+}
