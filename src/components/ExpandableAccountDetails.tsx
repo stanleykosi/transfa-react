@@ -41,7 +41,7 @@ const ExpandableAccountDetails: React.FC<ExpandableAccountDetailsProps> = ({
 
     if (newExpandedState) {
       // Expanding
-      height.value = withTiming(110, {
+      height.value = withTiming(140, {
         duration: 350,
         easing: Easing.bezier(0.25, 0.1, 0.25, 1),
       });
@@ -171,6 +171,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
     borderRadius: theme.radii.lg,
     padding: theme.spacing.s16,
+    paddingBottom: theme.spacing.s20,
     gap: theme.spacing.s12,
   },
   detailRow: {
@@ -190,10 +191,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: theme.spacing.s8,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingVertical: theme.spacing.s8,
+    paddingVertical: theme.spacing.s12,
     paddingHorizontal: theme.spacing.s16,
     borderRadius: theme.radii.md,
-    marginTop: theme.spacing.s4,
+    marginTop: theme.spacing.s8,
   },
   copyButtonText: {
     fontSize: theme.fontSizes.sm,

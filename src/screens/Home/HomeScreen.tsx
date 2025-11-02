@@ -343,6 +343,7 @@ const styles = StyleSheet.create({
     marginHorizontal: theme.spacing.s20,
     marginBottom: theme.spacing.s32,
     borderRadius: theme.radii.xl,
+    overflow: 'visible', // Ensure expandable content is not clipped
     ...Platform.select({
       ios: {
         shadowColor: '#5B48E8',
