@@ -21,29 +21,24 @@
  * - @/utils/formatCurrency: For displaying currency values.
  */
 import React, { useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  TouchableOpacity,
-} from 'react-native';
+import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import Animated from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import FormInput from '@/components/FormInput';
 import PrimaryButton from '@/components/PrimaryButton';
+import EnhancedBackButton from '@/components/EnhancedBackButton';
 import { theme } from '@/constants/theme';
 import { useSecureAction } from '@/hooks/useSecureAction';
 import { useAccountBalance, useSelfTransfer, useTransactionFees } from '@/api/transactionApi';
 import { useListBeneficiaries } from '@/api/accountApi';
 import PinInputModal from '@/components/PinInputModal';
-import { Ionicons } from '@expo/vector-icons';
 import { Beneficiary } from '@/types/api';
 import BeneficiaryDropdown from '@/components/BeneficiaryDropdown';
 import { formatCurrency, nairaToKobo } from '@/utils/formatCurrency';
 import { AppNavigationProp } from '@/types/navigation';
+import { useEntranceAnimation } from '@/hooks/useEntranceAnimation';
 
 const SelfTransferScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
@@ -164,27 +159,25 @@ const SelfTransferScreen = () => {
   const feeInKobo = useMemo(() => fees?.self_fee_kobo ?? 0, [fees]);
   const totalAmountInKobo = amountInKobo + feeInKobo;
 
+  const headerAnimation = useEntranceAnimation({ delay: 0, duration: 400 });
+  const contentAnimation = useEntranceAnimation({ delay: 100, duration: 500 });
+  const summaryAnimation = useEntranceAnimation({ delay: 200, duration: 500 });
+
   return (
     <ScreenWrapper>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={theme.colors.textPrimary} />
-        </TouchableOpacity>
+      <Animated.View style={[styles.header, headerAnimation.animatedStyle]}>
+        <EnhancedBackButton onPress={() => navigation.goBack()} />
         <Text style={styles.title}>Self Transfer</Text>
-        <View style={{ width: 24 }} />
-      </View>
+        <View style={{ width: 40 }} />
+      </Animated.View>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-          <View style={styles.accountCard}>
+          <Animated.View style={contentAnimation.animatedStyle}>
+            <View style={styles.accountCard}>
             <Text style={styles.accountLabel}>From</Text>
             <Text style={styles.accountName}>Transfa Wallet</Text>
             {isLoadingBalance ? (
@@ -220,9 +213,11 @@ const SelfTransferScreen = () => {
             multiline
             numberOfLines={2}
           />
+          </Animated.View>
 
           {amountInKobo > 0 && (
-            <View style={styles.summaryCard}>
+            <Animated.View style={summaryAnimation.animatedStyle}>
+              <View style={styles.summaryCard}>
               <View style={styles.summaryRow}>
                 <Text style={styles.summaryLabel}>Amount</Text>
                 <Text style={styles.summaryValue}>{formatCurrency(amountInKobo)}</Text>
@@ -237,12 +232,16 @@ const SelfTransferScreen = () => {
                 <Text style={styles.summaryTotalLabel}>Total to be Debited</Text>
                 <Text style={styles.summaryTotalValue}>{formatCurrency(totalAmountInKobo)}</Text>
               </View>
-            </View>
+              </View>
+            </Animated.View>
           )}
 
           <PrimaryButton
             title="Withdraw Funds"
-            onPress={handleWithdrawal}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              handleWithdrawal();
+            }}
             isLoading={isSending}
             disabled={!selectedBeneficiary || !amount.trim() || isSending}
           />
@@ -267,13 +266,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingBottom: theme.spacing.s24,
   },
-  backButton: {
-    padding: theme.spacing.s4,
-  },
   title: {
     fontSize: theme.fontSizes['2xl'],
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
+    letterSpacing: -0.5,
   },
   keyboardView: {
     flex: 1,
@@ -284,11 +281,20 @@ const styles = StyleSheet.create({
   },
   accountCard: {
     backgroundColor: theme.colors.surface,
-    borderRadius: theme.radii.md,
-    padding: theme.spacing.s16,
-    marginBottom: theme.spacing.s16,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderRadius: theme.radii.xl,
+    padding: theme.spacing.s20,
+    marginBottom: theme.spacing.s20,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.12,
+        shadowRadius: 16,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
   },
   accountLabel: {
     fontSize: theme.fontSizes.sm,
@@ -307,35 +313,47 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     backgroundColor: theme.colors.surface,
-    borderRadius: theme.radii.lg,
-    padding: theme.spacing.s16,
+    borderRadius: theme.radii.xl,
+    padding: theme.spacing.s20,
     marginBottom: theme.spacing.s24,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.12,
+        shadowRadius: 16,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
   },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: theme.spacing.s12,
+    marginBottom: theme.spacing.s16,
   },
   summaryLabel: {
     fontSize: theme.fontSizes.base,
     color: theme.colors.textSecondary,
+    fontWeight: theme.fontWeights.medium,
   },
   summaryValue: {
     fontSize: theme.fontSizes.base,
     color: theme.colors.textPrimary,
-    fontWeight: theme.fontWeights.medium,
+    fontWeight: theme.fontWeights.semibold,
+    letterSpacing: -0.3,
   },
   totalRow: {
-    borderTopWidth: 1,
+    borderTopWidth: 2,
     borderColor: theme.colors.border,
-    paddingTop: theme.spacing.s12,
+    paddingTop: theme.spacing.s16,
+    marginTop: theme.spacing.s4,
     marginBottom: 0,
   },
   summaryTotalLabel: {
-    fontSize: theme.fontSizes.base,
+    fontSize: theme.fontSizes.lg,
     color: theme.colors.textPrimary,
     fontWeight: theme.fontWeights.bold,
   },
@@ -343,6 +361,7 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSizes.lg,
     color: theme.colors.primary,
     fontWeight: theme.fontWeights.bold,
+    letterSpacing: -0.5,
   },
 });
 

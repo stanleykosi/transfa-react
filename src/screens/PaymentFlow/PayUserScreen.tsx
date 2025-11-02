@@ -19,26 +19,21 @@
  * - @/utils/formatCurrency: For displaying currency values.
  */
 import React, { useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  TouchableOpacity,
-} from 'react-native';
+import { View, Text, StyleSheet, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import Animated from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import FormInput from '@/components/FormInput';
 import PrimaryButton from '@/components/PrimaryButton';
+import EnhancedBackButton from '@/components/EnhancedBackButton';
 import { theme } from '@/constants/theme';
 import { useSecureAction } from '@/hooks/useSecureAction';
 import { useP2PTransfer, useTransactionFees } from '@/api/transactionApi';
 import PinInputModal from '@/components/PinInputModal';
-import { Ionicons } from '@expo/vector-icons';
 import { formatCurrency, nairaToKobo } from '@/utils/formatCurrency';
 import { AppNavigationProp } from '@/types/navigation';
+import { useEntranceAnimation } from '@/hooks/useEntranceAnimation';
 
 const PayUserScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
@@ -142,74 +137,79 @@ const PayUserScreen = () => {
   const feeInKobo = useMemo(() => fees?.p2p_fee_kobo ?? 0, [fees]);
   const totalAmountInKobo = amountInKobo + feeInKobo;
 
+  // Entrance animations
+  const headerAnimation = useEntranceAnimation({ delay: 0, duration: 400 });
+  const formAnimation = useEntranceAnimation({ delay: 100, duration: 500 });
+  const summaryAnimation = useEntranceAnimation({ delay: 200, duration: 500 });
+
   return (
     <ScreenWrapper>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={theme.colors.textPrimary} />
-        </TouchableOpacity>
+      <Animated.View style={[styles.header, headerAnimation.animatedStyle]}>
+        <EnhancedBackButton onPress={() => navigation.goBack()} />
         <Text style={styles.title}>Pay Someone</Text>
-        <View style={{ width: 24 }} />
-      </View>
+        <View style={{ width: 40 }} />
+      </Animated.View>
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-          <FormInput
-            label="Recipient's @username"
-            value={username}
-            onChangeText={setUsername}
-            placeholder="@john.doe"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
+          <Animated.View style={formAnimation.animatedStyle}>
+            <FormInput
+              label="Recipient's @username"
+              value={username}
+              onChangeText={setUsername}
+              placeholder="@john.doe"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
 
-          <FormInput
-            label="Amount (₦)"
-            value={amount}
-            onChangeText={setAmount}
-            placeholder="0.00"
-            keyboardType="numeric"
-          />
+            <FormInput
+              label="Amount (₦)"
+              value={amount}
+              onChangeText={setAmount}
+              placeholder="0.00"
+              keyboardType="numeric"
+            />
 
-          <FormInput
-            label="Description (Optional)"
-            value={description}
-            onChangeText={setDescription}
-            placeholder="e.g., For lunch"
-            multiline
-            numberOfLines={2}
-          />
+            <FormInput
+              label="Description"
+              value={description}
+              onChangeText={setDescription}
+              placeholder="e.g., For lunch"
+              multiline
+              numberOfLines={2}
+            />
+          </Animated.View>
 
           {amountInKobo > 0 && (
-            <View style={styles.summaryCard}>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Amount</Text>
-                <Text style={styles.summaryValue}>{formatCurrency(amountInKobo)}</Text>
+            <Animated.View style={summaryAnimation.animatedStyle}>
+              <View style={styles.summaryCard}>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Amount</Text>
+                  <Text style={styles.summaryValue}>{formatCurrency(amountInKobo)}</Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Transaction Fee</Text>
+                  <Text style={styles.summaryValue}>
+                    {isLoadingFees ? 'Calculating…' : formatCurrency(feeInKobo)}
+                  </Text>
+                </View>
+                <View style={[styles.summaryRow, styles.totalRow]}>
+                  <Text style={styles.summaryTotalLabel}>Total to be Debited</Text>
+                  <Text style={styles.summaryTotalValue}>{formatCurrency(totalAmountInKobo)}</Text>
+                </View>
               </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Transaction Fee</Text>
-                <Text style={styles.summaryValue}>
-                  {isLoadingFees ? 'Calculating…' : formatCurrency(feeInKobo)}
-                </Text>
-              </View>
-              <View style={[styles.summaryRow, styles.totalRow]}>
-                <Text style={styles.summaryTotalLabel}>Total to be Debited</Text>
-                <Text style={styles.summaryTotalValue}>{formatCurrency(totalAmountInKobo)}</Text>
-              </View>
-            </View>
+            </Animated.View>
           )}
 
           <PrimaryButton
             title="Send Payment"
-            onPress={handlePayment}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              handlePayment();
+            }}
             isLoading={isSending}
             disabled={!username.trim() || !amount.trim() || isSending}
           />
@@ -234,13 +234,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingBottom: theme.spacing.s24,
   },
-  backButton: {
-    padding: theme.spacing.s4,
-  },
   title: {
     fontSize: theme.fontSizes['2xl'],
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
+    letterSpacing: -0.5,
   },
   keyboardView: {
     flex: 1,
@@ -251,35 +249,47 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     backgroundColor: theme.colors.surface,
-    borderRadius: theme.radii.lg,
-    padding: theme.spacing.s16,
+    borderRadius: theme.radii.xl,
+    padding: theme.spacing.s20,
     marginBottom: theme.spacing.s24,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.12,
+        shadowRadius: 16,
+      },
+      android: {
+        elevation: 8,
+      },
+    }),
   },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: theme.spacing.s12,
+    marginBottom: theme.spacing.s16,
   },
   summaryLabel: {
     fontSize: theme.fontSizes.base,
     color: theme.colors.textSecondary,
+    fontWeight: theme.fontWeights.medium,
   },
   summaryValue: {
     fontSize: theme.fontSizes.base,
     color: theme.colors.textPrimary,
-    fontWeight: theme.fontWeights.medium,
+    fontWeight: theme.fontWeights.semibold,
+    letterSpacing: -0.3,
   },
   totalRow: {
-    borderTopWidth: 1,
+    borderTopWidth: 2,
     borderColor: theme.colors.border,
-    paddingTop: theme.spacing.s12,
+    paddingTop: theme.spacing.s16,
+    marginTop: theme.spacing.s4,
     marginBottom: 0,
   },
   summaryTotalLabel: {
-    fontSize: theme.fontSizes.base,
+    fontSize: theme.fontSizes.lg,
     color: theme.colors.textPrimary,
     fontWeight: theme.fontWeights.bold,
   },
@@ -287,6 +297,7 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSizes.lg,
     color: theme.colors.primary,
     fontWeight: theme.fontWeights.bold,
+    letterSpacing: -0.5,
   },
 });
 
