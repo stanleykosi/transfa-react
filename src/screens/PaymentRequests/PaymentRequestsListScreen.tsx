@@ -29,7 +29,7 @@ import { theme } from '@/constants/theme';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { Ionicons } from '@expo/vector-icons';
 import ActionButton from '@/components/ActionButton';
-import AppHeader from '@/components/AppHeader';
+import ScreenWrapper from '@/components/ScreenWrapper';
 
 const PaymentRequestItem = React.memo(({ item }: { item: PaymentRequest }) => {
   const isFulfilled = item.status === 'fulfilled';
@@ -183,13 +183,19 @@ const PaymentRequestsListScreen = () => {
   };
 
   return (
-    <View style={styles.container}>
-      <AppHeader
-        title="Payment Requests"
-        subtitle="Manage your outstanding requests"
-        icon="document-text"
-        showBack
-      />
+    <ScreenWrapper>
+      <View style={styles.header}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
+          <Ionicons name="arrow-back" size={24} color={theme.colors.textPrimary} />
+        </TouchableOpacity>
+        <Text style={styles.title}>Payment Requests</Text>
+        <View style={{ width: 24 }} />
+      </View>
 
       <View style={styles.contentWrapper}>
         {renderContent()}
@@ -204,19 +210,28 @@ const PaymentRequestsListScreen = () => {
           />
         </View>
       </View>
-    </View>
+    </ScreenWrapper>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: theme.spacing.s24,
+  },
+  backButton: {
+    padding: theme.spacing.s4,
+  },
+  title: {
+    fontSize: theme.fontSizes['2xl'],
+    fontWeight: theme.fontWeights.bold,
+    color: theme.colors.textPrimary,
   },
   contentWrapper: {
     flex: 1,
-    paddingHorizontal: theme.spacing.s16,
-    paddingVertical: theme.spacing.s16,
+    paddingTop: theme.spacing.s16,
     gap: theme.spacing.s16,
   },
   listContainer: {

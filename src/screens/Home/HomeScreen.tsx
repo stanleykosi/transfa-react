@@ -204,6 +204,7 @@ const HomeScreen = () => {
     <ScreenWrapper style={styles.container}>
       <ScrollView
         showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.scrollContent}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -300,13 +301,15 @@ const HomeScreen = () => {
           </View>
         </View>
 
-        <View style={styles.bottomSpacer} />
       </ScrollView>
     </ScreenWrapper>
   );
 };
 
 const styles = StyleSheet.create({
+  scrollContent: {
+    paddingBottom: 0,
+  },
   container: {
     paddingHorizontal: 0,
   },
@@ -391,7 +394,8 @@ const styles = StyleSheet.create({
   // Quick Actions Section
   quickActionsSection: {
     paddingHorizontal: theme.spacing.s24,
-    marginBottom: theme.spacing.s24,
+    marginBottom: 0,
+    paddingBottom: 0,
   },
   sectionTitle: {
     fontSize: theme.fontSizes.lg,
@@ -434,9 +438,6 @@ const styles = StyleSheet.create({
   refreshButton: {
     marginTop: theme.spacing.s24,
     minWidth: 200,
-  },
-  bottomSpacer: {
-    height: theme.spacing.s32,
   },
 });
 

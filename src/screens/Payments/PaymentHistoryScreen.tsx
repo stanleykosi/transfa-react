@@ -19,17 +19,18 @@ import {
   RefreshControl,
   Alert,
   Platform,
+  TouchableOpacity,
 } from 'react-native';
 import { theme } from '@/constants/theme';
 import { useTransactionHistory, useUserProfile } from '@/api/transactionApi';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { Ionicons } from '@expo/vector-icons';
-import AppHeader from '@/components/AppHeader';
+import ScreenWrapper from '@/components/ScreenWrapper';
+import { useNavigation } from '@react-navigation/native';
 
 interface PaymentHistoryScreenProps {
   showBack?: boolean;
   title?: string;
-  subtitle?: string;
 }
 
 interface TransactionItemProps {
@@ -212,8 +213,8 @@ const ItemSeparatorComponent = () => <View style={styles.separator} />;
 const PaymentHistoryScreen: React.FC<PaymentHistoryScreenProps> = ({
   showBack = true,
   title = 'Payments',
-  subtitle = 'View all your payment transactions',
 }) => {
+  const navigation = useNavigation();
   const [refreshing, setRefreshing] = useState(false);
 
   // Get user profile with UUID for correct transaction direction logic
@@ -267,8 +268,23 @@ const PaymentHistoryScreen: React.FC<PaymentHistoryScreenProps> = ({
   );
 
   return (
-    <View style={styles.container}>
-      <AppHeader title={title} subtitle={subtitle} icon="receipt" showBack={showBack} />
+    <ScreenWrapper>
+      <View style={styles.header}>
+        {showBack ? (
+          <TouchableOpacity
+            onPress={() => navigation.goBack()}
+            style={styles.backButton}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="arrow-back" size={24} color={theme.colors.textPrimary} />
+          </TouchableOpacity>
+        ) : (
+          <View style={{ width: 24 }} />
+        )}
+        <Text style={styles.title}>{title}</Text>
+        <View style={{ width: 24 }} />
+      </View>
 
       <View style={styles.contentWrapper}>
         {(isLoading || isLoadingProfile) && !refreshing ? (
@@ -298,23 +314,36 @@ const PaymentHistoryScreen: React.FC<PaymentHistoryScreenProps> = ({
           />
         )}
       </View>
-    </View>
+    </ScreenWrapper>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: theme.spacing.s24,
+  },
+  backButton: {
+    padding: theme.spacing.s4,
+  },
+  title: {
+    fontSize: theme.fontSizes['2xl'],
+    fontWeight: theme.fontWeights.bold,
+    color: theme.colors.textPrimary,
   },
   contentWrapper: {
     flex: 1,
-    paddingHorizontal: theme.spacing.s16,
-    paddingVertical: theme.spacing.s16,
+    paddingTop: theme.spacing.s16,
+    paddingBottom: 0,
+    marginBottom: 0,
   },
   listContainer: {
     flexGrow: 1,
-    paddingVertical: theme.spacing.s12,
+    paddingTop: theme.spacing.s12,
+    paddingBottom: 0,
+    marginBottom: 0,
   },
   // Transaction Item
   transactionItem: {

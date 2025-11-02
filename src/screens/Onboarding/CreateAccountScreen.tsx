@@ -224,6 +224,7 @@ const CreateAccountScreen = () => {
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={styles.scrollContainer}
+          showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
           <View style={styles.container}>

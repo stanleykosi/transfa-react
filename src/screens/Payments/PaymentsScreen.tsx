@@ -16,11 +16,7 @@ import { theme } from '@/constants/theme';
 const PaymentsScreen = () => {
   return (
     <View style={styles.container}>
-      <PaymentHistoryScreen
-        showBack={false}
-        title="Payments"
-        subtitle="View all your payment transactions"
-      />
+      <PaymentHistoryScreen showBack={false} title="Payments" />
     </View>
   );
 };

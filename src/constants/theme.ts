@@ -26,6 +26,9 @@ export const SPACING = {
   s32: 32,
   s40: 40,
   s48: 48,
+  s64: 64,
+  s80: 80,
+  s100: 100,
 };
 
 // Font sizes for different text roles

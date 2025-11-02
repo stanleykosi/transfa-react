@@ -110,6 +110,7 @@ const ProfileScreen = () => {
             renderItem={renderMenuItem}
             ItemSeparatorComponent={ItemSeparator}
             scrollEnabled={false}
+            showsVerticalScrollIndicator={false}
           />
         </EnhancedCard>
       </View>

@@ -49,11 +49,24 @@ const PaymentRequestSuccessScreen = () => {
 
   return (
     <ScreenWrapper>
-      <ScrollView contentContainerStyle={styles.container}>
+      <View style={styles.header}>
+        <TouchableOpacity
+          onPress={() => navigation.navigate('AppTabs', { screen: 'Payments' })}
+          style={styles.backButton}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
+          <Ionicons name="arrow-back" size={24} color={theme.colors.textPrimary} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Request Created</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.iconContainer}>
           <Ionicons name="checkmark-circle" size={80} color={theme.colors.secondary} />
         </View>
-        <Text style={styles.title}>Request Created!</Text>
+        <Text style={styles.successTitle}>Request Created!</Text>
         <Text style={styles.subtitle}>
           Share the QR code or link below with anyone to receive your payment.
         </Text>
@@ -89,16 +102,31 @@ const PaymentRequestSuccessScreen = () => {
 };
 
 const styles = StyleSheet.create({
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: theme.spacing.s24,
+  },
+  backButton: {
+    padding: theme.spacing.s4,
+  },
+  headerTitle: {
+    fontSize: theme.fontSizes['2xl'],
+    fontWeight: theme.fontWeights.bold,
+    color: theme.colors.textPrimary,
+  },
   container: {
     flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: theme.spacing.s24,
+    paddingTop: theme.spacing.s24,
+    paddingBottom: theme.spacing.s24,
   },
   iconContainer: {
     marginBottom: theme.spacing.s24,
   },
-  title: {
+  successTitle: {
     fontSize: theme.fontSizes['3xl'],
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,

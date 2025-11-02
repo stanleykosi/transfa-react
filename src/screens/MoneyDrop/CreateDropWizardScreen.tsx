@@ -24,10 +24,11 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { TouchableOpacity } from 'react-native';
+import ScreenWrapper from '@/components/ScreenWrapper';
 import FormInput from '@/components/FormInput';
 import PrimaryButton from '@/components/PrimaryButton';
 import PinInputModal from '@/components/PinInputModal';
-import AppHeader from '@/components/AppHeader';
 import Card from '@/components/Card';
 import { theme } from '@/constants/theme';
 import { useCreateMoneyDrop, useAccountBalance, useTransactionFees } from '@/api/transactionApi';
@@ -115,140 +116,145 @@ const CreateDropWizardScreen = () => {
   };
 
   return (
-    <>
-      <View style={styles.container}>
-        <AppHeader
-          title="Create a Money Drop"
-          subtitle="Set up a secure money drop for others to claim"
-          icon="gift"
-          showBack={true}
-        />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          style={styles.flex}
+    <ScreenWrapper>
+      <View style={styles.header}>
+        <TouchableOpacity
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
-          <ScrollView
-            contentContainerStyle={styles.contentWrapper}
-            keyboardShouldPersistTaps="handled"
-          >
-            {/* Feature Highlights Card */}
-            <Card style={styles.featuresCard}>
-              <View style={styles.featuresHeader}>
-                <Ionicons name="shield-checkmark" size={24} color={theme.colors.success} />
-                <Text style={styles.featuresTitle}>Secure Money Drop</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="lock-closed" size={16} color={theme.colors.textSecondary} />
-                <Text style={styles.featureText}>
-                  Funds are stored in a dedicated secure account separate from your main wallet
-                </Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="share-social" size={16} color={theme.colors.textSecondary} />
-                <Text style={styles.featureText}>
-                  Share via QR code or link - recipients claim instantly to their account
-                </Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="time" size={16} color={theme.colors.textSecondary} />
-                <Text style={styles.featureText}>
-                  Auto-refund if not claimed - your money returns to your wallet automatically
-                </Text>
-              </View>
-            </Card>
-
-            {/* Step 1: Amount per Claim */}
-            <FormInput
-              label="Amount per Person (₦)"
-              value={amountPerClaim}
-              onChangeText={setAmountPerClaim}
-              placeholder="e.g., 500"
-              keyboardType="numeric"
-            />
-
-            {/* Step 2: Number of People */}
-            <FormInput
-              label="Number of People"
-              value={numberOfPeople}
-              onChangeText={setNumberOfPeople}
-              placeholder="e.g., 10"
-              keyboardType="number-pad"
-            />
-
-            {/* Step 3: Expiry Time */}
-            <FormInput
-              label="Expiry Time (minutes)"
-              value={expiryInMinutes}
-              onChangeText={setExpiryInMinutes}
-              placeholder="e.g., 60 for 1 hour"
-              keyboardType="number-pad"
-            />
-
-            {/* Summary Card */}
-            {totalAmount > 0 && (
-              <Card style={styles.summaryCard}>
-                <Text style={styles.summaryTitle}>Payment Summary</Text>
-
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Total Amount:</Text>
-                  <Text style={styles.summaryValue}>
-                    {formatCurrency(nairaToKobo(totalAmount))}
-                  </Text>
-                </View>
-
-                {moneyDropFee > 0 && (
-                  <View style={styles.summaryRow}>
-                    <View style={styles.feeRow}>
-                      <Text style={styles.summaryLabel}>Creation Fee:</Text>
-                      <Ionicons
-                        name="information-circle-outline"
-                        size={16}
-                        color={theme.colors.textSecondary}
-                      />
-                    </View>
-                    <Text style={styles.summaryFee}>
-                      {formatCurrency(nairaToKobo(moneyDropFeeNaira))}
-                    </Text>
-                  </View>
-                )}
-
-                <View style={styles.summaryDivider} />
-
-                <View style={styles.summaryRow}>
-                  <Text style={styles.summaryTotalLabel}>Total Required:</Text>
-                  <Text style={styles.summaryTotalValue}>
-                    {formatCurrency(nairaToKobo(totalWithFee))}
-                  </Text>
-                </View>
-
-                {balanceData && (
-                  <View style={styles.balanceRow}>
-                    <Text style={styles.balanceLabel}>Available Balance:</Text>
-                    <Text
-                      style={[
-                        styles.balanceValue,
-                        balanceData.available_balance < nairaToKobo(totalWithFee) &&
-                        styles.balanceInsufficient,
-                      ]}
-                    >
-                      {formatCurrency(balanceData.available_balance)}
-                    </Text>
-                  </View>
-                )}
-              </Card>
-            )}
-
-            <View style={styles.buttonContainer}>
-              <PrimaryButton
-                title="Create Money Drop"
-                onPress={handleCreateDrop}
-                isLoading={isCreating}
-                disabled={totalAmount <= 0}
-              />
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
+          <Ionicons name="arrow-back" size={24} color={theme.colors.textPrimary} />
+        </TouchableOpacity>
+        <Text style={styles.title}>Create a Money Drop</Text>
+        <View style={{ width: 24 }} />
       </View>
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.flex}
+      >
+        <ScrollView
+          contentContainerStyle={styles.contentWrapper}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Feature Highlights Card */}
+          <Card style={styles.featuresCard}>
+            <View style={styles.featuresHeader}>
+              <Ionicons name="shield-checkmark" size={24} color={theme.colors.success} />
+              <Text style={styles.featuresTitle}>Secure Money Drop</Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Ionicons name="lock-closed" size={16} color={theme.colors.textSecondary} />
+              <Text style={styles.featureText}>
+                Funds are stored in a dedicated secure account separate from your main wallet
+              </Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Ionicons name="share-social" size={16} color={theme.colors.textSecondary} />
+              <Text style={styles.featureText}>
+                Share via QR code or link - recipients claim instantly to their account
+              </Text>
+            </View>
+            <View style={styles.featureItem}>
+              <Ionicons name="time" size={16} color={theme.colors.textSecondary} />
+              <Text style={styles.featureText}>
+                Auto-refund if not claimed - your money returns to your wallet automatically
+              </Text>
+            </View>
+          </Card>
+
+          {/* Step 1: Amount per Claim */}
+          <FormInput
+            label="Amount per Person (₦)"
+            value={amountPerClaim}
+            onChangeText={setAmountPerClaim}
+            placeholder="e.g., 500"
+            keyboardType="numeric"
+          />
+
+          {/* Step 2: Number of People */}
+          <FormInput
+            label="Number of People"
+            value={numberOfPeople}
+            onChangeText={setNumberOfPeople}
+            placeholder="e.g., 10"
+            keyboardType="number-pad"
+          />
+
+          {/* Step 3: Expiry Time */}
+          <FormInput
+            label="Expiry Time (minutes)"
+            value={expiryInMinutes}
+            onChangeText={setExpiryInMinutes}
+            placeholder="e.g., 60 for 1 hour"
+            keyboardType="number-pad"
+          />
+
+          {/* Summary Card */}
+          {totalAmount > 0 && (
+            <Card style={styles.summaryCard}>
+              <Text style={styles.summaryTitle}>Payment Summary</Text>
+
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Total Amount:</Text>
+                <Text style={styles.summaryValue}>{formatCurrency(nairaToKobo(totalAmount))}</Text>
+              </View>
+
+              {moneyDropFee > 0 && (
+                <View style={styles.summaryRow}>
+                  <View style={styles.feeRow}>
+                    <Text style={styles.summaryLabel}>Creation Fee:</Text>
+                    <Ionicons
+                      name="information-circle-outline"
+                      size={16}
+                      color={theme.colors.textSecondary}
+                    />
+                  </View>
+                  <Text style={styles.summaryFee}>
+                    {formatCurrency(nairaToKobo(moneyDropFeeNaira))}
+                  </Text>
+                </View>
+              )}
+
+              <View style={styles.summaryDivider} />
+
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryTotalLabel}>Total Required:</Text>
+                <Text style={styles.summaryTotalValue}>
+                  {formatCurrency(nairaToKobo(totalWithFee))}
+                </Text>
+              </View>
+
+              {balanceData && (
+                <View style={styles.balanceRow}>
+                  <Text style={styles.balanceLabel}>Available Balance:</Text>
+                  <Text
+                    style={[
+                      styles.balanceValue,
+                      balanceData.available_balance < nairaToKobo(totalWithFee) &&
+                      styles.balanceInsufficient,
+                    ]}
+                  >
+                    {formatCurrency(balanceData.available_balance)}
+                  </Text>
+                </View>
+              )}
+            </Card>
+          )}
+
+          <View style={styles.buttonContainer}>
+            <PrimaryButton
+              title="Create Money Drop"
+              onPress={handleCreateDrop}
+              isLoading={isCreating}
+              disabled={totalAmount <= 0}
+            />
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
       <PinInputModal
         visible={isModalVisible}
         onClose={closeModal}
@@ -256,21 +262,31 @@ const CreateDropWizardScreen = () => {
         error={pinError}
         clearError={clearPinError}
       />
-    </>
+    </ScreenWrapper>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: theme.spacing.s24,
+  },
+  backButton: {
+    padding: theme.spacing.s4,
+  },
+  title: {
+    fontSize: theme.fontSizes['2xl'],
+    fontWeight: theme.fontWeights.bold,
+    color: theme.colors.textPrimary,
   },
   flex: {
     flex: 1,
   },
   contentWrapper: {
-    paddingHorizontal: theme.spacing.s16,
-    paddingVertical: theme.spacing.s16,
+    paddingTop: theme.spacing.s16,
+    paddingBottom: theme.spacing.s80,
   },
   featuresCard: {
     marginBottom: theme.spacing.s20,

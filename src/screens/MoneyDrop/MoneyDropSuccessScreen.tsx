@@ -28,9 +28,9 @@ import {
 import { RouteProp, useRoute, useNavigation } from '@react-navigation/native';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
+import ScreenWrapper from '@/components/ScreenWrapper';
 import PrimaryButton from '@/components/PrimaryButton';
 import Card from '@/components/Card';
-import AppHeader from '@/components/AppHeader';
 import { theme } from '@/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { AppStackParamList } from '@/navigation/AppStack';
@@ -68,13 +68,7 @@ const MoneyDropSuccessScreen = () => {
   };
 
   return (
-    <View style={styles.container}>
-      <AppHeader
-        title="Money Drop Created"
-        subtitle="Share the link or QR code for others to claim"
-        icon="gift"
-        showBack={true}
-      />
+    <ScreenWrapper>
       <ScrollView
         contentContainerStyle={styles.contentWrapper}
         showsVerticalScrollIndicator={false}
@@ -86,7 +80,7 @@ const MoneyDropSuccessScreen = () => {
           </View>
         </View>
 
-        <Text style={styles.title}>Money Drop Created Successfully!</Text>
+        <Text style={styles.successTitle}>Money Drop Created Successfully!</Text>
 
         {/* Details Card */}
         <Card style={styles.detailsCard}>
@@ -182,18 +176,13 @@ const MoneyDropSuccessScreen = () => {
           style={styles.doneButton}
         />
       </ScrollView>
-    </View>
+    </ScreenWrapper>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background,
-  },
   contentWrapper: {
-    paddingHorizontal: theme.spacing.s16,
-    paddingVertical: theme.spacing.s16,
+    paddingTop: theme.spacing.s16,
     paddingBottom: theme.spacing.s32,
   },
   iconContainer: {
@@ -209,7 +198,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  title: {
+  successTitle: {
     fontSize: theme.fontSizes.xl,
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,

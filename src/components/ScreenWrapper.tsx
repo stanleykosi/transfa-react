@@ -31,7 +31,7 @@ interface ScreenWrapperProps {
 
 const ScreenWrapper: React.FC<ScreenWrapperProps> = ({ children, style }) => {
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
       <View style={[styles.container, style]}>{children}</View>
     </SafeAreaView>
   );
@@ -44,8 +44,9 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    paddingHorizontal: theme.spacing.s24,
-    paddingVertical: theme.spacing.s20,
+    paddingHorizontal: theme.spacing.s20,
+    paddingTop: theme.spacing.s20,
+    paddingBottom: 0,
   },
 });
 
