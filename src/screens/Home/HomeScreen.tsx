@@ -1,14 +1,15 @@
 /**
  * @description
  * Redesigned Home screen with modern fintech UI featuring card-based layout,
- * icon buttons, and professional styling. Main dashboard displaying wallet balance
- * and primary actions like "Pay Someone", "Self Transfer", and "Create Payment Request".
+ * circular icon buttons, and professional styling. Main dashboard displaying wallet balance
+ * with expandable account details and primary actions with smooth animations.
  *
  * @dependencies
  * - react-native: For core components
+ * - react-native-reanimated: For smooth animations
  * - @/components/ScreenWrapper: For consistent screen layout and safe area handling
- * - @/components/EnhancedCard: For modern card components
- * - @/components/ActionButton: For icon-based action buttons
+ * - @/components/CircularIconButton: For icon-based action grid
+ * - @/components/ExpandableAccountDetails: For Add Money toggle
  */
 import React, { useEffect, useState, useCallback } from 'react';
 import {
@@ -20,16 +21,20 @@ import {
   RefreshControl,
   Platform,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import ActionButton from '@/components/ActionButton';
+import CircularIconButton from '@/components/CircularIconButton';
+import ExpandableAccountDetails from '@/components/ExpandableAccountDetails';
 import { theme } from '@/constants/theme';
 import apiClient from '@/api/apiClient';
 import { useAuth } from '@clerk/clerk-expo';
 import { useAccountBalance, useUserProfile } from '@/api/transactionApi';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useEntranceAnimation } from '@/hooks/useEntranceAnimation';
 
 const HomeScreen = () => {
   const navigation = useNavigation();
@@ -50,6 +55,11 @@ const HomeScreen = () => {
     error: balanceError,
     refetch: refetchBalance,
   } = useAccountBalance();
+
+  // Animation hooks for entrance effects - must be at top level
+  const headerAnimation = useEntranceAnimation({ delay: 0, duration: 500 });
+  const balanceCardAnimation = useEntranceAnimation({ delay: 100, duration: 500 });
+  const actionsAnimation = useEntranceAnimation({ delay: 200, duration: 500 });
 
   const fetchAccountData = useCallback(async () => {
     try {
@@ -214,93 +224,81 @@ const HomeScreen = () => {
           />
         }
       >
-        {/* Header */}
-        <View style={styles.header}>
+        {/* Header with entrance animation */}
+        <Animated.View style={[styles.header, headerAnimation.animatedStyle]}>
           <View>
             <Text style={styles.greeting}>Welcome Back</Text>
             <Text style={styles.userName}>{userProfile?.username || 'User'}</Text>
           </View>
-        </View>
+        </Animated.View>
 
-        {/* Balance Card with Gradient */}
-        <LinearGradient
-          colors={[theme.colors.gradientStart, theme.colors.gradientEnd]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.balanceCard}
-        >
-          <View style={styles.balanceCardContent}>
-            <Text style={styles.balanceLabel}>Available Balance</Text>
-            {isLoadingBalance ? (
-              <ActivityIndicator size="small" color={theme.colors.textOnPrimary} />
-            ) : balanceError ? (
-              <Text style={styles.balanceError}>Unable to load balance</Text>
-            ) : (
-              <Text style={styles.balanceAmount}>
-                {accountBalance ? formatCurrency(accountBalance.available_balance) : '₦0.00'}
-              </Text>
-            )}
+        {/* Enhanced Balance Card with Gradient and Entrance Animation */}
+        <Animated.View style={balanceCardAnimation.animatedStyle}>
+          <LinearGradient
+            colors={[theme.colors.gradientStart, theme.colors.gradientEnd]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.balanceCard}
+          >
+            <View style={styles.balanceCardContent}>
+              <Text style={styles.balanceLabel}>Available Balance</Text>
+              {isLoadingBalance ? (
+                <ActivityIndicator size="small" color={theme.colors.textOnPrimary} />
+              ) : balanceError ? (
+                <Text style={styles.balanceError}>Unable to load balance</Text>
+              ) : (
+                <Text style={styles.balanceAmount}>
+                  {accountBalance ? formatCurrency(accountBalance.available_balance) : '₦0.00'}
+                </Text>
+              )}
 
-            {/* Account Info */}
-            <View style={styles.accountInfo}>
-              <View style={styles.accountInfoItem}>
-                <Ionicons name="card-outline" size={16} color={theme.colors.textOnPrimary} />
-                <Text style={styles.accountInfoText}>{nuban}</Text>
-              </View>
-              {bankName && (
-                <View style={styles.accountInfoItem}>
-                  <Ionicons name="business-outline" size={16} color={theme.colors.textOnPrimary} />
-                  <Text style={styles.accountInfoText}>{bankName}</Text>
-                </View>
+              {/* Expandable Account Details with Add Money Toggle */}
+              {nuban && (
+                <ExpandableAccountDetails accountNumber={nuban} bankName={bankName || ''} />
               )}
             </View>
-          </View>
-        </LinearGradient>
+          </LinearGradient>
+        </Animated.View>
 
-        {/* Quick Actions Section */}
-        <View style={styles.quickActionsSection}>
+        {/* Quick Actions Section with Circular Icon Grid */}
+        <Animated.View style={[styles.quickActionsSection, actionsAnimation.animatedStyle]}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
 
-          {/* Primary Actions */}
-          <View style={styles.actionGrid}>
-            <ActionButton
-              title="Pay Someone"
+          {/* Circular Icon Grid */}
+          <View style={styles.iconGrid}>
+            <CircularIconButton
+              title="Send"
               icon="send"
               onPress={() => navigation.navigate('PayUser' as never)}
-              variant="primary"
-              size="large"
-              style={styles.actionButton}
+              variant="gradient"
+              gradientColors={[theme.colors.gradientStart, theme.colors.gradientEnd]}
             />
 
-            <ActionButton
+            <CircularIconButton
               title="Self Transfer"
               icon="swap-horizontal"
               onPress={() => navigation.navigate('SelfTransfer' as never)}
-              variant="secondary"
-              size="large"
-              style={styles.actionButton}
+              variant="solid"
+              color={theme.colors.secondary}
             />
 
-            <ActionButton
-              title="Payment Request"
+            <CircularIconButton
+              title="Request"
               icon="document-text"
               onPress={() => navigation.navigate('PaymentRequestsList' as never)}
               variant="outline"
-              size="large"
-              style={styles.actionButton}
+              color={theme.colors.primary}
             />
 
-            <ActionButton
+            <CircularIconButton
               title="Money Drop"
               icon="gift"
               onPress={() => navigation.navigate('CreateDropWizard' as never)}
               variant="outline"
-              size="large"
-              style={styles.actionButton}
+              color={theme.colors.accent}
             />
           </View>
-        </View>
-
+        </Animated.View>
       </ScrollView>
     </ScreenWrapper>
   );
@@ -331,27 +329,29 @@ const styles = StyleSheet.create({
     fontSize: theme.fontSizes.sm,
     color: theme.colors.textSecondary,
     fontWeight: theme.fontWeights.medium,
+    opacity: 0.7,
   },
   userName: {
     fontSize: theme.fontSizes['2xl'],
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
     marginTop: theme.spacing.s4,
+    letterSpacing: -0.5,
   },
-  // Balance Card Styles
+  // Enhanced Balance Card Styles
   balanceCard: {
-    marginHorizontal: theme.spacing.s24,
-    marginBottom: theme.spacing.s24,
+    marginHorizontal: theme.spacing.s20,
+    marginBottom: theme.spacing.s32,
     borderRadius: theme.radii.xl,
     ...Platform.select({
       ios: {
         shadowColor: '#5B48E8',
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.3,
-        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 12 },
+        shadowOpacity: 0.4,
+        shadowRadius: 24,
       },
       android: {
-        elevation: 8,
+        elevation: 12,
       },
     }),
   },
@@ -361,53 +361,47 @@ const styles = StyleSheet.create({
   balanceLabel: {
     fontSize: theme.fontSizes.sm,
     color: theme.colors.textOnPrimary,
-    opacity: 0.9,
+    opacity: 0.85,
     fontWeight: theme.fontWeights.medium,
     marginBottom: theme.spacing.s8,
   },
   balanceAmount: {
     fontSize: theme.fontSizes['4xl'],
-    fontWeight: theme.fontWeights.bold,
+    fontWeight: '800' as any,
     color: theme.colors.textOnPrimary,
-    marginBottom: theme.spacing.s16,
+    marginBottom: theme.spacing.s8,
+    letterSpacing: -1,
+    ...Platform.select({
+      ios: {
+        textShadowColor: 'rgba(0, 0, 0, 0.1)',
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: 4,
+      },
+    }),
   },
   balanceError: {
     fontSize: theme.fontSizes.base,
     color: theme.colors.textOnPrimary,
     opacity: 0.8,
   },
-  accountInfo: {
-    marginTop: theme.spacing.s12,
-    gap: theme.spacing.s8,
-  },
-  accountInfoItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.s8,
-  },
-  accountInfoText: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.textOnPrimary,
-    opacity: 0.9,
-    fontWeight: theme.fontWeights.medium,
-  },
-  // Quick Actions Section
+  // Quick Actions Section with Circular Icons
   quickActionsSection: {
     paddingHorizontal: theme.spacing.s24,
     marginBottom: 0,
-    paddingBottom: 0,
+    paddingBottom: theme.spacing.s24,
   },
   sectionTitle: {
     fontSize: theme.fontSizes.lg,
     fontWeight: theme.fontWeights.bold,
     color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.s16,
+    marginBottom: theme.spacing.s20,
+    letterSpacing: -0.3,
   },
-  actionGrid: {
-    gap: theme.spacing.s12,
-  },
-  actionButton: {
-    width: '100%',
+  iconGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.s8,
   },
   // Misc
   loadingText: {

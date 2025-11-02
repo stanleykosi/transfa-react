@@ -234,7 +234,7 @@ const CreateDropWizardScreen = () => {
                     style={[
                       styles.balanceValue,
                       balanceData.available_balance < nairaToKobo(totalWithFee) &&
-                      styles.balanceInsufficient,
+                        styles.balanceInsufficient,
                     ]}
                   >
                     {formatCurrency(balanceData.available_balance)}
