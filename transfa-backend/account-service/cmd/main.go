@@ -55,17 +55,17 @@ func main() {
 	if err != nil {
 		log.Fatalf("Unable to parse database URL: %v\n", err)
 	}
-	
+
 	// Configure connection pool for high-traffic scenarios
 	// Increased from 10 to 100 to handle 100k+ concurrent users
 	dbConfig.MaxConns = 100
 	dbConfig.MinConns = 20
 	dbConfig.MaxConnLifetime = 30 * time.Minute
 	dbConfig.MaxConnIdleTime = 5 * time.Minute
-	
+
 	// Disable prepared statement caching to prevent conflicts
 	dbConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
-	
+
 	dbpool, err := pgxpool.NewWithConfig(context.Background(), dbConfig)
 	if err != nil {
 		log.Fatalf("Unable to connect to database: %v\n", err)
@@ -78,11 +78,11 @@ func main() {
 	beneficiaryRepo := store.NewPostgresBeneficiaryRepository(dbpool)
 	bankRepo := store.NewPostgresBankRepository(dbpool)
 	anchorClient := anchorclient.NewClient(cfg.AnchorAPIBaseURL, cfg.AnchorAPIKey)
-	
+
 	// Setup services
 	accountService := app.NewAccountService(accountRepo, beneficiaryRepo, bankRepo, anchorClient)
 	eventHandler := app.NewAccountEventHandler(accountRepo, anchorClient)
-	
+
 	// Setup RabbitMQ consumer.
 	consumer, err := rabbitmq.NewConsumer(cfg.RabbitMQURL)
 	if err != nil {
@@ -103,7 +103,7 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour) // Run every hour
 		defer ticker.Stop()
-		
+
 		log.Printf("Starting periodic cache cleanup job...")
 		for {
 			select {
@@ -119,7 +119,7 @@ func main() {
 	}()
 
 	// Setup and start HTTP server.
-	router := api.NewRouter(cfg, accountService)
+	router := api.NewRouter(&cfg, accountService)
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%s", cfg.ServerPort),
 		Handler: router,
@@ -138,7 +138,7 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	
+
 	log.Println("Shutting down account-service...")
 
 	// Create a context with a timeout for shutdown.
