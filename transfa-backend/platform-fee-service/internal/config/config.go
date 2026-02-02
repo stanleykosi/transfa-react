@@ -4,7 +4,11 @@
  */
 package config
 
-import "github.com/spf13/viper"
+import (
+	"os"
+
+	"github.com/spf13/viper"
+)
 
 // Config holds all configuration for the application.
 type Config struct {
@@ -19,11 +23,12 @@ type Config struct {
 
 // LoadConfig reads configuration from environment variables.
 func LoadConfig() (config Config, err error) {
-	viper.SetDefault("SERVER_PORT", "8086")
+	viper.SetDefault("SERVER_PORT", "8080")
 	viper.SetDefault("BUSINESS_TIMEZONE", "Africa/Lagos")
 	viper.AutomaticEnv()
 
 	_ = viper.BindEnv("SERVER_PORT")
+	_ = viper.BindEnv("PORT")
 	_ = viper.BindEnv("DATABASE_URL")
 	_ = viper.BindEnv("CLERK_JWKS_URL")
 	_ = viper.BindEnv("TRANSACTION_SERVICE_URL")
@@ -32,5 +37,8 @@ func LoadConfig() (config Config, err error) {
 	_ = viper.BindEnv("RABBITMQ_URL")
 
 	err = viper.Unmarshal(&config)
+	if port := os.Getenv("PORT"); port != "" {
+		config.ServerPort = port
+	}
 	return
 }
