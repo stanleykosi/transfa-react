@@ -56,9 +56,11 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
     transaction.type === 'self' ||
     transaction.category === 'self';
   const isP2P = transaction.type === 'p2p' || transaction.category === 'p2p';
+  const isPlatformFee =
+    transaction.type === 'platform_fee' || transaction.category === 'platform_fee';
 
   // For P2P transactions, check if user is sender or recipient
-  const isOutgoing = isP2P && transaction.sender_id === currentUserId;
+  const isOutgoing = (isP2P && transaction.sender_id === currentUserId) || isPlatformFee;
   const isIncoming =
     isP2P &&
     transaction.recipient_id === currentUserId &&
@@ -67,6 +69,9 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
   const getTransactionIcon = () => {
     if (isSelfTransfer) {
       return 'swap-horizontal';
+    }
+    if (isPlatformFee) {
+      return 'pricetag';
     }
     if (isOutgoing) {
       return 'arrow-up';
@@ -126,6 +131,9 @@ const TransactionItem: React.FC<TransactionItemProps> = ({ transaction, currentU
   const getTransactionTitle = () => {
     if (isSelfTransfer) {
       return 'Withdrawal to Bank';
+    }
+    if (isPlatformFee) {
+      return 'Platform Fee';
     }
     if (isOutgoing) {
       return 'Payment Sent';

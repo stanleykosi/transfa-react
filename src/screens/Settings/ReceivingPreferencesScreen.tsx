@@ -8,7 +8,7 @@
  * - Toggle between internal wallet and external account for receiving transfers
  * - Set default beneficiary account (for subscribed users with multiple accounts)
  * - Display current receiving preference status
- * - Handle subscription-based logic (non-subscribed users auto-use single external account)
+ * - Apply platform fee gating for external transfers
  *
  * @dependencies
  * - react, react-native: For UI components and state management.
@@ -26,7 +26,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useReceivingPreference, useUpdateReceivingPreference } from '@/api/transactionApi';
 import { useDefaultBeneficiary, useSetDefaultBeneficiary } from '@/api/transactionApi';
 import { useListBeneficiaries } from '@/api/accountApi';
-import { useSubscriptionStatus } from '@/api/subscriptionApi';
+import { usePlatformFeeStatus } from '@/api/platformFeeApi';
 import { Beneficiary } from '@/types/api';
 import BeneficiaryDropdown from '@/components/BeneficiaryDropdown';
 
@@ -41,7 +41,7 @@ const ReceivingPreferencesScreen = () => {
   const { data: receivingPreference, isLoading: isLoadingPreference } = useReceivingPreference();
   const { data: defaultBeneficiary, isLoading: isLoadingDefault } = useDefaultBeneficiary();
   const { data: beneficiaries, isLoading: isLoadingBeneficiaries } = useListBeneficiaries();
-  const { data: subscriptionStatus } = useSubscriptionStatus();
+  const { data: platformFeeStatus } = usePlatformFeeStatus();
 
   // Mutations for updating preferences
   const { mutate: updateReceivingPreference, isPending: isUpdatingPreference } =
@@ -76,23 +76,16 @@ const ReceivingPreferencesScreen = () => {
     }
   }, [defaultBeneficiary]);
 
-  // Check if user has exhausted their external transfer limits
-  const isExhausted =
-    subscriptionStatus &&
-    !subscriptionStatus.is_active &&
-    subscriptionStatus.transfers_remaining <= 0;
-  const isSubscribed = subscriptionStatus?.is_active || false;
+  const isDelinquent = platformFeeStatus?.is_delinquent || false;
+  const isWithinGrace = platformFeeStatus?.is_within_grace ?? true;
+  const effectiveExternalAccount = useExternalAccount && !isDelinquent;
 
   const handleToggleReceivingPreference = (value: boolean) => {
-    // Prevent free users from setting external account if they've exhausted their limits
-    if (value && isExhausted) {
+    if (value && isDelinquent) {
       Alert.alert(
-        'External Transfer Limit Exceeded',
-        'You have used all 5 of your monthly free external transfers. You can either:\n\n• Upgrade to Premium for unlimited transfers\n• Wait until next month for your limit to reset\n• Use your internal wallet for receiving transfers',
-        [
-          { text: 'Upgrade to Premium', onPress: () => navigation.navigate('Subscription') },
-          { text: 'Use Internal Wallet', style: 'cancel' },
-        ]
+        'Platform Fee Overdue',
+        'External transfers are disabled until your platform fee is settled. Incoming funds will be routed to your Transfa wallet.',
+        [{ text: 'Use Internal Wallet', style: 'cancel' }]
       );
       return;
     }
@@ -162,7 +155,10 @@ const ReceivingPreferencesScreen = () => {
               <View style={styles.toggleContainer}>
                 <View style={styles.toggleOption}>
                   <Text
-                    style={[styles.toggleLabel, !useExternalAccount && styles.activeToggleLabel]}
+                    style={[
+                      styles.toggleLabel,
+                      !effectiveExternalAccount && styles.activeToggleLabel,
+                    ]}
                   >
                     Internal Wallet
                   </Text>
@@ -172,32 +168,36 @@ const ReceivingPreferencesScreen = () => {
                 </View>
 
                 <Switch
-                  value={useExternalAccount}
+                  value={effectiveExternalAccount}
                   onValueChange={handleToggleReceivingPreference}
                   trackColor={{ false: theme.colors.border, true: theme.colors.primary }}
                   thumbColor={
-                    useExternalAccount ? theme.colors.textOnPrimary : theme.colors.textSecondary
+                    effectiveExternalAccount
+                      ? theme.colors.textOnPrimary
+                      : theme.colors.textSecondary
                   }
-                  disabled={isUpdatingPreference}
+                  disabled={isUpdatingPreference || isDelinquent}
                 />
 
                 <View style={styles.toggleOption}>
                   <Text
-                    style={[styles.toggleLabel, useExternalAccount && styles.activeToggleLabel]}
+                    style={[
+                      styles.toggleLabel,
+                      effectiveExternalAccount && styles.activeToggleLabel,
+                    ]}
                   >
                     External Account
-                    {isExhausted && <Text style={styles.limitExceededText}> (Limit Exceeded)</Text>}
                   </Text>
                   <Text style={styles.toggleDescription}>
-                    {isExhausted
-                      ? 'You have used all 5 monthly free external transfers. Upgrade to Premium for unlimited transfers.'
+                    {isDelinquent
+                      ? 'External transfers are disabled until your platform fee is paid.'
                       : 'Receive transfers directly to your bank account'}
                   </Text>
                 </View>
               </View>
             </View>
 
-            {/* Default Beneficiary Selection (for subscribed users) */}
+            {/* Default Beneficiary Selection */}
             {useExternalAccount && (
               <View style={styles.preferenceCard}>
                 <View style={styles.preferenceHeader}>
@@ -207,30 +207,18 @@ const ReceivingPreferencesScreen = () => {
                   <View style={styles.preferenceContent}>
                     <Text style={styles.preferenceTitle}>Default External Account</Text>
                     <Text style={styles.preferenceDescription}>
-                      {isSubscribed
-                        ? 'Select which external account to use for incoming transfers'
-                        : 'Your single external account will be used automatically'}
+                      Select which external account to use for incoming transfers
                     </Text>
                   </View>
                 </View>
 
-                {isSubscribed ? (
-                  <BeneficiaryDropdown
-                    beneficiaries={beneficiaries || []}
-                    selectedBeneficiary={selectedDefaultBeneficiary}
-                    onSelectBeneficiary={handleSetDefaultBeneficiary}
-                    isLoading={isSettingDefault}
-                    placeholder="Select default account"
-                  />
-                ) : (
-                  <View style={styles.singleAccountInfo}>
-                    <Text style={styles.singleAccountText}>
-                      {selectedDefaultBeneficiary
-                        ? `${selectedDefaultBeneficiary.account_name} (${selectedDefaultBeneficiary.bank_name})`
-                        : 'No external account linked'}
-                    </Text>
-                  </View>
-                )}
+                <BeneficiaryDropdown
+                  beneficiaries={beneficiaries || []}
+                  selectedBeneficiary={selectedDefaultBeneficiary}
+                  onSelectBeneficiary={handleSetDefaultBeneficiary}
+                  isLoading={isSettingDefault}
+                  placeholder="Select default account"
+                />
               </View>
             )}
 
@@ -240,7 +228,7 @@ const ReceivingPreferencesScreen = () => {
               <View style={styles.statusRow}>
                 <Text style={styles.statusLabel}>Receiving transfers to:</Text>
                 <Text style={styles.statusValue}>
-                  {useExternalAccount
+                  {effectiveExternalAccount
                     ? selectedDefaultBeneficiary
                       ? `${selectedDefaultBeneficiary.account_name} (${selectedDefaultBeneficiary.bank_name})`
                       : 'External account (not set)'
@@ -248,9 +236,13 @@ const ReceivingPreferencesScreen = () => {
                 </Text>
               </View>
               <View style={styles.statusRow}>
-                <Text style={styles.statusLabel}>Account type:</Text>
+                <Text style={styles.statusLabel}>Platform fee status:</Text>
                 <Text style={styles.statusValue}>
-                  {isSubscribed ? 'Subscribed (multiple accounts)' : 'Free (single account)'}
+                  {isDelinquent
+                    ? 'Delinquent'
+                    : isWithinGrace
+                      ? 'Active'
+                      : 'Pending'}
                 </Text>
               </View>
             </View>
@@ -347,18 +339,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 16,
   },
-  singleAccountInfo: {
-    backgroundColor: theme.colors.background,
-    borderRadius: theme.radii.md,
-    padding: theme.spacing.s12,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  singleAccountText: {
-    fontSize: theme.fontSizes.base,
-    color: theme.colors.textPrimary,
-    textAlign: 'center',
-  },
   statusCard: {
     backgroundColor: theme.colors.surface,
     borderRadius: theme.radii.lg,
@@ -390,11 +370,6 @@ const styles = StyleSheet.create({
     fontWeight: theme.fontWeights.medium,
     flex: 1,
     textAlign: 'right',
-  },
-  limitExceededText: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.error,
-    fontWeight: theme.fontWeights.semibold,
   },
 });
 

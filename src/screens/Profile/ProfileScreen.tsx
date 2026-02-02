@@ -50,10 +50,10 @@ const ProfileScreen = () => {
       bgColor: '#EFF6FF', // Blue 50
     },
     {
-      title: 'Subscription',
+      title: 'Platform Fees',
       icon: 'card' as const,
-      description: 'View and manage your subscription',
-      action: () => navigation.navigate('Subscription'),
+      description: 'Review your monthly platform fees',
+      action: () => navigation.navigate('PlatformFees'),
       color: theme.colors.accent,
       bgColor: '#F5F3FF', // Purple 50
     },

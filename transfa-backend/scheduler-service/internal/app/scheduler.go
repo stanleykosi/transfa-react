@@ -1,7 +1,6 @@
 /**
  * @description
- * This file contains the cron scheduler setup. It uses the robfig/cron library
- * to schedule and run the jobs defined in jobs.go.
+ * Cron scheduler setup for scheduled jobs.
  */
 package app
 
@@ -23,7 +22,6 @@ type Scheduler struct {
 
 // NewScheduler creates a new scheduler instance.
 func NewScheduler(jobs *Jobs, logger *slog.Logger, cfg config.Config) *Scheduler {
-	// Create a new cron scheduler with a logger
 	cronLogger := cron.PrintfLogger(slog.NewLogLogger(logger.Handler(), slog.LevelInfo))
 	c := cron.New(cron.WithChain(cron.Recover(cronLogger)))
 
@@ -37,25 +35,25 @@ func NewScheduler(jobs *Jobs, logger *slog.Logger, cfg config.Config) *Scheduler
 
 // Start registers the jobs and starts the cron scheduler.
 func (s *Scheduler) Start() {
-	// Schedule the monthly billing job
-	_, err := s.cron.AddFunc(s.config.BillingJobSchedule, s.jobs.ProcessMonthlyBilling)
-	if err != nil {
-		s.logger.Error("failed to schedule billing job", "error", err)
+	if _, err := s.cron.AddFunc(s.config.PlatformFeeInvoiceJobSchedule, s.jobs.GeneratePlatformFeeInvoices); err != nil {
+		s.logger.Error("failed to schedule platform fee invoice job", "error", err)
 	} else {
-		s.logger.Info("scheduled monthly billing job", "schedule", s.config.BillingJobSchedule)
+		s.logger.Info("scheduled platform fee invoice job", "schedule", s.config.PlatformFeeInvoiceJobSchedule)
 	}
 
-	// Schedule the job to reset monthly transfer usage
-	_, err = s.cron.AddFunc(s.config.ResetUsageJobSchedule, s.jobs.ResetMonthlyTransferUsage)
-	if err != nil {
-		s.logger.Error("failed to schedule usage reset job", "error", err)
+	if _, err := s.cron.AddFunc(s.config.PlatformFeeChargeJobSchedule, s.jobs.ProcessPlatformFeeAttempts); err != nil {
+		s.logger.Error("failed to schedule platform fee charge job", "error", err)
 	} else {
-		s.logger.Info("scheduled usage reset job", "schedule", s.config.ResetUsageJobSchedule)
+		s.logger.Info("scheduled platform fee charge job", "schedule", s.config.PlatformFeeChargeJobSchedule)
 	}
 
-	// Schedule the money drop expiry job
-	_, err = s.cron.AddFunc(s.config.MoneyDropExpirySchedule, s.jobs.ProcessMoneyDropExpiry)
-	if err != nil {
+	if _, err := s.cron.AddFunc(s.config.PlatformFeeDelinqJobSchedule, s.jobs.ProcessPlatformFeeDelinquency); err != nil {
+		s.logger.Error("failed to schedule platform fee delinquency job", "error", err)
+	} else {
+		s.logger.Info("scheduled platform fee delinquency job", "schedule", s.config.PlatformFeeDelinqJobSchedule)
+	}
+
+	if _, err := s.cron.AddFunc(s.config.MoneyDropExpirySchedule, s.jobs.ProcessMoneyDropExpiry); err != nil {
 		s.logger.Error("failed to schedule money drop expiry job", "error", err)
 	} else {
 		s.logger.Info("scheduled money drop expiry job", "schedule", s.config.MoneyDropExpirySchedule)

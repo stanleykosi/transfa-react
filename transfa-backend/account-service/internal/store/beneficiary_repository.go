@@ -121,12 +121,3 @@ func (r *PostgresBeneficiaryRepository) CountBeneficiariesByUserID(ctx context.C
 	}
 	return count, nil
 }
-
-// GetUserSubscriptionStatus retrieves the subscription status for a user.
-// For now, this returns a default status. In a real implementation, this would
-// query a subscriptions table or external service.
-func (r *PostgresBeneficiaryRepository) GetUserSubscriptionStatus(ctx context.Context, userID string) (domain.SubscriptionStatus, error) {
-	// TODO: Implement actual subscription status lookup
-	// For now, return inactive to enforce free tier limits
-	return domain.SubscriptionStatusInactive, nil
-}

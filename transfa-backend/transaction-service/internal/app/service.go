@@ -6,7 +6,7 @@
  *
  * Key features:
  * - Implements the main use cases: P2P transfers and self-transfers.
- * - Contains the critical subscription-based routing logic for P2P payments.
+ * - Contains the critical platform-fee routing logic for P2P payments.
  * - Ensures transactional integrity by creating and updating records in the `transactions` table.
  * - Publishes events to RabbitMQ for asynchronous processing by other services.
  *
@@ -35,8 +35,6 @@ import (
 )
 
 const (
-	FreeTierTransferLimit = 5
-	SubscriptionFee       = 100000
 	defaultTransactionFee = 500
 )
 
@@ -116,6 +114,14 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		return nil, fmt.Errorf("failed to find recipient: %w", err)
 	}
 	log.Printf("ProcessP2PTransfer: Found recipient %s", recipient.ID)
+
+	senderDelinquent := false
+	if delinquent, err := s.repo.IsUserDelinquent(ctx, sender.ID); err != nil {
+		log.Printf("WARN: Failed to check platform fee status for sender %s: %v", sender.ID, err)
+		senderDelinquent = true
+	} else {
+		senderDelinquent = delinquent
+	}
 
 	// 2. Validate sender permissions and funds
 	if !sender.AllowSending {
@@ -201,7 +207,7 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 			isEligibleForExternal = false
 		}
 
-		if isEligibleForExternal {
+		if isEligibleForExternal && !senderDelinquent {
 			// Route externally via NIP Transfer
 			var recipientBeneficiary *domain.Beneficiary
 			if recipientPreference.DefaultBeneficiaryID != nil {
@@ -237,19 +243,6 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 					}
 				}
 
-				// Increment monthly usage for free tier recipients when external transfer is successful
-				if err == nil {
-					sub, _ := s.repo.FindSubscriptionByUserID(ctx, recipient.ID)
-					if sub == nil || sub.Status != "active" {
-						// Free tier user - increment their monthly external receipt count
-						now := time.Now().UTC()
-						period := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-						if incrementErr := s.repo.IncrementMonthlyUsage(ctx, recipient.ID, period); incrementErr != nil {
-							log.Printf("WARN: Failed to increment monthly usage for recipient %s: %v", recipient.ID, incrementErr)
-							// Don't fail the transaction, just log the warning
-						}
-					}
-				}
 			}
 		} else {
 			// Recipient wants external but is not eligible - route internally
@@ -280,12 +273,12 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 	}
 
 	// 7. Update transaction metadata; final status driven by webhook
-    if anchorResp != nil {
-        transferID := anchorResp.Data.ID
-        txRecord.AnchorTransferID = &transferID
-        if txRecord.TransferType == "" {
-            txRecord.TransferType = "nip"
-        }
+	if anchorResp != nil {
+		transferID := anchorResp.Data.ID
+		txRecord.AnchorTransferID = &transferID
+		if txRecord.TransferType == "" {
+			txRecord.TransferType = "nip"
+		}
 
 		metadata := store.UpdateTransactionMetadataParams{
 			AnchorTransferID: &transferID,
@@ -298,7 +291,7 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		if err := s.repo.UpdateTransactionMetadata(ctx, txRecord.ID, metadata); err != nil {
 			log.Printf("WARN: failed to persist transfer metadata for %s: %v", txRecord.ID, err)
 		}
-    }
+	}
 
 	txRecord.Status = "processing"
 
@@ -346,23 +339,12 @@ func (s *Service) performInternalTransfer(ctx context.Context, txRecord *domain.
 
 // checkRecipientEligibility checks if a recipient can receive an external transfer.
 func (s *Service) checkRecipientEligibility(ctx context.Context, recipientID uuid.UUID) (bool, error) {
-	sub, err := s.repo.FindSubscriptionByUserID(ctx, recipientID)
-	if err != nil && !errors.Is(err, store.ErrSubscriptionNotFound) {
-		return false, err
-	}
-	if sub != nil && sub.Status == "active" {
-		return true, nil // Subscribed users are always eligible.
-	}
-
-	// For non-subscribed users, check monthly usage.
-	now := time.Now().UTC()
-	period := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	usage, err := s.repo.FindOrCreateMonthlyUsage(ctx, recipientID, period)
+	delinquent, err := s.repo.IsUserDelinquent(ctx, recipientID)
 	if err != nil {
 		return false, err
 	}
 
-	return usage.ExternalReceiptCount < FreeTierTransferLimit, nil
+	return !delinquent, nil
 }
 
 // ProcessSelfTransfer handles the logic for a withdrawal to an external account.
@@ -371,6 +353,14 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 	sender, err := s.repo.FindUserByID(ctx, senderID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find sender: %w", err)
+	}
+	// Block external withdrawals when platform fees are delinquent.
+	delinquent, err := s.repo.IsUserDelinquent(ctx, sender.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check platform fee status: %w", err)
+	}
+	if delinquent {
+		return nil, store.ErrPlatformFeeDelinquent
 	}
 	beneficiary, err := s.repo.FindBeneficiaryByID(ctx, req.BeneficiaryID, senderID)
 	if err != nil {
@@ -458,22 +448,22 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 		return nil, fmt.Errorf("anchor NIP transfer failed: %w", err)
 	}
 
-// 6. Update transaction metadata; final status comes from webhook
-if anchorResp != nil {
-	transferID := anchorResp.Data.ID
-	txRecord.AnchorTransferID = &transferID
-	txRecord.TransferType = "nip"
+	// 6. Update transaction metadata; final status comes from webhook
+	if anchorResp != nil {
+		transferID := anchorResp.Data.ID
+		txRecord.AnchorTransferID = &transferID
+		txRecord.TransferType = "nip"
 
-	metadata := store.UpdateTransactionMetadataParams{
-		AnchorTransferID: &transferID,
-	}
-	typeCopy := txRecord.TransferType
-	metadata.TransferType = &typeCopy
+		metadata := store.UpdateTransactionMetadataParams{
+			AnchorTransferID: &transferID,
+		}
+		typeCopy := txRecord.TransferType
+		metadata.TransferType = &typeCopy
 
-	if err := s.repo.UpdateTransactionMetadata(ctx, txRecord.ID, metadata); err != nil {
-		log.Printf("WARN: failed to persist transfer metadata for %s: %v", txRecord.ID, err)
+		if err := s.repo.UpdateTransactionMetadata(ctx, txRecord.ID, metadata); err != nil {
+			log.Printf("WARN: failed to persist transfer metadata for %s: %v", txRecord.ID, err)
+		}
 	}
-}
 
 	txRecord.Status = "processing"
 
@@ -565,19 +555,19 @@ func (s *Service) GetTransactionByID(ctx context.Context, userID uuid.UUID, tran
 	return tx, nil
 }
 
-// ProcessSubscriptionFee handles the logic for debiting subscription fees.
-// This is called by the scheduler-service for monthly billing.
-func (s *Service) ProcessSubscriptionFee(ctx context.Context, userID uuid.UUID, amount int64, reason string) (*domain.Transaction, error) {
-	// 1. Get user details
+// ProcessPlatformFee handles the logic for debiting platform fees.
+// This is called by the platform-fee service for monthly billing.
+func (s *Service) ProcessPlatformFee(ctx context.Context, userID uuid.UUID, amount int64, reason string) (*domain.Transaction, error) {
 	user, err := s.repo.FindUserByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find user: %w", err)
 	}
 
-	// 2. Validate user permissions and funds
-	if !user.AllowSending {
-		return nil, errors.New("user account is not permitted to send funds")
+	// Sync balances with Anchor before validating.
+	if err := s.syncAccountBalance(ctx, user.ID); err != nil {
+		log.Printf("ProcessPlatformFee: Failed to sync balance for %s: %v", user.ID, err)
 	}
+
 	userAccount, err := s.repo.FindAccountByUserID(ctx, user.ID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find user account: %w", err)
@@ -586,40 +576,61 @@ func (s *Service) ProcessSubscriptionFee(ctx context.Context, userID uuid.UUID, 
 		return nil, store.ErrInsufficientFunds
 	}
 
-	// 3. Debit the user's wallet immediately to lock funds
 	if err := s.repo.DebitWallet(ctx, user.ID, amount); err != nil {
 		return nil, fmt.Errorf("failed to debit user wallet: %w", err)
 	}
 
-	// 4. Create transaction record for subscription fee
-	txRecord := &domain.Transaction{
-		ID:              uuid.New(),
-		SenderID:        user.ID,
-		SourceAccountID: userAccount.ID,
-		Type:            "subscription_fee",
-		Status:          "completed", // Subscription fees are immediately completed
-		Amount:          amount,
-		Fee:             0, // No additional fee for subscription billing
-		Description:     reason,
-	}
-	if err := s.repo.CreateTransaction(ctx, txRecord); err != nil {
-		// Refund the debited amount since transaction creation failed
-		if refundErr := s.repo.CreditWallet(ctx, user.ID, amount); refundErr != nil {
-			log.Printf("CRITICAL: Failed to refund debited amount for user %s after subscription fee transaction creation failure: %v", user.ID, refundErr)
-		}
-		return nil, fmt.Errorf("failed to create subscription fee transaction record: %w", err)
+	if s.adminAccountID == "" {
+		_ = s.repo.CreditWallet(ctx, user.ID, amount)
+		return nil, errors.New("admin account not configured for platform fee collection")
 	}
 
-	// 5. Publish subscription fee event to RabbitMQ for other services
-	event := rmrabbit.SubscriptionFeeEvent{
-		UserID:    user.ID,
-		Amount:    amount,
-		Reason:    reason,
-		Timestamp: time.Now(),
+	transferResp, err := s.anchorClient.InitiateBookTransfer(ctx, userAccount.AnchorAccountID, s.adminAccountID, reason, amount)
+	if err != nil {
+		if refundErr := s.repo.CreditWallet(ctx, user.ID, amount); refundErr != nil {
+			log.Printf("CRITICAL: Failed to refund debited amount for user %s after platform fee transfer failure: %v", user.ID, refundErr)
+		}
+		return nil, fmt.Errorf("failed to transfer platform fee to admin account: %w", err)
 	}
-	if err := s.eventProducer.PublishSubscriptionFeeEvent(ctx, event); err != nil {
-		log.Printf("WARN: Failed to publish subscription fee event for user %s: %v", user.ID, err)
-		// Don't fail the transaction for this, as the fee was successfully debited
+
+	var anchorTransferID *string
+	transferType := "book"
+	if transferResp != nil {
+		anchorTransferID = &transferResp.Data.ID
+	}
+
+	txRecord := &domain.Transaction{
+		ID:               uuid.New(),
+		SenderID:         user.ID,
+		SourceAccountID:  userAccount.ID,
+		Type:             "platform_fee",
+		Category:         "platform_fee",
+		Status:           "completed",
+		Amount:           amount,
+		Fee:              0,
+		Description:      reason,
+		AnchorTransferID: anchorTransferID,
+		TransferType:     transferType,
+	}
+	if err := s.repo.CreateTransaction(ctx, txRecord); err != nil {
+		if anchorTransferID != nil {
+			log.Printf("CRITICAL: Platform fee transfer %s completed but transaction record creation failed for user %s: %v", *anchorTransferID, user.ID, err)
+		} else {
+			log.Printf("CRITICAL: Platform fee transfer completed but transaction record creation failed for user %s: %v", user.ID, err)
+		}
+		return nil, fmt.Errorf("failed to create platform fee transaction record: %w", err)
+	}
+
+	if s.eventProducer != nil {
+		event := rmrabbit.PlatformFeeEvent{
+			UserID:    user.ID,
+			Amount:    amount,
+			Reason:    reason,
+			Timestamp: time.Now(),
+		}
+		if err := s.eventProducer.PublishPlatformFeeEvent(ctx, event); err != nil {
+			log.Printf("WARN: Failed to publish platform fee event for user %s: %v", user.ID, err)
+		}
 	}
 
 	return txRecord, nil
@@ -843,14 +854,14 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 	// 5. Create money drop record
 	expiry := time.Now().Add(time.Duration(req.ExpiryInMinutes) * time.Minute)
 	drop := &domain.MoneyDrop{
-		CreatorID:            userID,
-		Status:               "active",
-		AmountPerClaim:       req.AmountPerClaim,
-		TotalClaimsAllowed:   req.NumberOfPeople,
-		ClaimsMadeCount:      0,
-		ExpiryTimestamp:      expiry,
+		CreatorID:              userID,
+		Status:                 "active",
+		AmountPerClaim:         req.AmountPerClaim,
+		TotalClaimsAllowed:     req.NumberOfPeople,
+		ClaimsMadeCount:        0,
+		ExpiryTimestamp:        expiry,
 		FundingSourceAccountID: primaryAccount.ID,
-		MoneyDropAccountID:   moneyDropAccount.ID,
+		MoneyDropAccountID:     moneyDropAccount.ID,
 	}
 
 	createdDrop, err := s.repo.CreateMoneyDrop(ctx, drop)
@@ -876,16 +887,16 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 
 	// 6. Log the funding transaction
 	fundingTx := &domain.Transaction{
-		ID:              uuid.New(),
-		SenderID:        userID,
-		SourceAccountID: primaryAccount.ID,
+		ID:                   uuid.New(),
+		SenderID:             userID,
+		SourceAccountID:      primaryAccount.ID,
 		DestinationAccountID: &moneyDropAccount.ID,
-		Type:            "money_drop_funding",
-		Category:        "Money Drop",
-		Status:          "completed",
-		Amount:          totalAmount,
-		Fee:             s.moneyDropFeeKobo, // Record fee in database
-		Description:     fmt.Sprintf("Funding for Money Drop #%s", createdDrop.ID.String()),
+		Type:                 "money_drop_funding",
+		Category:             "Money Drop",
+		Status:               "completed",
+		Amount:               totalAmount,
+		Fee:                  s.moneyDropFeeKobo, // Record fee in database
+		Description:          fmt.Sprintf("Funding for Money Drop #%s", createdDrop.ID.String()),
 	}
 	if err := s.repo.CreateTransaction(ctx, fundingTx); err != nil {
 		log.Printf("WARN: Failed to log money drop funding transaction: %v", err)
@@ -895,14 +906,14 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 	// 7. Prepare and return response
 	dropIDStr := createdDrop.ID.String()
 	response := &domain.CreateMoneyDropResponse{
-		MoneyDropID:      dropIDStr,
-		QRCodeContent:    fmt.Sprintf("transfa://claim-drop/%s", dropIDStr),
-		ShareableLink:    fmt.Sprintf("https://transfa.app/claim?drop_id=%s", dropIDStr),
-		TotalAmount:      totalAmount,
-		AmountPerClaim:   req.AmountPerClaim,
-		NumberOfPeople:   req.NumberOfPeople,
-		Fee:               s.moneyDropFeeKobo, // Include fee in response
-		ExpiryTimestamp:  expiry,
+		MoneyDropID:     dropIDStr,
+		QRCodeContent:   fmt.Sprintf("transfa://claim-drop/%s", dropIDStr),
+		ShareableLink:   fmt.Sprintf("https://transfa.app/claim?drop_id=%s", dropIDStr),
+		TotalAmount:     totalAmount,
+		AmountPerClaim:  req.AmountPerClaim,
+		NumberOfPeople:  req.NumberOfPeople,
+		Fee:             s.moneyDropFeeKobo, // Include fee in response
+		ExpiryTimestamp: expiry,
 	}
 
 	log.Printf("CreateMoneyDrop: Successfully created money drop %s for user %s", dropIDStr, userID)
@@ -980,8 +991,8 @@ func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, drop
 
 	// 8. Prepare and return response
 	response := &domain.ClaimMoneyDropResponse{
-		Message:        "Money drop claimed successfully!",
-		AmountClaimed:  drop.AmountPerClaim,
+		Message:         "Money drop claimed successfully!",
+		AmountClaimed:   drop.AmountPerClaim,
 		CreatorUsername: creator.Username,
 	}
 
@@ -1077,16 +1088,16 @@ func (s *Service) RefundMoneyDrop(ctx context.Context, dropID uuid.UUID, creator
 
 	// Log the refund transaction
 	refundTx := &domain.Transaction{
-		ID:              uuid.New(),
-		SenderID:        creatorID,
-		SourceAccountID: moneyDropAccount.ID,
+		ID:                   uuid.New(),
+		SenderID:             creatorID,
+		SourceAccountID:      moneyDropAccount.ID,
 		DestinationAccountID: &creatorAccount.ID,
-		Type:            "money_drop_refund",
-		Category:        "Money Drop",
-		Status:          "completed",
-		Amount:          amount,
-		Fee:             0,
-		Description:     fmt.Sprintf("Refund for Money Drop #%s", dropID.String()),
+		Type:                 "money_drop_refund",
+		Category:             "Money Drop",
+		Status:               "completed",
+		Amount:               amount,
+		Fee:                  0,
+		Description:          fmt.Sprintf("Refund for Money Drop #%s", dropID.String()),
 	}
 	if err := s.repo.CreateTransaction(ctx, refundTx); err != nil {
 		log.Printf("WARN: Failed to log money drop refund transaction: %v", err)

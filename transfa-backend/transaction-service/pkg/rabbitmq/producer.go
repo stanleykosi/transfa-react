@@ -23,8 +23,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// SubscriptionFeeEvent represents the payload published to RabbitMQ when a subscription fee is debited.
-type SubscriptionFeeEvent struct {
+// PlatformFeeEvent represents the payload published to RabbitMQ when a platform fee is debited.
+type PlatformFeeEvent struct {
 	UserID    uuid.UUID `json:"user_id"`
 	Amount    int64     `json:"amount"`
 	Reason    string    `json:"reason"`
@@ -40,7 +40,7 @@ type EventProducer struct {
 // Publisher is the interface implemented by types that can publish events.
 type Publisher interface {
 	Publish(ctx context.Context, exchange, routingKey string, body interface{}) error
-	PublishSubscriptionFeeEvent(ctx context.Context, event SubscriptionFeeEvent) error
+	PublishPlatformFeeEvent(ctx context.Context, event PlatformFeeEvent) error
 	Close()
 }
 
@@ -54,8 +54,8 @@ func (p *EventProducerFallback) Publish(ctx context.Context, exchange, routingKe
 
 func (p *EventProducerFallback) Close() {}
 
-func (p *EventProducerFallback) PublishSubscriptionFeeEvent(ctx context.Context, event SubscriptionFeeEvent) error {
-	log.Printf("[MQ-FALLBACK] Would publish subscription fee event: %+v", event)
+func (p *EventProducerFallback) PublishPlatformFeeEvent(ctx context.Context, event PlatformFeeEvent) error {
+	log.Printf("[MQ-FALLBACK] Would publish platform fee event: %+v", event)
 	return nil
 }
 
@@ -171,9 +171,9 @@ func (p *EventProducer) Publish(ctx context.Context, exchange, routingKey string
 	return nil
 }
 
-// PublishSubscriptionFeeEvent publishes a subscription fee event to the transaction_events exchange.
-func (p *EventProducer) PublishSubscriptionFeeEvent(ctx context.Context, event SubscriptionFeeEvent) error {
-	return p.Publish(ctx, "transaction_events", "subscription.fee.debited", event)
+// PublishPlatformFeeEvent publishes a platform fee event to the transaction_events exchange.
+func (p *EventProducer) PublishPlatformFeeEvent(ctx context.Context, event PlatformFeeEvent) error {
+	return p.Publish(ctx, "transaction_events", "platform.fee.debited", event)
 }
 
 // Close gracefully closes the channel and connection to RabbitMQ.

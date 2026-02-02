@@ -19,6 +19,7 @@ import (
 	"github.com/transfa/scheduler-service/internal/app"
 	"github.com/transfa/scheduler-service/internal/config"
 	"github.com/transfa/scheduler-service/internal/store"
+	"github.com/transfa/scheduler-service/pkg/platformfeeclient"
 	"github.com/transfa/scheduler-service/pkg/transactionclient"
 )
 
@@ -61,7 +62,8 @@ func main() {
 	// Initialize dependencies
 	repository := store.NewRepository(dbpool)
 	txClient := transactionclient.NewClient(cfg.TransactionServiceURL)
-	jobs := app.NewJobs(repository, txClient, logger, *cfg)
+	feeClient := platformfeeclient.NewClient(cfg.PlatformFeeServiceURL, cfg.PlatformFeeInternalAPIKey)
+	jobs := app.NewJobs(repository, txClient, feeClient, logger, *cfg)
 	scheduler := app.NewScheduler(jobs, logger, *cfg)
 
 	// Start the cron scheduler in the background

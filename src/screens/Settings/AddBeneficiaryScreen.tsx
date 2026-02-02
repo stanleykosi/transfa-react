@@ -9,7 +9,7 @@
  * - Uses `useAddBeneficiary` to create the beneficiary (backend handles verification).
  * - Handles loading and error states for the API call.
  * - Navigates back to the beneficiaries list upon successful addition.
- * - Catches and displays errors, including the free-tier limit on adding accounts.
+ * - Catches and displays API errors.
  *
  * @dependencies
  * - react-native: For UI components and `Alert`.
@@ -65,12 +65,7 @@ const AddBeneficiaryScreen = () => {
         errorMessage = error.message;
       }
 
-      // Handle specific error for free-tier limit (now returns 400 status)
-      if (error.response?.status === 400 && errorMessage.includes('linked account on free tier')) {
-        Alert.alert('Limit Reached', errorMessage);
-      } else {
-        Alert.alert('Error', errorMessage);
-      }
+      Alert.alert('Error', errorMessage);
     },
   });
 

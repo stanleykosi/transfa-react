@@ -32,6 +32,7 @@ import { theme } from '@/constants/theme';
 import apiClient from '@/api/apiClient';
 import { useAuth } from '@clerk/clerk-expo';
 import { useAccountBalance, useUserProfile } from '@/api/transactionApi';
+import { usePlatformFeeStatus } from '@/api/platformFeeApi';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEntranceAnimation } from '@/hooks/useEntranceAnimation';
@@ -47,6 +48,7 @@ const HomeScreen = () => {
 
   // Fetch user profile from database (includes username, UUID)
   const { data: userProfile, isLoading: isLoadingProfile } = useUserProfile();
+  const { data: platformFeeStatus } = usePlatformFeeStatus();
 
   // Fetch account balance with caching
   const {
@@ -60,6 +62,40 @@ const HomeScreen = () => {
   const headerAnimation = useEntranceAnimation({ delay: 0, duration: 500 });
   const balanceCardAnimation = useEntranceAnimation({ delay: 100, duration: 500 });
   const actionsAnimation = useEntranceAnimation({ delay: 200, duration: 500 });
+
+  const platformFeeBanner = (() => {
+    if (
+      !platformFeeStatus ||
+      platformFeeStatus.status === 'paid' ||
+      platformFeeStatus.status === 'waived' ||
+      platformFeeStatus.status === 'none'
+    ) {
+      return null;
+    }
+
+    const dueDate = platformFeeStatus.due_at
+      ? new Date(platformFeeStatus.due_at).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        })
+      : 'soon';
+
+    if (platformFeeStatus.is_delinquent) {
+      return {
+        tone: 'error',
+        title: 'Platform Fee Overdue',
+        message:
+          'External transfers are disabled. Add funds to your wallet to settle the fee.',
+      };
+    }
+
+    return {
+      tone: 'warning',
+      title: 'Platform Fee Due',
+      message: `Your monthly platform fee is due on ${dueDate}. Keep funds in your wallet for auto-debit.`,
+    };
+  })();
 
   const fetchAccountData = useCallback(async () => {
     try {
@@ -232,6 +268,25 @@ const HomeScreen = () => {
           </View>
         </Animated.View>
 
+        {platformFeeBanner && (
+          <View
+            style={[
+              styles.feeBanner,
+              platformFeeBanner.tone === 'error' ? styles.feeBannerError : styles.feeBannerWarning,
+            ]}
+          >
+            <Ionicons
+              name={platformFeeBanner.tone === 'error' ? 'alert-circle' : 'time-outline'}
+              size={18}
+              color={platformFeeBanner.tone === 'error' ? theme.colors.error : theme.colors.warning}
+            />
+            <View style={styles.feeBannerContent}>
+              <Text style={styles.feeBannerTitle}>{platformFeeBanner.title}</Text>
+              <Text style={styles.feeBannerText}>{platformFeeBanner.message}</Text>
+            </View>
+          </View>
+        )}
+
         {/* Enhanced Balance Card with Gradient and Entrance Animation */}
         <Animated.View style={balanceCardAnimation.animatedStyle}>
           <LinearGradient
@@ -324,6 +379,39 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.s24,
     marginBottom: theme.spacing.s24,
     marginTop: theme.spacing.s16,
+  },
+  feeBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: theme.spacing.s12,
+    padding: theme.spacing.s12,
+    borderRadius: theme.radii.md,
+    marginHorizontal: theme.spacing.s20,
+    marginBottom: theme.spacing.s16,
+  },
+  feeBannerWarning: {
+    backgroundColor: '#FEF3C7',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  feeBannerError: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  feeBannerContent: {
+    flex: 1,
+  },
+  feeBannerTitle: {
+    fontSize: theme.fontSizes.sm,
+    fontWeight: theme.fontWeights.semibold,
+    color: theme.colors.textPrimary,
+    marginBottom: theme.spacing.s2,
+  },
+  feeBannerText: {
+    fontSize: theme.fontSizes.xs,
+    color: theme.colors.textSecondary,
+    lineHeight: 16,
   },
   greeting: {
     fontSize: theme.fontSizes.sm,

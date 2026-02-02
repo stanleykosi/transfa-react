@@ -96,19 +96,6 @@ type Beneficiary struct {
 	UpdatedAt            time.Time `json:"updated_at"`
 }
 
-// Subscription holds the subscription status for a user.
-type Subscription struct {
-	UserID uuid.UUID `json:"user_id"`
-	Status string    `json:"status"` // 'active', 'inactive', 'lapsed'
-}
-
-// MonthlyUsage tracks free transfers for non-subscribed users.
-type MonthlyUsage struct {
-	UserID               uuid.UUID `json:"user_id"`
-	Period               time.Time `json:"period"`
-	ExternalReceiptCount int       `json:"external_receipt_count"`
-}
-
 // ReroutedInternalPayload is the message payload published to RabbitMQ
 // when a P2P transfer is rerouted to the recipient's internal wallet.
 type ReroutedInternalPayload struct {

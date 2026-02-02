@@ -169,6 +169,10 @@ func (h *TransactionHandlers) SelfTransferHandler(w http.ResponseWriter, r *http
 			http.Error(w, "Beneficiary not found or does not belong to user", http.StatusNotFound)
 			return
 		}
+		if errors.Is(err, store.ErrPlatformFeeDelinquent) {
+			http.Error(w, "Platform fee overdue: external transfers are disabled", http.StatusForbidden)
+			return
+		}
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -538,13 +542,14 @@ func (h *TransactionHandlers) GetTransactionByIDHandler(w http.ResponseWriter, r
 	h.writeJSON(w, http.StatusOK, tx)
 }
 
-// SubscriptionFeeHandler handles internal requests to debit subscription fees.
-// This is called by the scheduler-service for monthly billing.
-func (h *TransactionHandlers) SubscriptionFeeHandler(w http.ResponseWriter, r *http.Request) {
+// PlatformFeeHandler handles internal requests to debit platform fees.
+// This is called by the platform-fee service for monthly billing.
+func (h *TransactionHandlers) PlatformFeeHandler(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		UserID string `json:"user_id"`
-		Amount int64  `json:"amount"`
-		Reason string `json:"reason"`
+		UserID    string `json:"user_id"`
+		Amount    int64  `json:"amount"`
+		Reason    string `json:"reason"`
+		InvoiceID string `json:"invoice_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -558,10 +563,18 @@ func (h *TransactionHandlers) SubscriptionFeeHandler(w http.ResponseWriter, r *h
 		return
 	}
 
-	// Call the core service logic to debit the subscription fee
-	tx, err := h.service.ProcessSubscriptionFee(r.Context(), userID, req.Amount, req.Reason)
+	if req.Reason == "" {
+		req.Reason = "Monthly Platform Fee"
+	}
+
+	// Call the core service logic to debit the platform fee
+	tx, err := h.service.ProcessPlatformFee(r.Context(), userID, req.Amount, req.Reason)
 	if err != nil {
-		log.Printf("Subscription fee debit failed for user %s: %v", userID, err)
+		if req.InvoiceID != "" {
+			log.Printf("Platform fee debit failed for user %s invoice %s: %v", userID, req.InvoiceID, err)
+		} else {
+			log.Printf("Platform fee debit failed for user %s: %v", userID, err)
+		}
 		if errors.Is(err, store.ErrInsufficientFunds) {
 			http.Error(w, err.Error(), http.StatusPaymentRequired)
 			return

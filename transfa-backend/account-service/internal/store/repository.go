@@ -35,7 +35,6 @@ type BeneficiaryRepository interface {
 	GetBeneficiariesByUserID(ctx context.Context, userID string) ([]domain.Beneficiary, error)
 	DeleteBeneficiary(ctx context.Context, beneficiaryID string, userID string) error
 	CountBeneficiariesByUserID(ctx context.Context, userID string) (int, error)
-	GetUserSubscriptionStatus(ctx context.Context, userID string) (domain.SubscriptionStatus, error)
 }
 
 // BankRepository defines the contract for caching bank information.

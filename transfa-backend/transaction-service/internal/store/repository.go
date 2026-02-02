@@ -15,7 +15,6 @@ package store
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/transfa/transaction-service/internal/domain"
@@ -40,10 +39,8 @@ type Repository interface {
 	FindOrCreateReceivingPreference(ctx context.Context, userID uuid.UUID) (*domain.UserReceivingPreference, error)
     UpdateReceivingPreference(ctx context.Context, userID uuid.UUID, useExternal bool, beneficiaryID *uuid.UUID) error
 
-	// Subscription and Usage methods
-	FindSubscriptionByUserID(ctx context.Context, userID uuid.UUID) (*domain.Subscription, error)
-	FindOrCreateMonthlyUsage(ctx context.Context, userID uuid.UUID, period time.Time) (*domain.MonthlyUsage, error)
-	IncrementMonthlyUsage(ctx context.Context, userID uuid.UUID, period time.Time) error
+	// Platform fee methods
+	IsUserDelinquent(ctx context.Context, userID uuid.UUID) (bool, error)
 
 	// Transaction methods
 	CreateTransaction(ctx context.Context, tx *domain.Transaction) error

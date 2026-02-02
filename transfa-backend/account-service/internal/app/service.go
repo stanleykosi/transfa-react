@@ -20,11 +20,6 @@ import (
 	"github.com/transfa/account-service/internal/domain"
 	"github.com/transfa/account-service/internal/store"
 	"github.com/transfa/account-service/pkg/anchorclient"
-	"github.com/transfa/account-service/pkg/subscriptionclient"
-)
-
-const (
-	maxBeneficiariesFreeTier = 1
 )
 
 // AccountService provides methods for managing accounts and beneficiaries.
@@ -33,25 +28,22 @@ type AccountService struct {
 	beneficiaryRepo store.BeneficiaryRepository
 	bankRepo        store.BankRepository
 	anchorClient    *anchorclient.Client
-	subscriptionClient *subscriptionclient.Client
 	cacheWarmingMutex sync.Mutex // Prevents multiple cache warming operations
 }
 
 // NewAccountService creates a new instance of AccountService.
-func NewAccountService(accountRepo store.AccountRepository, beneficiaryRepo store.BeneficiaryRepository, bankRepo store.BankRepository, anchorClient *anchorclient.Client, subscriptionClient *subscriptionclient.Client) *AccountService {
+func NewAccountService(accountRepo store.AccountRepository, beneficiaryRepo store.BeneficiaryRepository, bankRepo store.BankRepository, anchorClient *anchorclient.Client) *AccountService {
 	return &AccountService{
 		accountRepo:     accountRepo,
 		beneficiaryRepo: beneficiaryRepo,
 		bankRepo:        bankRepo,
 		anchorClient:    anchorClient,
-		subscriptionClient: subscriptionClient,
 	}
 }
 
 // CreateBeneficiaryInput defines the required input for creating a beneficiary.
 type CreateBeneficiaryInput struct {
 	UserID        string
-	AuthToken     string
 	AccountNumber string
 	BankCode      string
 }
@@ -64,22 +56,6 @@ func (s *AccountService) CreateBeneficiary(ctx context.Context, input CreateBene
 		return nil, fmt.Errorf("user not found: %w", err)
 	}
 	
-	// 2. Check user's subscription status and beneficiary count limit.
-	subscriptionStatus, err := s.subscriptionClient.GetUserSubscriptionStatus(ctx, input.AuthToken)
-	if err != nil {
-		return nil, fmt.Errorf("could not verify user subscription status: %w", err)
-	}
-
-	if !subscriptionStatus.IsActive {
-		count, err := s.beneficiaryRepo.CountBeneficiariesByUserID(ctx, internalUserID)
-		if err != nil {
-			return nil, fmt.Errorf("could not count existing beneficiaries: %w", err)
-		}
-		if count >= maxBeneficiariesFreeTier {
-			return nil, fmt.Errorf("You can only add 1 linked account on free tier. Please upgrade your subscription to add more linked accounts")
-		}
-	}
-
 	// 2. Verify account details with Anchor.
 	verifyResp, err := s.anchorClient.VerifyBankAccount(ctx, input.BankCode, input.AccountNumber)
 	if err != nil {

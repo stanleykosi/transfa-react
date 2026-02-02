@@ -1,38 +1,38 @@
 /**
  * @description
- * This file handles configuration management for the scheduler-service.
- * It loads settings from environment variables, providing defaults for cron schedules.
+ * Configuration management for the scheduler-service.
  */
 package config
 
-import (
-	"github.com/spf13/viper"
-)
+import "github.com/spf13/viper"
 
 // Config holds all configuration for the scheduler service.
 type Config struct {
-	DatabaseURL             string `mapstructure:"DATABASE_URL"`
-	TransactionServiceURL   string `mapstructure:"TRANSACTION_SERVICE_URL"`
-	SubscriptionFeeKobo     int64  `mapstructure:"SUBSCRIPTION_FEE_KOBO"`
-	BillingJobSchedule      string `mapstructure:"BILLING_JOB_SCHEDULE"`
-	ResetUsageJobSchedule   string `mapstructure:"RESET_USAGE_JOB_SCHEDULE"`
-	MoneyDropExpirySchedule string `mapstructure:"MONEY_DROP_EXPIRY_SCHEDULE"`
+	DatabaseURL                    string `mapstructure:"DATABASE_URL"`
+	TransactionServiceURL          string `mapstructure:"TRANSACTION_SERVICE_URL"`
+	PlatformFeeServiceURL          string `mapstructure:"PLATFORM_FEE_SERVICE_URL"`
+	PlatformFeeInternalAPIKey      string `mapstructure:"PLATFORM_FEE_INTERNAL_API_KEY"`
+	PlatformFeeInvoiceJobSchedule  string `mapstructure:"PLATFORM_FEE_INVOICE_JOB_SCHEDULE"`
+	PlatformFeeChargeJobSchedule   string `mapstructure:"PLATFORM_FEE_CHARGE_JOB_SCHEDULE"`
+	PlatformFeeDelinqJobSchedule   string `mapstructure:"PLATFORM_FEE_DELINQ_JOB_SCHEDULE"`
+	MoneyDropExpirySchedule        string `mapstructure:"MONEY_DROP_EXPIRY_SCHEDULE"`
 }
 
 // LoadConfig reads configuration from environment variables.
 func LoadConfig() (*Config, error) {
-	viper.SetDefault("BILLING_JOB_SCHEDULE", "0 2 1 * *")        // At 02:00 on day-of-month 1.
-	viper.SetDefault("RESET_USAGE_JOB_SCHEDULE", "0 1 1 * *")    // At 01:00 on day-of-month 1.
-	viper.SetDefault("MONEY_DROP_EXPIRY_SCHEDULE", "*/5 * * * *") // Every 5 minutes
-	viper.SetDefault("SUBSCRIPTION_FEE_KOBO", 1000)              // Default to ₦10.00
+	viper.SetDefault("PLATFORM_FEE_INVOICE_JOB_SCHEDULE", "5 0 1 * *")
+	viper.SetDefault("PLATFORM_FEE_CHARGE_JOB_SCHEDULE", "15 0 * * *")
+	viper.SetDefault("PLATFORM_FEE_DELINQ_JOB_SCHEDULE", "30 0 * * *")
+	viper.SetDefault("MONEY_DROP_EXPIRY_SCHEDULE", "*/5 * * * *")
 	viper.AutomaticEnv()
 
-	// Bind environment variables explicitly to ensure they appear in Unmarshal
 	_ = viper.BindEnv("DATABASE_URL")
 	_ = viper.BindEnv("TRANSACTION_SERVICE_URL")
-	_ = viper.BindEnv("SUBSCRIPTION_FEE_KOBO")
-	_ = viper.BindEnv("BILLING_JOB_SCHEDULE")
-	_ = viper.BindEnv("RESET_USAGE_JOB_SCHEDULE")
+	_ = viper.BindEnv("PLATFORM_FEE_SERVICE_URL")
+	_ = viper.BindEnv("PLATFORM_FEE_INTERNAL_API_KEY")
+	_ = viper.BindEnv("PLATFORM_FEE_INVOICE_JOB_SCHEDULE")
+	_ = viper.BindEnv("PLATFORM_FEE_CHARGE_JOB_SCHEDULE")
+	_ = viper.BindEnv("PLATFORM_FEE_DELINQ_JOB_SCHEDULE")
 	_ = viper.BindEnv("MONEY_DROP_EXPIRY_SCHEDULE")
 
 	var config Config

@@ -148,16 +148,40 @@ export interface AccountBalance {
 }
 
 // =================================================================
-// Subscription Types
+// Platform Fee Types
 // =================================================================
 
-// Represents the user's subscription status as returned by the backend.
-export interface SubscriptionStatus {
-  status: 'active' | 'inactive' | 'lapsed';
-  current_period_end?: string; // ISO 8601 date string
-  auto_renew: boolean;
-  is_active: boolean;
-  transfers_remaining: number; // -1 for unlimited (premium), 0-5 for free tier
+export interface PlatformFeeStatus {
+  status: 'pending' | 'paid' | 'failed' | 'delinquent' | 'waived' | 'none';
+  period_start?: string;
+  period_end?: string;
+  due_at?: string;
+  grace_until?: string;
+  amount?: number;
+  currency?: string;
+  retry_count?: number;
+  last_attempt_at?: string;
+  is_delinquent: boolean;
+  is_within_grace: boolean;
+}
+
+export interface PlatformFeeInvoice {
+  id: string;
+  user_id: string;
+  user_type: 'personal' | 'merchant';
+  period_start: string;
+  period_end: string;
+  due_at: string;
+  grace_until: string;
+  amount: number;
+  currency: string;
+  status: 'pending' | 'paid' | 'failed' | 'delinquent' | 'waived';
+  paid_at?: string;
+  last_attempt_at?: string;
+  retry_count: number;
+  failure_reason?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // Structure for a payment request object from the API.

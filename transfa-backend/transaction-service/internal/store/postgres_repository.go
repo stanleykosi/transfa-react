@@ -2,7 +2,7 @@
  * @description
  * This file provides the PostgreSQL implementation of the `Repository` interface.
  * It contains all the necessary SQL queries to interact with the database tables
- * related to transactions, users, accounts, and subscriptions.
+ * related to transactions, users, accounts, and platform fee status.
  *
  * @dependencies
  * - context, time, errors: Standard Go libraries.
@@ -26,12 +26,12 @@ import (
 )
 
 var (
-	ErrUserNotFound         = errors.New("user not found")
-	ErrAccountNotFound      = errors.New("account not found")
-	ErrBeneficiaryNotFound  = errors.New("beneficiary not found")
-	ErrSubscriptionNotFound = errors.New("subscription not found")
-	ErrInsufficientFunds    = errors.New("insufficient funds")
-	ErrTransactionNotFound  = errors.New("transaction not found")
+	ErrUserNotFound          = errors.New("user not found")
+	ErrAccountNotFound       = errors.New("account not found")
+	ErrBeneficiaryNotFound   = errors.New("beneficiary not found")
+	ErrInsufficientFunds     = errors.New("insufficient funds")
+	ErrPlatformFeeDelinquent = errors.New("platform fee delinquent")
+	ErrTransactionNotFound   = errors.New("transaction not found")
 )
 
 // PostgresRepository is a concrete implementation of the Repository interface for PostgreSQL.
@@ -219,53 +219,31 @@ func (r *PostgresRepository) FindDefaultBeneficiaryByUserID(ctx context.Context,
 	return &beneficiary, nil
 }
 
-// FindSubscriptionByUserID retrieves a user's subscription status.
-func (r *PostgresRepository) FindSubscriptionByUserID(ctx context.Context, userID uuid.UUID) (*domain.Subscription, error) {
-	var sub domain.Subscription
-	query := `SELECT user_id, status FROM subscriptions WHERE user_id = $1`
-	err := r.db.QueryRow(ctx, query, userID).Scan(&sub.UserID, &sub.Status)
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			// If no subscription record exists, treat them as inactive.
-			return &domain.Subscription{UserID: userID, Status: "inactive"}, nil
-		}
-		return nil, err
-	}
-	return &sub, nil
-}
-
-// FindOrCreateMonthlyUsage finds the current month's usage record for a user or creates a new one if it doesn't exist.
-func (r *PostgresRepository) FindOrCreateMonthlyUsage(ctx context.Context, userID uuid.UUID, period time.Time) (*domain.MonthlyUsage, error) {
-	var usage domain.MonthlyUsage
-	// Use an `INSERT ... ON CONFLICT ... DO NOTHING` followed by a SELECT to ensure atomicity.
-	insertQuery := `
-		INSERT INTO monthly_transfer_usage (user_id, period, external_receipt_count)
-		VALUES ($1, $2::DATE, 0)
-		ON CONFLICT (user_id, period) DO NOTHING
-	`
-	_, err := r.db.Exec(ctx, insertQuery, userID, period)
-	if err != nil {
-		return nil, err
-	}
-
-	selectQuery := `SELECT user_id, period, external_receipt_count FROM monthly_transfer_usage WHERE user_id = $1 AND period = $2`
-	err = r.db.QueryRow(ctx, selectQuery, userID, period).Scan(&usage.UserID, &usage.Period, &usage.ExternalReceiptCount)
-	if err != nil {
-		return nil, err
-	}
-
-	return &usage, nil
-}
-
-// IncrementMonthlyUsage increases the external transfer count for a user for the given period.
-func (r *PostgresRepository) IncrementMonthlyUsage(ctx context.Context, userID uuid.UUID, period time.Time) error {
+// IsUserDelinquent checks whether a user is delinquent on platform fees.
+func (r *PostgresRepository) IsUserDelinquent(ctx context.Context, userID uuid.UUID) (bool, error) {
 	query := `
-		UPDATE monthly_transfer_usage
-		SET external_receipt_count = external_receipt_count + 1
-		WHERE user_id = $1 AND period = $2::DATE
+		SELECT EXISTS (
+			SELECT 1
+			FROM platform_fee_invoices
+			WHERE user_id = $1
+			  AND (
+				status = 'delinquent'
+				OR (status IN ('pending', 'failed') AND grace_until < NOW())
+			  )
+			  AND NOT EXISTS (
+				SELECT 1
+				FROM platform_fee_attempts
+				WHERE invoice_id = platform_fee_invoices.id
+				  AND status = 'success'
+			  )
+		)
 	`
-	_, err := r.db.Exec(ctx, query, userID, period)
-	return err
+	var delinquent bool
+	if err := r.db.QueryRow(ctx, query, userID).Scan(&delinquent); err != nil {
+		return false, err
+	}
+
+	return delinquent, nil
 }
 
 // CreateTransaction inserts a new transaction record into the database.
@@ -395,7 +373,7 @@ func (r *PostgresRepository) FindTransactionByAnchorTransferID(ctx context.Conte
 }
 
 func (r *PostgresRepository) FindTransactionByID(ctx context.Context, transactionID uuid.UUID) (*domain.Transaction, error) {
-    query := `
+	query := `
         SELECT id, anchor_transfer_id, sender_id, recipient_id, source_account_id,
                destination_account_id, destination_beneficiary_id, type, category, status,
                amount, fee, description, transfer_type, failure_reason, anchor_session_id,
@@ -403,37 +381,36 @@ func (r *PostgresRepository) FindTransactionByID(ctx context.Context, transactio
         FROM transactions
         WHERE id = $1
     `
-    var tx domain.Transaction
-    err := r.db.QueryRow(ctx, query, transactionID).Scan(
-        &tx.ID,
-        &tx.AnchorTransferID,
-        &tx.SenderID,
-        &tx.RecipientID,
-        &tx.SourceAccountID,
-        &tx.DestinationAccountID,
-        &tx.DestinationBeneficiaryID,
-        &tx.Type,
-        &tx.Category,
-        &tx.Status,
-        &tx.Amount,
-        &tx.Fee,
-        &tx.Description,
-        &tx.TransferType,
-        &tx.FailureReason,
-        &tx.AnchorSessionID,
-        &tx.AnchorReason,
-        &tx.CreatedAt,
-        &tx.UpdatedAt,
-    )
-    if err != nil {
-        if err == pgx.ErrNoRows {
-            return nil, ErrTransactionNotFound
-        }
-        return nil, err
-    }
-    return &tx, nil
+	var tx domain.Transaction
+	err := r.db.QueryRow(ctx, query, transactionID).Scan(
+		&tx.ID,
+		&tx.AnchorTransferID,
+		&tx.SenderID,
+		&tx.RecipientID,
+		&tx.SourceAccountID,
+		&tx.DestinationAccountID,
+		&tx.DestinationBeneficiaryID,
+		&tx.Type,
+		&tx.Category,
+		&tx.Status,
+		&tx.Amount,
+		&tx.Fee,
+		&tx.Description,
+		&tx.TransferType,
+		&tx.FailureReason,
+		&tx.AnchorSessionID,
+		&tx.AnchorReason,
+		&tx.CreatedAt,
+		&tx.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrTransactionNotFound
+		}
+		return nil, err
+	}
+	return &tx, nil
 }
-
 
 func (r *PostgresRepository) RefundTransactionFee(ctx context.Context, transactionID uuid.UUID, userID uuid.UUID, fee int64) error {
 	if fee <= 0 {

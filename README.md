@@ -77,6 +77,13 @@ The app uses:
 - React Navigation for navigation
 - Various other React Native libraries
 
+## Environment Variables
+
+Frontend runtime variables are loaded from `.env`. Key values:
+
+- `EXPO_PUBLIC_API_GATEWAY_URL` - API gateway base URL.
+- `EXPO_PUBLIC_PLATFORM_FEE_SERVICE_URL` - Platform fee service base URL.
+
 ## Backend Onboarding Notes
 
 ### Manual Tier2 Reconciliation (Anchor KYC Already Completed)

@@ -1,8 +1,6 @@
 /**
  * @description
- * This package provides a client for communicating with the transaction-service.
- * It encapsulates the logic for making API calls to the transaction service,
- * making it easy for the scheduler to perform financial operations.
+ * Client for communicating with the transaction-service.
  */
 package transactionclient
 
@@ -10,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -27,7 +24,6 @@ type Client struct {
 
 // NewClient creates a new transaction service client.
 func NewClient(baseURL string) *Client {
-	// Normalize baseURL - remove trailing slash if present
 	normalizedURL := strings.TrimSuffix(baseURL, "/")
 	return &Client{
 		baseURL:    normalizedURL,
@@ -35,56 +31,13 @@ func NewClient(baseURL string) *Client {
 	}
 }
 
-// DebitSubscriptionFee calls the transaction-service to debit a subscription fee
-// from a user's primary wallet.
-func (c *Client) DebitSubscriptionFee(ctx context.Context, userID string, amount int64) error {
-	url := fmt.Sprintf("%s/transactions/subscription-fee", c.baseURL)
-
-	payload := domain.TransactionPayload{
-		UserID: userID,
-		Amount: amount,
-		Reason: "Monthly Subscription Fee",
-	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal transaction payload: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	// NOTE: This is an internal, server-to-server call.
-	// We might add internal auth (e.g., a shared secret) later for security.
-	// For now, we trust the internal network.
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to execute request to transaction service: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		// A 402 Payment Required status specifically means insufficient funds.
-		if resp.StatusCode == http.StatusPaymentRequired {
-			return errors.New("insufficient funds")
-		}
-		return fmt.Errorf("transaction service returned error status %d", resp.StatusCode)
-	}
-
-	return nil
-}
-
 // RefundMoneyDrop calls the transaction-service to refund a money drop.
 func (c *Client) RefundMoneyDrop(ctx context.Context, dropID, creatorID string, amount int64) error {
-	// Handle both cases: baseURL with or without /transactions prefix
-	var url string
 	if c.baseURL == "" {
 		return fmt.Errorf("transaction service base URL is not configured")
 	}
-	// If baseURL already ends with /transactions, don't add it again
+
+	var url string
 	if strings.HasSuffix(c.baseURL, "/transactions") {
 		url = fmt.Sprintf("%s/internal/money-drops/refund", c.baseURL)
 	} else {
@@ -102,7 +55,7 @@ func (c *Client) RefundMoneyDrop(ctx context.Context, dropID, creatorID string, 
 		return fmt.Errorf("failed to marshal refund payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
@@ -115,12 +68,7 @@ func (c *Client) RefundMoneyDrop(ctx context.Context, dropID, creatorID string, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		// Read response body to get detailed error message
-		var errorBody bytes.Buffer
-		if _, err := errorBody.ReadFrom(resp.Body); err == nil {
-			return fmt.Errorf("transaction service returned error status %d: %s (URL: %s)", resp.StatusCode, errorBody.String(), url)
-		}
-		return fmt.Errorf("transaction service returned error status %d (URL: %s)", resp.StatusCode, url)
+		return fmt.Errorf("transaction service returned error status %d", resp.StatusCode)
 	}
 
 	return nil

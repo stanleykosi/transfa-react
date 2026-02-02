@@ -76,7 +76,7 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 	})
 
 	// Internal endpoints (no authentication required for service-to-service communication)
-	r.Post("/subscription-fee", h.SubscriptionFeeHandler)
+	r.Post("/platform-fee", h.PlatformFeeHandler)
 	r.Post("/internal/money-drops/refund", h.RefundMoneyDropHandler)
 
 	return r
