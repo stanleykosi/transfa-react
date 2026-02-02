@@ -49,6 +49,12 @@ apiClient.interceptors.request.use(
         if (userId) {
           (config.headers as any)['X-Clerk-User-Id'] = String(userId);
         }
+        const email =
+          (Clerk as any).user?.primaryEmailAddress?.emailAddress ||
+          (Clerk as any).user?.emailAddresses?.[0]?.emailAddress;
+        if (email) {
+          (config.headers as any)['X-User-Email'] = String(email);
+        }
       }
     } catch (error) {
       // Log an error if token retrieval fails, but don't block the request.

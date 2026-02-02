@@ -13,6 +13,7 @@ This document captures the platform-fee implementation summary, Railway updates,
 - Supabase migration added platform fee tables and removed subscription tables/enum.
 
 Key code locations:
+
 - Platform fee service: `transfa-backend/platform-fee-service`
 - Scheduler updates: `transfa-backend/scheduler-service`
 - Transaction service updates: `transfa-backend/transaction-service`
@@ -36,6 +37,7 @@ Key code locations:
 ### Scheduler Service
 
 Add or update:
+
 - `PLATFORM_FEE_SERVICE_URL`
 - `PLATFORM_FEE_INTERNAL_API_KEY`
 - `PLATFORM_FEE_INVOICE_JOB_SCHEDULE` (default `5 0 1 * *`)
@@ -44,6 +46,7 @@ Add or update:
 - `TZ=Africa/Lagos`
 
 Remove old subscription settings:
+
 - `SUBSCRIPTION_FEE_KOBO`
 - `BILLING_JOB_SCHEDULE`
 - `RESET_USAGE_JOB_SCHEDULE`
@@ -51,6 +54,7 @@ Remove old subscription settings:
 ### Transaction Service
 
 Ensure:
+
 - `ADMIN_ACCOUNT_ID` points to the platform revenue Anchor account.
 
 ### Frontend Environment

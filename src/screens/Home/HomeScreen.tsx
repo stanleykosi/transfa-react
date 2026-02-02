@@ -85,8 +85,7 @@ const HomeScreen = () => {
       return {
         tone: 'error',
         title: 'Platform Fee Overdue',
-        message:
-          'External transfers are disabled. Add funds to your wallet to settle the fee.',
+        message: 'External transfers are disabled. Add funds to your wallet to settle the fee.',
       };
     }
 

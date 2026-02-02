@@ -53,10 +53,10 @@ const TransferStatusScreen = () => {
 
   const [fallback, setFallback] = useState({ status: initialStatus, failureReason });
 
-  const {
-    data: statusData,
-    isLoading,
-  } = useTransactionStatus(transactionId, initialStatus === 'pending');
+  const { data: statusData, isLoading } = useTransactionStatus(
+    transactionId,
+    initialStatus === 'pending'
+  );
 
   useEffect(() => {
     if (!transactionId && initialStatus === 'failed' && failureReason) {

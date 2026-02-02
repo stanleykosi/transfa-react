@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"net/url"
@@ -19,6 +20,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/transfa/auth-service/internal/api"
 	"github.com/transfa/auth-service/internal/config"
+	"github.com/transfa/auth-service/internal/domain"
 	"github.com/transfa/auth-service/internal/store"
 	"github.com/transfa/auth-service/pkg/rabbitmq"
 )
@@ -124,23 +126,63 @@ func main() {
 	// Create the onboarding handler with its dependencies
 	onboardingHandler := api.NewOnboardingHandler(userRepo, producer)
 
+	resolveUser := func(r *http.Request) (*domain.User, int, error) {
+		clerkUserID := strings.TrimSpace(r.Header.Get("X-Clerk-User-Id"))
+		if clerkUserID == "" {
+			return nil, http.StatusUnauthorized, errors.New("clerk user id missing")
+		}
+
+		existing, err := userRepo.FindByClerkUserID(r.Context(), clerkUserID)
+		if err == nil && existing != nil {
+			return existing, http.StatusOK, nil
+		}
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, http.StatusInternalServerError, err
+		}
+
+		email := strings.TrimSpace(r.Header.Get("X-User-Email"))
+		if email == "" {
+			return nil, http.StatusNotFound, errors.New("user not found")
+		}
+
+		byEmail, emailErr := userRepo.FindByEmail(r.Context(), email)
+		if emailErr != nil {
+			if errors.Is(emailErr, pgx.ErrNoRows) {
+				return nil, http.StatusNotFound, emailErr
+			}
+			return nil, http.StatusInternalServerError, emailErr
+		}
+
+		if byEmail != nil && byEmail.ClerkUserID != clerkUserID {
+			if updateErr := userRepo.UpdateClerkUserID(r.Context(), byEmail.ID, clerkUserID); updateErr != nil {
+				log.Printf("WARN: Failed updating clerk_user_id for user %s: %v", byEmail.ID, updateErr)
+			} else {
+				byEmail.ClerkUserID = clerkUserID
+			}
+		}
+
+		return byEmail, http.StatusOK, nil
+	}
+
 	// Define routes
 	r.Post("/onboarding", onboardingHandler.ServeHTTP)
 	r.Post("/onboarding/tier2", onboardingHandler.HandleTier2)
 
 	r.Get("/onboarding/status", func(w http.ResponseWriter, r *http.Request) {
-		clerkUserID := r.Header.Get("X-Clerk-User-Id")
-		if clerkUserID == "" {
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte("Unauthorized: Clerk User ID missing"))
-			return
-		}
-
-		// Minimal inline fetch to avoid new handler file; repository already constructed
-		existing, err := userRepo.FindByClerkUserID(r.Context(), clerkUserID)
+		existing, statusCode, err := resolveUser(r)
 		if err != nil || existing == nil {
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("User not found"))
+			if statusCode == http.StatusUnauthorized {
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte("Unauthorized: Clerk User ID missing"))
+				return
+			}
+			if statusCode == http.StatusNotFound {
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte("User not found"))
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("Failed to resolve user"))
 			return
 		}
 		// Derive a normalized, frontend-friendly status
@@ -207,16 +249,20 @@ func main() {
 
 	// Endpoint to fetch the user's profile including username, email, and UUID
 	r.Get("/me/profile", func(w http.ResponseWriter, r *http.Request) {
-		clerkUserID := r.Header.Get("X-Clerk-User-Id")
-		if clerkUserID == "" {
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte("Unauthorized: Clerk User ID missing"))
-			return
-		}
-		existing, err := userRepo.FindByClerkUserID(r.Context(), clerkUserID)
+		existing, statusCode, err := resolveUser(r)
 		if err != nil || existing == nil {
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("User not found"))
+			if statusCode == http.StatusUnauthorized {
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte("Unauthorized: Clerk User ID missing"))
+				return
+			}
+			if statusCode == http.StatusNotFound {
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte("User not found"))
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("Failed to resolve user"))
 			return
 		}
 		// Return user profile data
@@ -227,16 +273,20 @@ func main() {
 
 	// Lightweight helper to fetch the user's primary account number (NUBAN) and bank name
 	r.Get("/me/primary-account", func(w http.ResponseWriter, r *http.Request) {
-		clerkUserID := r.Header.Get("X-Clerk-User-Id")
-		if clerkUserID == "" {
-			w.WriteHeader(http.StatusUnauthorized)
-			w.Write([]byte("Unauthorized: Clerk User ID missing"))
-			return
-		}
-		existing, err := userRepo.FindByClerkUserID(r.Context(), clerkUserID)
+		existing, statusCode, err := resolveUser(r)
 		if err != nil || existing == nil {
-			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("User not found"))
+			if statusCode == http.StatusUnauthorized {
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte("Unauthorized: Clerk User ID missing"))
+				return
+			}
+			if statusCode == http.StatusNotFound {
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte("User not found"))
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("Failed to resolve user"))
 			return
 		}
 		var accountNumber, bankName *string

@@ -15,6 +15,8 @@ import (
 type UserRepository interface {
 	CreateUser(ctx context.Context, user *domain.User) (string, error)
 	FindByClerkUserID(ctx context.Context, clerkUserID string) (*domain.User, error)
+	FindByEmail(ctx context.Context, email string) (*domain.User, error)
+	UpdateClerkUserID(ctx context.Context, userID, clerkUserID string) error
 	UpdateContactInfo(ctx context.Context, userID string, email *string, phone *string) error
 	UpdateAnchorCustomerInfo(ctx context.Context, userID string, anchorCustomerID string, fullName *string) error
 	UpsertOnboardingStatus(ctx context.Context, userID, stage, status string, reason *string) error
@@ -96,6 +98,56 @@ func (r *PostgresUserRepository) FindByClerkUserID(ctx context.Context, clerkUse
 		u.AnchorCustomerID = anchorID
 	}
 	return &u, nil
+}
+
+// FindByEmail retrieves a user by their email address.
+func (r *PostgresUserRepository) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
+	query := `
+		SELECT id, clerk_user_id, anchor_customer_id, username, email, phone_number, full_name, user_type, allow_sending, created_at, updated_at
+		FROM users WHERE email = $1 LIMIT 1
+	`
+	var u domain.User
+	var anchorID *string
+	row := r.db.QueryRow(ctx, query, email)
+	err := row.Scan(
+		&u.ID,
+		&u.ClerkUserID,
+		&anchorID,
+		&u.Username,
+		&u.Email,
+		&u.PhoneNumber,
+		&u.FullName,
+		&u.Type,
+		&u.AllowSending,
+		&u.CreatedAt,
+		&u.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+		log.Printf("Error fetching user by email %s: %v", email, err)
+		return nil, err
+	}
+	if anchorID != nil {
+		u.AnchorCustomerID = anchorID
+	}
+	return &u, nil
+}
+
+// UpdateClerkUserID updates the Clerk user ID for a given internal user ID.
+func (r *PostgresUserRepository) UpdateClerkUserID(ctx context.Context, userID, clerkUserID string) error {
+	query := `
+		UPDATE users
+		SET clerk_user_id = $1, updated_at = NOW()
+		WHERE id = $2
+	`
+	_, err := r.db.Exec(ctx, query, clerkUserID, userID)
+	if err != nil {
+		log.Printf("Error updating clerk_user_id for user %s: %v", userID, err)
+		return err
+	}
+	return nil
 }
 
 // UpdateContactInfo updates Tier 0 contact fields for a user.

@@ -178,60 +178,60 @@ const SelfTransferScreen = () => {
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
           <Animated.View style={contentAnimation.animatedStyle}>
             <View style={styles.accountCard}>
-            <Text style={styles.accountLabel}>From</Text>
-            <Text style={styles.accountName}>Transfa Wallet</Text>
-            {isLoadingBalance ? (
-              <Text style={styles.accountBalance}>Loading balance...</Text>
-            ) : (
-              <Text style={styles.accountBalance}>
-                Balance: {formatCurrency(walletBalanceInKobo)}
-              </Text>
-            )}
-          </View>
+              <Text style={styles.accountLabel}>From</Text>
+              <Text style={styles.accountName}>Transfa Wallet</Text>
+              {isLoadingBalance ? (
+                <Text style={styles.accountBalance}>Loading balance...</Text>
+              ) : (
+                <Text style={styles.accountBalance}>
+                  Balance: {formatCurrency(walletBalanceInKobo)}
+                </Text>
+              )}
+            </View>
 
-          <BeneficiaryDropdown
-            beneficiaries={beneficiaries || []}
-            selectedBeneficiary={selectedBeneficiary}
-            onSelectBeneficiary={setSelectedBeneficiary}
-            isLoading={isLoadingBeneficiaries}
-            error={beneficiariesError?.message}
-          />
+            <BeneficiaryDropdown
+              beneficiaries={beneficiaries || []}
+              selectedBeneficiary={selectedBeneficiary}
+              onSelectBeneficiary={setSelectedBeneficiary}
+              isLoading={isLoadingBeneficiaries}
+              error={beneficiariesError?.message}
+            />
 
-          <FormInput
-            label="Amount to Withdraw (₦)"
-            value={amount}
-            onChangeText={setAmount}
-            placeholder="0.00"
-            keyboardType="numeric"
-          />
+            <FormInput
+              label="Amount to Withdraw (₦)"
+              value={amount}
+              onChangeText={setAmount}
+              placeholder="0.00"
+              keyboardType="numeric"
+            />
 
-          <FormInput
-            label="Description (Optional)"
-            value={description}
-            onChangeText={setDescription}
-            placeholder="e.g., Savings"
-            multiline
-            numberOfLines={2}
-          />
+            <FormInput
+              label="Description (Optional)"
+              value={description}
+              onChangeText={setDescription}
+              placeholder="e.g., Savings"
+              multiline
+              numberOfLines={2}
+            />
           </Animated.View>
 
           {amountInKobo > 0 && (
             <Animated.View style={summaryAnimation.animatedStyle}>
               <View style={styles.summaryCard}>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Amount</Text>
-                <Text style={styles.summaryValue}>{formatCurrency(amountInKobo)}</Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Withdrawal Fee</Text>
-                <Text style={styles.summaryValue}>
-                  {isLoadingFees ? 'Calculating…' : formatCurrency(feeInKobo)}
-                </Text>
-              </View>
-              <View style={[styles.summaryRow, styles.totalRow]}>
-                <Text style={styles.summaryTotalLabel}>Total to be Debited</Text>
-                <Text style={styles.summaryTotalValue}>{formatCurrency(totalAmountInKobo)}</Text>
-              </View>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Amount</Text>
+                  <Text style={styles.summaryValue}>{formatCurrency(amountInKobo)}</Text>
+                </View>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Withdrawal Fee</Text>
+                  <Text style={styles.summaryValue}>
+                    {isLoadingFees ? 'Calculating…' : formatCurrency(feeInKobo)}
+                  </Text>
+                </View>
+                <View style={[styles.summaryRow, styles.totalRow]}>
+                  <Text style={styles.summaryTotalLabel}>Total to be Debited</Text>
+                  <Text style={styles.summaryTotalValue}>{formatCurrency(totalAmountInKobo)}</Text>
+                </View>
               </View>
             </Animated.View>
           )}

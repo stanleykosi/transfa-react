@@ -238,11 +238,7 @@ const ReceivingPreferencesScreen = () => {
               <View style={styles.statusRow}>
                 <Text style={styles.statusLabel}>Platform fee status:</Text>
                 <Text style={styles.statusValue}>
-                  {isDelinquent
-                    ? 'Delinquent'
-                    : isWithinGrace
-                      ? 'Active'
-                      : 'Pending'}
+                  {isDelinquent ? 'Delinquent' : isWithinGrace ? 'Active' : 'Pending'}
                 </Text>
               </View>
             </View>
