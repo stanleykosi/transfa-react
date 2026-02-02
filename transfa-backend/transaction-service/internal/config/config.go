@@ -13,6 +13,7 @@ package config
 import (
 	"log"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 
@@ -48,17 +49,18 @@ func LoadConfig(path string) (config Config, err error) {
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	// Set default values
-    viper.SetDefault("SERVER_PORT", "8083")
-    viper.SetDefault("TRANSFER_EVENT_QUEUE", "transaction_service.transfer_updates")
-    viper.SetDefault("ADMIN_ACCOUNT_ID", "17568857819889-anc_acc")
-    viper.SetDefault("P2P_TRANSACTION_FEE_KOBO", 500)
-    viper.SetDefault("MONEY_DROP_FEE_KOBO", 0) // Default: no fee (can be configured)
+	viper.SetDefault("SERVER_PORT", "8080")
+	viper.SetDefault("TRANSFER_EVENT_QUEUE", "transaction_service.transfer_updates")
+	viper.SetDefault("ADMIN_ACCOUNT_ID", "17568857819889-anc_acc")
+	viper.SetDefault("P2P_TRANSACTION_FEE_KOBO", 500)
+	viper.SetDefault("MONEY_DROP_FEE_KOBO", 0) // Default: no fee (can be configured)
 
 	// Bind environment variables explicitly to ensure they appear in Unmarshal
 	_ = viper.BindEnv("SERVER_PORT")
+	_ = viper.BindEnv("PORT")
 	_ = viper.BindEnv("DATABASE_URL")
-    _ = viper.BindEnv("RABBITMQ_URL")
-    _ = viper.BindEnv("TRANSFER_EVENT_QUEUE")
+	_ = viper.BindEnv("RABBITMQ_URL")
+	_ = viper.BindEnv("TRANSFER_EVENT_QUEUE")
 	_ = viper.BindEnv("ANCHOR_API_BASE_URL")
 	_ = viper.BindEnv("ANCHOR_API_KEY")
 	_ = viper.BindEnv("CLERK_JWKS_URL")
@@ -84,6 +86,10 @@ func LoadConfig(path string) (config Config, err error) {
 	err = viper.Unmarshal(&config)
 	if err != nil {
 		return
+	}
+
+	if port := strings.TrimSpace(os.Getenv("PORT")); port != "" {
+		config.ServerPort = port
 	}
 
 	// Allow specifying fee in whole currency units via P2P_TRANSACTION_FEE or P2P_TRANSACTION_FEE_NAIRA.
