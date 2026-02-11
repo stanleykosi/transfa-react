@@ -22,6 +22,8 @@ type Config struct {
 	ServerPort          string `mapstructure:"SERVER_PORT"`
 	RabbitMQURL         string `mapstructure:"RABBITMQ_URL"`
 	AnchorWebhookSecret string `mapstructure:"ANCHOR_WEBHOOK_SECRET"`
+	AnchorAPIKey        string `mapstructure:"ANCHOR_API_KEY"`
+	AnchorAPIBaseURL    string `mapstructure:"ANCHOR_API_BASE_URL"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -35,11 +37,14 @@ func LoadConfig() (config Config, err error) {
 
 	// Set default values
 	viper.SetDefault("SERVER_PORT", "8081")
+	viper.SetDefault("ANCHOR_API_BASE_URL", "https://api.sandbox.getanchor.co")
 
 	// Bind env vars explicitly
 	_ = viper.BindEnv("SERVER_PORT")
 	_ = viper.BindEnv("RABBITMQ_URL")
 	_ = viper.BindEnv("ANCHOR_WEBHOOK_SECRET")
+	_ = viper.BindEnv("ANCHOR_API_KEY")
+	_ = viper.BindEnv("ANCHOR_API_BASE_URL")
 
 	// Read the config file if it exists.
 	if err = viper.ReadInConfig(); err != nil {

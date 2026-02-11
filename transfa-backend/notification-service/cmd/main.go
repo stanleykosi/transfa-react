@@ -67,7 +67,12 @@ func main() {
 	r.Use(middleware.Recoverer)
 
 	// Create the webhook handler with its dependencies.
-	webhookHandler := api.NewWebhookHandler(producer, cfg.AnchorWebhookSecret)
+	webhookHandler := api.NewWebhookHandler(
+		producer,
+		cfg.AnchorWebhookSecret,
+		cfg.AnchorAPIKey,
+		cfg.AnchorAPIBaseURL,
+	)
 
 	// Define routes.
 	r.Post("/webhooks/anchor", webhookHandler.ServeHTTP)

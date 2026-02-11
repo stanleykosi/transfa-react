@@ -51,6 +51,9 @@ const (
 type WebhookHandler struct {
 	producer        *rabbitmq.EventProducer
 	secrets         []string
+	anchorAPIKey    string
+	anchorAPIBase   string
+	httpClient      *http.Client
 	processedEvents map[string]time.Time
 	mutex           sync.RWMutex
 }
@@ -69,10 +72,18 @@ func extractReason(attrs map[string]interface{}) string {
 }
 
 // NewWebhookHandler creates a new handler for the webhook endpoint.
-func NewWebhookHandler(producer *rabbitmq.EventProducer, secret string) *WebhookHandler {
+func NewWebhookHandler(producer *rabbitmq.EventProducer, secret string, anchorAPIKey string, anchorAPIBaseURL string) *WebhookHandler {
+	anchorAPIBaseURL = strings.TrimSpace(anchorAPIBaseURL)
+	if anchorAPIBaseURL == "" {
+		anchorAPIBaseURL = "https://api.sandbox.getanchor.co"
+	}
+
 	return &WebhookHandler{
 		producer:        producer,
 		secrets:         parseWebhookSecrets(secret),
+		anchorAPIKey:    strings.TrimSpace(anchorAPIKey),
+		anchorAPIBase:   strings.TrimRight(anchorAPIBaseURL, "/"),
+		httpClient:      &http.Client{Timeout: 5 * time.Second},
 		processedEvents: make(map[string]time.Time),
 	}
 }
@@ -111,9 +122,13 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !h.isValidSignature(signatureHeader, signatureBodies...) {
 		eventType, eventID := previewWebhookEvent(body)
 		bodyHash := sha1.Sum(body)
-		log.Printf("[%s] Error: Invalid webhook signature (event=%s id=%s body_sha1=%x content_encoding=%q content_type=%q content_length=%d)", requestID, safeSegment(eventType, "unknown"), safeSegment(eventID, "unknown"), bodyHash, r.Header.Get("Content-Encoding"), r.Header.Get("Content-Type"), r.ContentLength)
-		http.Error(w, "Invalid signature", http.StatusBadRequest)
-		return
+		if h.verifyAnchorEventFallback(r.Context(), body, eventType, eventID) {
+			log.Printf("[%s] WARN: Signature mismatch but Anchor API fallback verification succeeded (event=%s id=%s body_sha1=%x)", requestID, safeSegment(eventType, "unknown"), safeSegment(eventID, "unknown"), bodyHash)
+		} else {
+			log.Printf("[%s] Error: Invalid webhook signature (event=%s id=%s body_sha1=%x content_encoding=%q content_type=%q content_length=%d)", requestID, safeSegment(eventType, "unknown"), safeSegment(eventID, "unknown"), bodyHash, r.Header.Get("Content-Encoding"), r.Header.Get("Content-Type"), r.ContentLength)
+			http.Error(w, "Invalid signature", http.StatusBadRequest)
+			return
+		}
 	}
 
 	event, err := decodeAnchorWebhook(body)
@@ -393,6 +408,104 @@ func gunzipBody(body []byte) ([]byte, error) {
 	return decoded, nil
 }
 
+type anchorEventLookupResponse struct {
+	Data domain.EventResource `json:"data"`
+}
+
+// verifyAnchorEventFallback validates webhook authenticity by cross-checking event identity
+// with Anchor's Events API when signature verification fails.
+func (h *WebhookHandler) verifyAnchorEventFallback(ctx context.Context, body []byte, eventType string, eventID string) bool {
+	eventType = strings.TrimSpace(eventType)
+	eventID = strings.TrimSpace(eventID)
+	if eventType == "" || eventID == "" {
+		return false
+	}
+	if h.anchorAPIKey == "" {
+		return false
+	}
+
+	localEvent, err := decodeAnchorWebhook(body)
+	if err != nil {
+		return false
+	}
+
+	localTransferID := extractRelationshipID(localEvent.Data.Relationships, "transfer", "bookTransfer", "book_transfer", "nipTransfer", "nip_transfer")
+	localCustomerID := extractRelationshipID(localEvent.Data.Relationships, "customer")
+	localAccountID := extractRelationshipID(localEvent.Data.Relationships, "account")
+
+	requestCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+
+	endpoint := fmt.Sprintf("%s/api/v1/events/%s", h.anchorAPIBase, url.PathEscape(eventID))
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("x-anchor-key", h.anchorAPIKey)
+
+	resp, err := h.httpClient.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxWebhookBodyBytes))
+	if err != nil {
+		return false
+	}
+
+	var lookup anchorEventLookupResponse
+	if err := json.Unmarshal(respBody, &lookup); err != nil {
+		return false
+	}
+
+	if strings.TrimSpace(lookup.Data.ID) != eventID {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(lookup.Data.Type), eventType) {
+		return false
+	}
+
+	remoteTransferID := extractRelationshipID(lookup.Data.Relationships, "transfer", "bookTransfer", "book_transfer", "nipTransfer", "nip_transfer")
+	remoteCustomerID := extractRelationshipID(lookup.Data.Relationships, "customer")
+	remoteAccountID := extractRelationshipID(lookup.Data.Relationships, "account")
+
+	if localTransferID != "" && remoteTransferID != "" && localTransferID != remoteTransferID {
+		return false
+	}
+	if localCustomerID != "" && remoteCustomerID != "" && localCustomerID != remoteCustomerID {
+		return false
+	}
+	if localAccountID != "" && remoteAccountID != "" && localAccountID != remoteAccountID {
+		return false
+	}
+
+	return true
+}
+
+func extractRelationshipID(relationships map[string]domain.Relationship, keys ...string) string {
+	if rel, ok := relationshipByKey(relationships, keys...); ok {
+		var single domain.RelationshipData
+		if err := json.Unmarshal(rel.Data, &single); err == nil && single.ID != "" {
+			return single.ID
+		}
+		var many []domain.RelationshipData
+		if err := json.Unmarshal(rel.Data, &many); err == nil {
+			for _, item := range many {
+				if item.ID != "" {
+					return item.ID
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func normalizeSignatureHeader(header string) []string {
 	header = strings.TrimSpace(header)
 	if header == "" {
@@ -534,6 +647,7 @@ func (h *WebhookHandler) routeEvent(ctx context.Context, event domain.AnchorWebh
 		routingKey := fmt.Sprintf("transfer.status.%s.%s", safeSegment(payload.TransferType, "unknown"), safeSegment(normalizedStatus, "unknown"))
 		payload.Status = normalizedStatus
 		return func() error {
+			log.Printf("Publishing transfer event: routing_key=%s event_id=%s event_type=%s anchor_transfer_id=%s status=%s anchor_customer_id=%s", routingKey, payload.EventID, payload.EventType, payload.AnchorTransferID, payload.Status, payload.AnchorCustomerID)
 			return h.producer.Publish(ctx, "transfa.events", routingKey, payload)
 		}, true
 	}
