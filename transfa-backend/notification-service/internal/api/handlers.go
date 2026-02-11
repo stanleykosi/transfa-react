@@ -19,6 +19,8 @@
 package api
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/hmac"
 	"crypto/sha1"
@@ -105,13 +107,24 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	signatureHeader := r.Header.Get("x-anchor-signature")
-	if !h.isValidSignature(signatureHeader, body) {
-		log.Printf("[%s] Error: Invalid webhook signature", requestID)
+	signatureBodies := buildSignatureBodies(body, r.Header.Get("Content-Encoding"))
+	if !h.isValidSignature(signatureHeader, signatureBodies...) {
+		eventType, eventID := previewWebhookEvent(body)
+		bodyHash := sha1.Sum(body)
+		log.Printf("[%s] Error: Invalid webhook signature (event=%s id=%s body_sha1=%x content_encoding=%q content_type=%q content_length=%d)", requestID, safeSegment(eventType, "unknown"), safeSegment(eventID, "unknown"), bodyHash, r.Header.Get("Content-Encoding"), r.Header.Get("Content-Type"), r.ContentLength)
 		http.Error(w, "Invalid signature", http.StatusBadRequest)
 		return
 	}
 
 	event, err := decodeAnchorWebhook(body)
+	if err != nil && len(signatureBodies) > 1 {
+		for _, candidate := range signatureBodies[1:] {
+			event, err = decodeAnchorWebhook(candidate)
+			if err == nil {
+				break
+			}
+		}
+	}
 	if err != nil {
 		log.Printf("[%s] Error decoding webhook JSON: %v", requestID, err)
 		http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
@@ -281,8 +294,32 @@ func buildEventKey(event domain.AnchorWebhookEvent, body []byte) string {
 	return fmt.Sprintf("%s:body:%x", eventType, sum)
 }
 
+func previewWebhookEvent(body []byte) (eventType string, eventID string) {
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return "", ""
+	}
+
+	if data, ok := raw["data"].(map[string]any); ok {
+		if id, ok := data["id"].(string); ok {
+			eventID = id
+		}
+		if typ, ok := data["type"].(string); ok {
+			eventType = typ
+		}
+	}
+
+	if eventType == "" {
+		if typ, ok := raw["event"].(string); ok {
+			eventType = typ
+		}
+	}
+
+	return eventType, eventID
+}
+
 // isValidSignature validates the webhook signature using Anchor's documented scheme.
-func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) bool {
+func (h *WebhookHandler) isValidSignature(signatureHeader string, bodies ...[]byte) bool {
 	if len(h.secrets) == 0 {
 		log.Println("Error: ANCHOR_WEBHOOK_SECRET is not set. Rejecting webhook.")
 		return false
@@ -294,12 +331,14 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
 		return false
 	}
 
-	for _, secret := range h.secrets {
-		expectedSignatures := anchorSignatures(secret, body)
-		for _, provided := range signatureCandidates {
-			for _, expected := range expectedSignatures {
-				if hmac.Equal([]byte(provided), []byte(expected)) {
-					return true
+	for _, body := range bodies {
+		for _, secret := range h.secrets {
+			expectedSignatures := anchorSignatures(secret, body)
+			for _, provided := range signatureCandidates {
+				for _, expected := range expectedSignatures {
+					if hmac.Equal([]byte(provided), []byte(expected)) {
+						return true
+					}
 				}
 			}
 		}
@@ -307,6 +346,51 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
 
 	log.Printf("Signature mismatch. Provided header: %s", strings.Join(signatureCandidates, ","))
 	return false
+}
+
+func buildSignatureBodies(body []byte, contentEncoding string) [][]byte {
+	candidates := make([][]byte, 0, 2)
+	candidates = append(candidates, body)
+
+	if !shouldTryGzipBody(contentEncoding, body) {
+		return candidates
+	}
+
+	decoded, err := gunzipBody(body)
+	if err != nil {
+		log.Printf("Webhook gzip decode skipped: %v", err)
+		return candidates
+	}
+	if len(decoded) == 0 {
+		return candidates
+	}
+
+	candidates = append(candidates, decoded)
+	return candidates
+}
+
+func shouldTryGzipBody(contentEncoding string, body []byte) bool {
+	if strings.Contains(strings.ToLower(contentEncoding), "gzip") {
+		return true
+	}
+	return len(body) >= 2 && body[0] == 0x1f && body[1] == 0x8b
+}
+
+func gunzipBody(body []byte) ([]byte, error) {
+	reader, err := gzip.NewReader(bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	decoded, err := io.ReadAll(io.LimitReader(reader, maxWebhookBodyBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(decoded)) > maxWebhookBodyBytes {
+		return nil, fmt.Errorf("decoded webhook body exceeds %d bytes", maxWebhookBodyBytes)
+	}
+	return decoded, nil
 }
 
 func normalizeSignatureHeader(header string) []string {
@@ -355,7 +439,7 @@ func normalizeSignatureHeader(header string) []string {
 		if err == nil {
 			decodedStr := strings.TrimSpace(string(decoded))
 			// Many Anchor examples return base64(hex(hmac_sha1(...))).
-			if isLowerHexSHA1(decodedStr) {
+			if isHexSHA1(decodedStr) {
 				appendCandidate(strings.ToLower(decodedStr))
 			}
 		}
@@ -365,27 +449,49 @@ func normalizeSignatureHeader(header string) []string {
 }
 
 func anchorSignatures(secret string, body []byte) []string {
-	sha1Mac := hmac.New(sha1.New, []byte(secret))
-	sha1Mac.Write(body)
-	raw := sha1Mac.Sum(nil)
-	hexLower := hex.EncodeToString(raw)
-
-	return []string{
-		// Matches Anchor examples and current observed traffic.
-		base64.StdEncoding.EncodeToString([]byte(hexLower)),
-		// Defensive compatibility with "Base64(HMAC_SHA1(...))" interpretation.
-		base64.StdEncoding.EncodeToString(raw),
-		// Accept direct hex if a proxy/formatter rewrites header.
-		hexLower,
+	variants := [][]byte{
+		body,                          // strict raw payload
+		bytes.TrimSpace(body),         // tolerate leading/trailing whitespace differences
+		bytes.TrimRight(body, "\r\n"), // tolerate newline normalization by intermediaries
 	}
+	if len(body) > 0 && body[len(body)-1] != '\n' {
+		variants = append(variants, append(append([]byte{}, body...), '\n'))
+	}
+
+	seen := make(map[string]struct{})
+	signatures := make([]string, 0, len(variants)*3)
+
+	appendSignature := func(sig string) {
+		if _, ok := seen[sig]; ok {
+			return
+		}
+		seen[sig] = struct{}{}
+		signatures = append(signatures, sig)
+	}
+
+	for _, variant := range variants {
+		sha1Mac := hmac.New(sha1.New, []byte(secret))
+		sha1Mac.Write(variant)
+		raw := sha1Mac.Sum(nil)
+		hexLower := hex.EncodeToString(raw)
+
+		// Matches Anchor examples and current observed traffic.
+		appendSignature(base64.StdEncoding.EncodeToString([]byte(hexLower)))
+		// Defensive compatibility with "Base64(HMAC_SHA1(...))" interpretation.
+		appendSignature(base64.StdEncoding.EncodeToString(raw))
+		// Accept direct hex if a proxy/formatter rewrites header.
+		appendSignature(hexLower)
+	}
+
+	return signatures
 }
 
-func isLowerHexSHA1(value string) bool {
+func isHexSHA1(value string) bool {
 	if len(value) != 40 {
 		return false
 	}
 	for _, r := range value {
-		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') && (r < 'A' || r > 'F') {
 			return false
 		}
 	}

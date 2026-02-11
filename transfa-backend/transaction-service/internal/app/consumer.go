@@ -14,7 +14,7 @@ import (
 	"github.com/transfa/transaction-service/internal/store"
 )
 
-const maxMissingTransferRetries = 8
+const maxMissingTransferRetries = 20
 
 type TransferStatusConsumer struct {
 	repo              store.Repository
@@ -54,7 +54,9 @@ func (c *TransferStatusConsumer) HandleMessage(body []byte) bool {
 
 			attempt := c.incrementMissingAttempt(event.AnchorTransferID)
 			if attempt < maxMissingTransferRetries {
+				backoff := missingTransferRetryBackoff(attempt)
 				log.Printf("transfer-consumer: transaction not found for transfer %s, retrying (%d/%d)", event.AnchorTransferID, attempt, maxMissingTransferRetries)
+				time.Sleep(backoff)
 				return false
 			}
 
@@ -135,12 +137,13 @@ func normalizeStatus(status string) string {
 	switch status {
 	case "successful", "success":
 		return "completed"
-	case "failed", "failure":
+	case "failed", "failure", "reversed":
 		return "failed"
-	case "initiated", "processing", "pending":
-		return "processing"
+	case "initiated", "processing", "pending", "in_progress":
+		return "pending"
 	default:
-		return status
+		// Unknown statuses should not be written into the enum-backed DB column.
+		return ""
 	}
 }
 
@@ -184,4 +187,17 @@ func (c *TransferStatusConsumer) clearMissingAttempt(anchorTransferID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.missingTxAttempts, anchorTransferID)
+}
+
+func missingTransferRetryBackoff(attempt int) time.Duration {
+	if attempt < 1 {
+		return 250 * time.Millisecond
+	}
+
+	// Linear backoff with cap keeps retries spread out without stalling consumers for too long.
+	delay := time.Duration(attempt) * 250 * time.Millisecond
+	if delay > 3*time.Second {
+		return 3 * time.Second
+	}
+	return delay
 }

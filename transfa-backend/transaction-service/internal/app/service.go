@@ -283,8 +283,8 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		metadata := store.UpdateTransactionMetadataParams{
 			AnchorTransferID: &transferID,
 		}
-		statusProcessing := "processing"
-		metadata.Status = &statusProcessing
+		statusPending := "pending"
+		metadata.Status = &statusPending
 		if txRecord.TransferType != "" {
 			typeCopy := txRecord.TransferType
 			metadata.TransferType = &typeCopy
@@ -295,7 +295,7 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		}
 	}
 
-	txRecord.Status = "processing"
+	txRecord.Status = "pending"
 
 	return txRecord, nil
 }
@@ -459,8 +459,8 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 		metadata := store.UpdateTransactionMetadataParams{
 			AnchorTransferID: &transferID,
 		}
-		statusProcessing := "processing"
-		metadata.Status = &statusProcessing
+		statusPending := "pending"
+		metadata.Status = &statusPending
 		typeCopy := txRecord.TransferType
 		metadata.TransferType = &typeCopy
 
@@ -469,7 +469,7 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 		}
 	}
 
-	txRecord.Status = "processing"
+	txRecord.Status = "pending"
 
 	return txRecord, nil
 }
