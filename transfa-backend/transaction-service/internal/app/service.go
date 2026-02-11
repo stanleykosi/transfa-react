@@ -283,6 +283,8 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		metadata := store.UpdateTransactionMetadataParams{
 			AnchorTransferID: &transferID,
 		}
+		statusProcessing := "processing"
+		metadata.Status = &statusProcessing
 		if txRecord.TransferType != "" {
 			typeCopy := txRecord.TransferType
 			metadata.TransferType = &typeCopy
@@ -457,6 +459,8 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 		metadata := store.UpdateTransactionMetadataParams{
 			AnchorTransferID: &transferID,
 		}
+		statusProcessing := "processing"
+		metadata.Status = &statusProcessing
 		typeCopy := txRecord.TransferType
 		metadata.TransferType = &typeCopy
 

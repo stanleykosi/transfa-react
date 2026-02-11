@@ -7,18 +7,26 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/transfa/transaction-service/internal/domain"
 	"github.com/transfa/transaction-service/internal/store"
 )
 
+const maxMissingTransferRetries = 8
+
 type TransferStatusConsumer struct {
-	repo store.Repository
+	repo              store.Repository
+	mu                sync.Mutex
+	missingTxAttempts map[string]int
 }
 
 func NewTransferStatusConsumer(repo store.Repository) *TransferStatusConsumer {
-	return &TransferStatusConsumer{repo: repo}
+	return &TransferStatusConsumer{
+		repo:              repo,
+		missingTxAttempts: make(map[string]int),
+	}
 }
 
 func (c *TransferStatusConsumer) HandleMessage(body []byte) bool {
@@ -37,20 +45,35 @@ func (c *TransferStatusConsumer) HandleMessage(body []byte) bool {
 	defer cancel()
 
 	if err := c.processEvent(ctx, event); err != nil {
+		if errors.Is(err, store.ErrTransactionNotFound) {
+			// Fee transfer webhooks are expected to not map to a primary user-facing transaction.
+			if looksLikeFeeEvent(event) {
+				log.Printf("transfer-consumer: ignoring fee transfer event with no transaction for anchor transfer %s", event.AnchorTransferID)
+				return true
+			}
+
+			attempt := c.incrementMissingAttempt(event.AnchorTransferID)
+			if attempt < maxMissingTransferRetries {
+				log.Printf("transfer-consumer: transaction not found for transfer %s, retrying (%d/%d)", event.AnchorTransferID, attempt, maxMissingTransferRetries)
+				return false
+			}
+
+			log.Printf("transfer-consumer: transaction still not found for transfer %s after %d attempts; acknowledging", event.AnchorTransferID, attempt)
+			c.clearMissingAttempt(event.AnchorTransferID)
+			return true
+		}
+
 		log.Printf("transfer-consumer: processing error for transfer %s: %v", event.AnchorTransferID, err)
 		return false
 	}
 
+	c.clearMissingAttempt(event.AnchorTransferID)
 	return true
 }
 
 func (c *TransferStatusConsumer) processEvent(ctx context.Context, event domain.TransferStatusEvent) error {
 	tx, err := c.repo.FindTransactionByAnchorTransferID(ctx, event.AnchorTransferID)
 	if err != nil {
-		if errors.Is(err, store.ErrTransactionNotFound) {
-			log.Printf("transfer-consumer: no transaction found for anchor transfer %s; acknowledging", event.AnchorTransferID)
-			return nil
-		}
 		return fmt.Errorf("lookup transaction: %w", err)
 	}
 
@@ -138,4 +161,27 @@ func optionalString(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+func looksLikeFeeEvent(event domain.TransferStatusEvent) bool {
+	if strings.Contains(strings.ToLower(event.Reason), "fee") {
+		return true
+	}
+	if strings.Contains(strings.ToLower(event.EventType), "fee") {
+		return true
+	}
+	return false
+}
+
+func (c *TransferStatusConsumer) incrementMissingAttempt(anchorTransferID string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.missingTxAttempts[anchorTransferID]++
+	return c.missingTxAttempts[anchorTransferID]
+}
+
+func (c *TransferStatusConsumer) clearMissingAttempt(anchorTransferID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.missingTxAttempts, anchorTransferID)
 }

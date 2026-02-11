@@ -288,57 +288,108 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, body []byte) b
 		return false
 	}
 
-	signature := normalizeSignatureHeader(signatureHeader)
-	if signature == "" {
+	signatureCandidates := normalizeSignatureHeader(signatureHeader)
+	if len(signatureCandidates) == 0 {
 		log.Println("Missing x-anchor-signature header")
 		return false
 	}
 
 	for _, secret := range h.secrets {
-		expected := anchorSignature(secret, body)
-		if hmac.Equal([]byte(signature), []byte(expected)) {
-			return true
+		expectedSignatures := anchorSignatures(secret, body)
+		for _, provided := range signatureCandidates {
+			for _, expected := range expectedSignatures {
+				if hmac.Equal([]byte(provided), []byte(expected)) {
+					return true
+				}
+			}
 		}
 	}
 
-	log.Printf("Signature mismatch. Provided header: %s", signature)
+	log.Printf("Signature mismatch. Provided header: %s", strings.Join(signatureCandidates, ","))
 	return false
 }
 
-func normalizeSignatureHeader(header string) string {
+func normalizeSignatureHeader(header string) []string {
 	header = strings.TrimSpace(header)
 	if header == "" {
-		return ""
+		return nil
 	}
 
-	for _, part := range strings.Split(header, ",") {
+	// Anchor currently documents HMAC-SHA1 but examples show two equivalent renderings.
+	// Accept common header variants robustly while still requiring a matching HMAC.
+	parts := strings.FieldsFunc(header, func(r rune) bool {
+		return r == ',' || r == ';'
+	})
+
+	seen := make(map[string]struct{})
+	candidates := make([]string, 0, len(parts)*2)
+	appendCandidate := func(value string) {
+		value = strings.TrimSpace(strings.Trim(value, "\"'"))
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		candidates = append(candidates, value)
+	}
+
+	for _, part := range parts {
 		candidate := strings.TrimSpace(part)
 		if candidate == "" {
 			continue
 		}
 
 		lower := strings.ToLower(candidate)
-		if strings.HasPrefix(lower, "sha256=") {
-			continue
+		for _, prefix := range []string{"sha1=", "v1=", "signature="} {
+			if strings.HasPrefix(lower, prefix) {
+				candidate = strings.TrimSpace(candidate[len(prefix):])
+				break
+			}
 		}
-		if strings.HasPrefix(lower, "sha1=") {
-			candidate = strings.TrimSpace(candidate[5:])
-		}
-		if candidate != "" {
-			return candidate
+
+		appendCandidate(candidate)
+
+		decoded, err := base64.StdEncoding.DecodeString(candidate)
+		if err == nil {
+			decodedStr := strings.TrimSpace(string(decoded))
+			// Many Anchor examples return base64(hex(hmac_sha1(...))).
+			if isLowerHexSHA1(decodedStr) {
+				appendCandidate(strings.ToLower(decodedStr))
+			}
 		}
 	}
 
-	return ""
+	return candidates
 }
 
-func anchorSignature(secret string, body []byte) string {
+func anchorSignatures(secret string, body []byte) []string {
 	sha1Mac := hmac.New(sha1.New, []byte(secret))
 	sha1Mac.Write(body)
-	sha1Raw := sha1Mac.Sum(nil)
+	raw := sha1Mac.Sum(nil)
+	hexLower := hex.EncodeToString(raw)
 
-	hexLower := hex.EncodeToString(sha1Raw)
-	return base64.StdEncoding.EncodeToString([]byte(hexLower))
+	return []string{
+		// Matches Anchor examples and current observed traffic.
+		base64.StdEncoding.EncodeToString([]byte(hexLower)),
+		// Defensive compatibility with "Base64(HMAC_SHA1(...))" interpretation.
+		base64.StdEncoding.EncodeToString(raw),
+		// Accept direct hex if a proxy/formatter rewrites header.
+		hexLower,
+	}
+}
+
+func isLowerHexSHA1(value string) bool {
+	if len(value) != 40 {
+		return false
+	}
+	for _, r := range value {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // isDuplicateEvent checks if we've already processed this event recently.
@@ -437,41 +488,48 @@ func (h *WebhookHandler) buildTransferEvent(event domain.AnchorWebhookEvent, anc
 		OccurredAt:       event.CreatedAt,
 	}
 
-	if rel, ok := event.Data.Relationships["transfer"]; ok {
+	if rel, ok := relationshipByKey(event.Data.Relationships, "transfer", "bookTransfer", "book_transfer", "nipTransfer", "nip_transfer"); ok {
 		var transferRef domain.RelationshipData
 		if err := json.Unmarshal(rel.Data, &transferRef); err == nil && transferRef.ID != "" {
 			payload.AnchorTransferID = transferRef.ID
 		}
 	}
 
-	if rel, ok := event.Data.Relationships["account"]; ok {
+	if rel, ok := relationshipByKey(event.Data.Relationships, "account"); ok {
 		var accountRef domain.RelationshipData
 		if err := json.Unmarshal(rel.Data, &accountRef); err == nil && accountRef.ID != "" {
 			payload.AnchorAccountID = accountRef.ID
 		}
 	}
 
-	if rel, ok := event.Data.Relationships["customer"]; ok && payload.AnchorCustomerID == "" {
+	if rel, ok := relationshipByKey(event.Data.Relationships, "customer"); ok && payload.AnchorCustomerID == "" {
 		var customerRef domain.RelationshipData
 		if err := json.Unmarshal(rel.Data, &customerRef); err == nil && customerRef.ID != "" {
 			payload.AnchorCustomerID = customerRef.ID
 		}
 	}
 
-	if rel, ok := event.Data.Relationships["counterParty"]; ok {
+	if rel, ok := relationshipByKey(event.Data.Relationships, "counterParty", "counterparty", "counter_party"); ok {
 		var counterpartyRef domain.RelationshipData
 		if err := json.Unmarshal(rel.Data, &counterpartyRef); err == nil {
 			payload.CounterpartyID = counterpartyRef.ID
 		}
 	}
 
+	eventStatus, hasEventStatus := statusFromEventType(event.Event)
+
 	for _, included := range event.Included {
 		typeLower := strings.ToLower(included.Type)
 		switch typeLower {
 		case "nip_transfer", "book_transfer":
+			if payload.AnchorTransferID == "" && included.ID != "" {
+				payload.AnchorTransferID = included.ID
+			}
 			payload.TransferType = transferTypeFromIncluded(included.Type, payload.TransferType)
-			if status, ok := stringFromMap(included.Attributes, "status"); ok {
-				payload.Status = strings.ToLower(status)
+			if !hasEventStatus {
+				if status, ok := stringFromMap(included.Attributes, "status"); ok {
+					payload.Status = strings.ToLower(status)
+				}
 			}
 			if reason, ok := stringFromMap(included.Attributes, "reason"); ok {
 				payload.Reason = decodeReason(reason)
@@ -486,8 +544,10 @@ func (h *WebhookHandler) buildTransferEvent(event domain.AnchorWebhookEvent, anc
 				payload.SessionID = sessionID
 			}
 		case "niptransferhistory", "booktransferhistory", "nip_transfer_history", "book_transfer_history":
-			if status, ok := stringFromMap(included.Attributes, "status"); ok {
-				payload.Status = strings.ToLower(status)
+			if !hasEventStatus {
+				if status, ok := stringFromMap(included.Attributes, "status"); ok {
+					payload.Status = strings.ToLower(status)
+				}
 			}
 			if message, ok := stringFromMap(included.Attributes, "message"); ok {
 				payload.Reason = decodeReason(message)
@@ -503,7 +563,11 @@ func (h *WebhookHandler) buildTransferEvent(event domain.AnchorWebhookEvent, anc
 		}
 	}
 
-	if payload.Status == "" {
+	// The event name is the source of truth for event status.
+	// Included resources can represent a later snapshot on retries.
+	if hasEventStatus {
+		payload.Status = eventStatus
+	} else if payload.Status == "" {
 		parts := strings.Split(event.Event, ".")
 		payload.Status = parts[len(parts)-1]
 	}
@@ -517,6 +581,45 @@ func (h *WebhookHandler) buildTransferEvent(event domain.AnchorWebhookEvent, anc
 	}
 
 	return payload, true
+}
+
+func relationshipByKey(relationships map[string]domain.Relationship, keys ...string) (domain.Relationship, bool) {
+	if len(relationships) == 0 || len(keys) == 0 {
+		return domain.Relationship{}, false
+	}
+	for _, key := range keys {
+		if rel, ok := relationships[key]; ok {
+			return rel, true
+		}
+	}
+	for relationshipKey, rel := range relationships {
+		lowerRelationshipKey := strings.ToLower(relationshipKey)
+		for _, key := range keys {
+			if lowerRelationshipKey == strings.ToLower(key) {
+				return rel, true
+			}
+		}
+	}
+	return domain.Relationship{}, false
+}
+
+func statusFromEventType(eventType string) (string, bool) {
+	eventType = strings.TrimSpace(strings.ToLower(eventType))
+	if eventType == "" {
+		return "", false
+	}
+
+	parts := strings.Split(eventType, ".")
+	if len(parts) == 0 {
+		return "", false
+	}
+
+	switch suffix := parts[len(parts)-1]; suffix {
+	case "successful", "success", "failed", "failure", "initiated", "processing", "pending", "completed", "reversed":
+		return suffix, true
+	default:
+		return "", false
+	}
 }
 
 func transferTypeFromIncluded(rawType, current string) string {
