@@ -25,6 +25,7 @@ import { useUser } from '@clerk/clerk-expo';
 
 import AppTabs, { AppTabsParamList } from './AppTabs';
 import OnboardingFormScreen from '@/screens/Onboarding/OnboardingFormScreen';
+import SelectAccountTypeScreen from '@/screens/Onboarding/SelectAccountTypeScreen';
 import PayUserScreen from '@/screens/PaymentFlow/PayUserScreen';
 import SelfTransferScreen from '@/screens/PaymentFlow/SelfTransferScreen';
 import TransferStatusScreen from '@/screens/PaymentFlow/TransferStatusScreen';
@@ -41,7 +42,8 @@ import { theme } from '@/constants/theme';
 // It includes the AppTabs (as a nested navigator) and the OnboardingForm.
 export type AppStackParamList = {
   AppTabs: NavigatorScreenParams<AppTabsParamList>; // Nested navigator
-  OnboardingForm: undefined;
+  SelectAccountType: undefined;
+  OnboardingForm: { userType?: 'personal' | 'merchant' };
   CreateAccount: undefined;
   PayUser: undefined;
   SelfTransfer: undefined;
@@ -69,9 +71,9 @@ const Stack = createNativeStackNavigator<AppStackParamList>();
 const AppStack = () => {
   const { user } = useUser();
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
-  const [initialRoute, setInitialRoute] = useState<'AppTabs' | 'OnboardingForm' | 'CreateAccount'>(
-    'AppTabs'
-  );
+  const [initialRoute, setInitialRoute] = useState<
+    'AppTabs' | 'SelectAccountType' | 'OnboardingForm' | 'CreateAccount'
+  >('AppTabs');
 
   useEffect(() => {
     const checkUserStatus = async () => {
@@ -89,18 +91,26 @@ const AppStack = () => {
             setInitialRoute('CreateAccount');
             break;
           case 'onboarding_form':
+            if (session?.onboarding?.status === 'new') {
+              setInitialRoute('SelectAccountType');
+              break;
+            }
+            setInitialRoute('OnboardingForm');
+            break;
           default:
             setInitialRoute('OnboardingForm');
             break;
         }
       } catch (error: any) {
-        // Swallow 404s (new user) and quietly route to onboarding
+        // 404 indicates no onboarding user record yet for this Clerk identity.
         const status = error?.response?.status;
-        if (status !== 404) {
+        if (status === 404) {
+          setInitialRoute('SelectAccountType');
+        } else {
           console.warn('Status check failed:', status);
+          // Default to onboarding form if we can't check status
+          setInitialRoute('OnboardingForm');
         }
-        // Default to onboarding form if we can't check status
-        setInitialRoute('OnboardingForm');
       } finally {
         setIsCheckingStatus(false);
       }
@@ -124,6 +134,11 @@ const AppStack = () => {
         name="AppTabs"
         component={AppTabs}
         options={{ headerShown: false }} // The tab navigator will manage its own headers.
+      />
+      <Stack.Screen
+        name="SelectAccountType"
+        component={SelectAccountTypeScreen}
+        options={{ headerShown: false, gestureEnabled: false }}
       />
       <Stack.Screen
         name="OnboardingForm"

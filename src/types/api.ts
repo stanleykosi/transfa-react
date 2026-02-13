@@ -64,6 +64,16 @@ export interface AuthSessionResponse {
   onboarding: AuthSessionOnboarding;
 }
 
+export interface AccountTypeOption {
+  type: 'personal' | 'merchant';
+  title: string;
+  description: string;
+}
+
+export interface AccountTypeOptionsResponse {
+  options: AccountTypeOption[];
+}
+
 // Represents a single beneficiary (external bank account).
 // This shape matches the response from the GET /beneficiaries endpoint.
 export interface Beneficiary {

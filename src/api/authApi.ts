@@ -15,7 +15,12 @@
  */
 import { useMutation, type UseMutationOptions } from '@tanstack/react-query';
 import apiClient from './apiClient';
-import { AuthSessionResponse, OnboardingPayload, OnboardingResponse } from '@/types/api';
+import {
+  AccountTypeOptionsResponse,
+  AuthSessionResponse,
+  OnboardingPayload,
+  OnboardingResponse,
+} from '@/types/api';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 
 /**
@@ -65,5 +70,10 @@ export const useOnboardingMutation = (
  */
 export const fetchAuthSession = async (): Promise<AuthSessionResponse> => {
   const { data } = await apiClient.get<AuthSessionResponse>('/auth/session');
+  return data;
+};
+
+export const fetchAccountTypeOptions = async (): Promise<AccountTypeOptionsResponse> => {
+  const { data } = await apiClient.get<AccountTypeOptionsResponse>('/onboarding/account-types');
   return data;
 };

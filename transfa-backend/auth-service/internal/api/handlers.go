@@ -120,11 +120,25 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	req.Username = strings.TrimSpace(req.Username)
+	req.Email = strings.TrimSpace(req.Email)
+	req.PhoneNumber = strings.TrimSpace(req.PhoneNumber)
+	normalizedUserType := domain.UserType(strings.ToLower(strings.TrimSpace(string(req.UserType))))
+
 	// Basic validation
-	if req.Username == "" || req.UserType == "" {
+	if req.Username == "" || normalizedUserType == "" {
 		http.Error(w, "Username and user_type are required", http.StatusBadRequest)
 		return
 	}
+	if normalizedUserType != domain.PersonalUser && normalizedUserType != domain.MerchantUser {
+		http.Error(w, "user_type must be either 'personal' or 'merchant'", http.StatusBadRequest)
+		return
+	}
+	if req.Email == "" || req.PhoneNumber == "" {
+		http.Error(w, "email and phone_number are required", http.StatusBadRequest)
+		return
+	}
+	req.UserType = normalizedUserType
 
 	// Idempotent onboarding: if user already exists by Clerk ID, update contact info; otherwise create
 	var internalUserID string

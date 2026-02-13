@@ -10,7 +10,6 @@
  * - react-native: For core UI components and alerts.
  * - @/components/*: Reusable UI components.
  * - @/api/authApi: The `useOnboardingMutation` hook for the API call.
- * - UserTypeSelector: Component for selecting user type.
  *
  * @notes
  * - The form state is managed locally with `useState`.
@@ -28,24 +27,26 @@ import {
   Alert,
 } from 'react-native';
 import { useUser, useAuth } from '@clerk/clerk-expo';
-import { useNavigation, StackActions } from '@react-navigation/native';
+import { useNavigation, useRoute, StackActions, RouteProp } from '@react-navigation/native';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import FormInput from '@/components/FormInput';
 import PrimaryButton from '@/components/PrimaryButton';
 import { theme } from '@/constants/theme';
-import UserTypeSelector from './components/UserTypeSelector';
 import { useOnboardingMutation } from '@/api/authApi';
 import { OnboardingPayload } from '@/types/api';
 import apiClient from '@/api/apiClient';
+import { AppStackParamList } from '@/navigation/AppStack';
 
 type UserType = 'personal' | 'merchant';
+type OnboardingFormRouteProp = RouteProp<AppStackParamList, 'OnboardingForm'>;
 
 const OnboardingFormScreen = () => {
   const navigation = useNavigation();
+  const route = useRoute<OnboardingFormRouteProp>();
   const { user } = useUser();
   const { signOut } = useAuth();
 
-  const [userType, setUserType] = useState<UserType>('personal');
+  const [userType] = useState<UserType>(route.params?.userType || 'personal');
 
   // Shared
   const [username, setUsername] = useState('');
@@ -215,8 +216,6 @@ const OnboardingFormScreen = () => {
         >
           <Text style={styles.title}>Tell us about yourself</Text>
           <Text style={styles.subtitle}>This information is required to set up your profile.</Text>
-
-          <UserTypeSelector selectedType={userType} onSelectType={setUserType} />
 
           <FormInput
             label="Unique Username"

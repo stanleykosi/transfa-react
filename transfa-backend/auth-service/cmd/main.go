@@ -32,6 +32,12 @@ type onboardingState struct {
 	NextStep string  `json:"next_step"`
 }
 
+type accountTypeOption struct {
+	Type        string `json:"type"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
 type authSessionResponse struct {
 	Authenticated bool            `json:"authenticated"`
 	ClerkUserID   string          `json:"clerk_user_id"`
@@ -144,6 +150,20 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(authMiddleware)
 		r.Use(middleware.ThrottleBacklog(200, 200, 5*time.Second))
+
+		r.Get("/onboarding/account-types", func(w http.ResponseWriter, r *http.Request) {
+			if _, ok := api.GetClerkUserID(r.Context()); !ok {
+				writeError(w, http.StatusUnauthorized, errors.New("unauthorized"))
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{
+				"options": []accountTypeOption{
+					{Type: "personal", Title: "Individual", Description: "For Individual use"},
+					{Type: "merchant", Title: "Merchant", Description: "For Business owners"},
+				},
+			})
+		})
 
 		r.Post("/onboarding", onboardingHandler.ServeHTTP)
 		r.Post("/onboarding/tier2", onboardingHandler.HandleTier2)
