@@ -18,10 +18,12 @@ type Config struct {
 
 // LoadConfig reads configuration from environment variables.
 func LoadConfig() (config Config, err error) {
-	viper.SetDefault("SERVER_PORT", "8081")
+	viper.SetDefault("SERVER_PORT", "8080")
+	viper.SetDefault("PORT", "8080")
 	viper.AutomaticEnv()
 
 	_ = viper.BindEnv("SERVER_PORT")
+	_ = viper.BindEnv("PORT")
 	_ = viper.BindEnv("DATABASE_URL")
 	_ = viper.BindEnv("CLERK_JWKS_URL")
 	_ = viper.BindEnv("ANCHOR_API_KEY")
@@ -29,5 +31,17 @@ func LoadConfig() (config Config, err error) {
 	_ = viper.BindEnv("RABBITMQ_URL")
 
 	err = viper.Unmarshal(&config)
+	if err != nil {
+		return config, err
+	}
+
+	// Railway and most PaaS providers inject PORT. If SERVER_PORT is unset,
+	// fall back to PORT so the HTTP server binds to the routable port.
+	if config.ServerPort == "" {
+		config.ServerPort = viper.GetString("PORT")
+	}
+	if config.ServerPort == "" {
+		config.ServerPort = "8080"
+	}
 	return
 }
