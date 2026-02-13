@@ -13,8 +13,10 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/transfa/account-service/internal/domain"
 )
@@ -69,13 +71,26 @@ func (r *PostgresBeneficiaryRepository) CreateBeneficiary(ctx context.Context, b
 func (r *PostgresBeneficiaryRepository) GetBeneficiariesByUserID(ctx context.Context, userID string) ([]domain.Beneficiary, error) {
 	var beneficiaries []domain.Beneficiary
 	query := `
-        SELECT id, user_id, anchor_counterparty_id, account_name, account_number_masked, bank_name, is_default, created_at, updated_at
+        SELECT
+            id,
+            user_id,
+            COALESCE(anchor_counterparty_id, '') AS anchor_counterparty_id,
+            COALESCE(account_name, '') AS account_name,
+            COALESCE(account_number_masked, '') AS account_number_masked,
+            COALESCE(bank_name, '') AS bank_name,
+            COALESCE(is_default, false) AS is_default,
+            created_at,
+            updated_at
         FROM beneficiaries
         WHERE user_id = $1
-        ORDER BY is_default DESC, created_at DESC
+        ORDER BY COALESCE(is_default, false) DESC, created_at DESC
     `
 	rows, err := r.db.Query(ctx, query, userID)
 	if err != nil {
+		// Legacy compatibility: older schemas might not have is_default yet.
+		if isUndefinedColumnError(err) {
+			return r.getBeneficiariesByUserIDLegacy(ctx, userID)
+		}
 		return nil, fmt.Errorf("failed to query beneficiaries: %w", err)
 	}
 	defer rows.Close()
@@ -87,6 +102,60 @@ func (r *PostgresBeneficiaryRepository) GetBeneficiariesByUserID(ctx context.Con
 			return nil, fmt.Errorf("failed to scan beneficiary row: %w", err)
 		}
 		beneficiaries = append(beneficiaries, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed while iterating beneficiary rows: %w", err)
+	}
+
+	return beneficiaries, nil
+}
+
+func (r *PostgresBeneficiaryRepository) getBeneficiariesByUserIDLegacy(ctx context.Context, userID string) ([]domain.Beneficiary, error) {
+	var beneficiaries []domain.Beneficiary
+
+	query := `
+        SELECT
+            id,
+            user_id,
+            COALESCE(anchor_counterparty_id, '') AS anchor_counterparty_id,
+            COALESCE(account_name, '') AS account_name,
+            COALESCE(account_number_masked, '') AS account_number_masked,
+            COALESCE(bank_name, '') AS bank_name,
+            created_at,
+            updated_at
+        FROM beneficiaries
+        WHERE user_id = $1
+        ORDER BY created_at DESC
+    `
+
+	rows, err := r.db.Query(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query beneficiaries (legacy schema): %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var b domain.Beneficiary
+		err := rows.Scan(
+			&b.ID,
+			&b.UserID,
+			&b.AnchorCounterpartyID,
+			&b.AccountName,
+			&b.AccountNumberMasked,
+			&b.BankName,
+			&b.CreatedAt,
+			&b.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan beneficiary row (legacy schema): %w", err)
+		}
+
+		// Legacy schema has no default flag; treat as false.
+		b.IsDefault = false
+		beneficiaries = append(beneficiaries, b)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed while iterating beneficiary rows (legacy schema): %w", err)
 	}
 
 	return beneficiaries, nil
@@ -120,4 +189,12 @@ func (r *PostgresBeneficiaryRepository) CountBeneficiariesByUserID(ctx context.C
 		return 0, fmt.Errorf("failed to count beneficiaries: %w", err)
 	}
 	return count, nil
+}
+
+func isUndefinedColumnError(err error) bool {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "42703"
+	}
+	return false
 }

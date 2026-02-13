@@ -11,16 +11,23 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/transfa/account-service/internal/app"
 	"github.com/transfa/account-service/internal/config"
-	"github.com/transfa/account-service/pkg/middleware"
+	appmiddleware "github.com/transfa/account-service/pkg/middleware"
 )
 
 // NewRouter creates and configures a new HTTP router.
 func NewRouter(cfg *config.Config, service *app.AccountService) http.Handler {
 	r := chi.NewRouter()
+	r.Use(chimiddleware.RequestID)
+	r.Use(chimiddleware.RealIP)
+	r.Use(chimiddleware.Logger)
+	r.Use(chimiddleware.Recoverer)
+	r.Use(chimiddleware.Timeout(30 * time.Second))
 
 	// Health check endpoint
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -42,8 +49,8 @@ func NewRouter(cfg *config.Config, service *app.AccountService) http.Handler {
 	// Group routes that require authentication
 	r.Group(func(r chi.Router) {
 		// Apply rate limiting first (1000 requests per minute per IP)
-		r.Use(middleware.RateLimitMiddleware(1000))
-		r.Use(middleware.AuthMiddleware(cfg))
+		r.Use(appmiddleware.RateLimitMiddleware(1000))
+		r.Use(appmiddleware.AuthMiddleware(cfg))
 
 		r.Route("/beneficiaries", func(r chi.Router) {
 			r.Post("/", beneficiaryHandler.CreateBeneficiary)

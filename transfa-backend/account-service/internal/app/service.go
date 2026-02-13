@@ -12,22 +12,26 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/transfa/account-service/internal/domain"
 	"github.com/transfa/account-service/internal/store"
 	"github.com/transfa/account-service/pkg/anchorclient"
 )
 
+var ErrUserNotFound = errors.New("user not found")
+
 // AccountService provides methods for managing accounts and beneficiaries.
 type AccountService struct {
-	accountRepo     store.AccountRepository
-	beneficiaryRepo store.BeneficiaryRepository
-	bankRepo        store.BankRepository
-	anchorClient    *anchorclient.Client
+	accountRepo       store.AccountRepository
+	beneficiaryRepo   store.BeneficiaryRepository
+	bankRepo          store.BankRepository
+	anchorClient      *anchorclient.Client
 	cacheWarmingMutex sync.Mutex // Prevents multiple cache warming operations
 }
 
@@ -53,25 +57,27 @@ func (s *AccountService) CreateBeneficiary(ctx context.Context, input CreateBene
 	// 1. Resolve Clerk User ID to internal UUID
 	internalUserID, err := s.accountRepo.FindUserIDByClerkUserID(ctx, input.UserID)
 	if err != nil {
-		return nil, fmt.Errorf("user not found: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("failed to resolve user: %w", err)
 	}
-	
+
 	// 2. Verify account details with Anchor.
 	verifyResp, err := s.anchorClient.VerifyBankAccount(ctx, input.BankCode, input.AccountNumber)
 	if err != nil {
 		return nil, fmt.Errorf("failed to verify bank account with provider: %w", err)
 	}
 	accountName := verifyResp.Data.Attributes.AccountName
-	
-	// Debug: Log the account verification response
-	fmt.Printf("DEBUG: Account verification response: %+v\n", verifyResp)
-	fmt.Printf("DEBUG: Extracted account name: '%s'\n", accountName)
-	
+
 	// Handle cases where account name is empty or generic
 	if accountName == "" || accountName == "N/A" || accountName == "Unknown" {
 		// Use a more user-friendly fallback
-		accountName = fmt.Sprintf("Account ending in %s", input.AccountNumber[len(input.AccountNumber)-4:])
-		fmt.Printf("DEBUG: Using fallback account name: '%s'\n", accountName)
+		suffix := input.AccountNumber
+		if len(input.AccountNumber) > 4 {
+			suffix = input.AccountNumber[len(input.AccountNumber)-4:]
+		}
+		accountName = fmt.Sprintf("Account ending in %s", suffix)
 	}
 
 	// 3. Create CounterParty on Anchor.
@@ -108,9 +114,12 @@ func (s *AccountService) ListBeneficiaries(ctx context.Context, clerkUserID stri
 	// Resolve Clerk User ID to internal UUID
 	internalUserID, err := s.accountRepo.FindUserIDByClerkUserID(ctx, clerkUserID)
 	if err != nil {
-		return nil, fmt.Errorf("user not found: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("failed to resolve user: %w", err)
 	}
-	
+
 	return s.beneficiaryRepo.GetBeneficiariesByUserID(ctx, internalUserID)
 }
 
@@ -119,9 +128,12 @@ func (s *AccountService) DeleteBeneficiary(ctx context.Context, clerkUserID, ben
 	// Resolve Clerk User ID to internal UUID
 	internalUserID, err := s.accountRepo.FindUserIDByClerkUserID(ctx, clerkUserID)
 	if err != nil {
-		return fmt.Errorf("user not found: %w", err)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrUserNotFound
+		}
+		return fmt.Errorf("failed to resolve user: %w", err)
 	}
-	
+
 	// Note: The repository layer handles the ownership check in the DELETE query.
 	return s.beneficiaryRepo.DeleteBeneficiary(ctx, beneficiaryID, internalUserID)
 }
@@ -157,14 +169,14 @@ func (s *AccountService) ListBanks(ctx context.Context) (*domain.ListBanksRespon
 // checkAndWarmCache checks if cache is expiring soon and warms it if needed
 func (s *AccountService) checkAndWarmCache() {
 	ctx := context.Background()
-	
+
 	// Check if cache expires within 1 hour
 	expiringSoon, err := s.bankRepo.IsCacheExpiringSoon(ctx, time.Hour)
 	if err != nil {
 		// If we can't check, don't warm (cache might not exist)
 		return
 	}
-	
+
 	if expiringSoon {
 		log.Printf("Cache is expiring soon, warming cache in background...")
 		s.warmCacheInBackground()
@@ -179,29 +191,29 @@ func (s *AccountService) warmCacheInBackground() {
 		return
 	}
 	defer s.cacheWarmingMutex.Unlock()
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	
+
 	// Fetch fresh data from Anchor API
 	banksResp, err := s.anchorClient.ListBanks(ctx)
 	if err != nil {
 		log.Printf("Warning: failed to warm cache - could not fetch from Anchor: %v", err)
 		return
 	}
-	
+
 	// Validate we got data
 	if len(banksResp.Data) == 0 {
 		log.Printf("Warning: failed to warm cache - received empty bank list from Anchor")
 		return
 	}
-	
+
 	// Cache the fresh data
 	if err := s.bankRepo.CacheBanks(ctx, banksResp.Data); err != nil {
 		log.Printf("Warning: failed to warm cache - could not store in database: %v", err)
 		return
 	}
-	
+
 	log.Printf("Successfully warmed cache with %d banks", len(banksResp.Data))
 }
 
@@ -213,28 +225,28 @@ func (s *AccountService) getBankNameFromCode(ctx context.Context, bankCode strin
 		// If cache miss, try to fetch fresh data
 		banksResp, fetchErr := s.anchorClient.ListBanks(ctx)
 		if fetchErr != nil {
-			fmt.Printf("Warning: could not fetch bank list: %v\n", fetchErr)
+			log.Printf("Warning: could not fetch bank list: %v", fetchErr)
 			return "Unknown Bank"
 		}
-		
+
 		// Cache the fresh data for future use
 		go func() {
 			cacheCtx := context.Background()
 			if cacheErr := s.bankRepo.CacheBanks(cacheCtx, banksResp.Data); cacheErr != nil {
-				fmt.Printf("Warning: failed to cache banks: %v\n", cacheErr)
+				log.Printf("Warning: failed to cache banks: %v", cacheErr)
 			}
 		}()
-		
+
 		cachedBanks = banksResp.Data
 	}
-	
+
 	// Search for the bank by code
 	for _, bank := range cachedBanks {
 		if bank.Attributes.NipCode == bankCode {
 			return bank.Attributes.Name
 		}
 	}
-	
+
 	return "Unknown Bank"
 }
 

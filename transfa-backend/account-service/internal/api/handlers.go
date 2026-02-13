@@ -13,6 +13,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -68,6 +69,10 @@ func (h *BeneficiaryHandler) CreateBeneficiary(w http.ResponseWriter, r *http.Re
 
 	beneficiary, err := h.service.CreateBeneficiary(r.Context(), input)
 	if err != nil {
+		if errors.Is(err, app.ErrUserNotFound) {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -85,6 +90,10 @@ func (h *BeneficiaryHandler) ListBeneficiaries(w http.ResponseWriter, r *http.Re
 
 	beneficiaries, err := h.service.ListBeneficiaries(r.Context(), userID)
 	if err != nil {
+		if errors.Is(err, app.ErrUserNotFound) {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -100,9 +109,17 @@ func (h *BeneficiaryHandler) DeleteBeneficiary(w http.ResponseWriter, r *http.Re
 		return
 	}
 	beneficiaryID := chi.URLParam(r, "id")
+	if beneficiaryID == "" {
+		http.Error(w, "Beneficiary ID is required", http.StatusBadRequest)
+		return
+	}
 
 	err := h.service.DeleteBeneficiary(r.Context(), userID, beneficiaryID)
 	if err != nil {
+		if errors.Is(err, app.ErrUserNotFound) {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
 		// Differentiate between not found and other errors
 		if err.Error() == "beneficiary not found or not owned by user" {
 			http.Error(w, err.Error(), http.StatusNotFound)
