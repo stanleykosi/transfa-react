@@ -78,7 +78,7 @@ func LoadConfig(path string) (config Config, err error) {
 		// If the config file is not found, we can ignore the error.
 		// For other errors, we should return them.
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			log.Printf("Warning: Error reading config file: %s", err)
+			log.Printf("level=warn component=config msg=\"failed to read config file; using environment values\" err=%v", err)
 		}
 	}
 
@@ -98,7 +98,7 @@ func LoadConfig(path string) (config Config, err error) {
 		if feeStr != "" {
 			feeValue, parseErr := strconv.ParseFloat(feeStr, 64)
 			if parseErr != nil {
-				log.Printf("Warning: invalid P2P_TRANSACTION_FEE value %q: %v", feeStr, parseErr)
+				log.Printf("level=warn component=config msg=\"invalid P2P_TRANSACTION_FEE\" value=%q err=%v", feeStr, parseErr)
 			} else {
 				config.P2PTransactionFeeKobo = int64(math.Round(feeValue * 100))
 			}
@@ -108,7 +108,7 @@ func LoadConfig(path string) (config Config, err error) {
 		if feeStr != "" {
 			feeValue, parseErr := strconv.ParseFloat(feeStr, 64)
 			if parseErr != nil {
-				log.Printf("Warning: invalid P2P_TRANSACTION_FEE_NAIRA value %q: %v", feeStr, parseErr)
+				log.Printf("level=warn component=config msg=\"invalid P2P_TRANSACTION_FEE_NAIRA\" value=%q err=%v", feeStr, parseErr)
 			} else {
 				config.P2PTransactionFeeKobo = int64(math.Round(feeValue * 100))
 			}
@@ -116,7 +116,7 @@ func LoadConfig(path string) (config Config, err error) {
 	}
 
 	if config.P2PTransactionFeeKobo < 0 {
-		log.Printf("Warning: negative P2P transaction fee configured (%d). Coercing to 0.", config.P2PTransactionFeeKobo)
+		log.Printf("level=warn component=config msg=\"negative p2p fee configured; coercing to zero\" fee_kobo=%d", config.P2PTransactionFeeKobo)
 		config.P2PTransactionFeeKobo = 0
 	}
 
@@ -126,7 +126,7 @@ func LoadConfig(path string) (config Config, err error) {
 		if feeStr != "" {
 			feeValue, parseErr := strconv.ParseFloat(feeStr, 64)
 			if parseErr != nil {
-				log.Printf("Warning: invalid MONEY_DROP_FEE value %q: %v", feeStr, parseErr)
+				log.Printf("level=warn component=config msg=\"invalid MONEY_DROP_FEE\" value=%q err=%v", feeStr, parseErr)
 			} else {
 				config.MoneyDropFeeKobo = int64(math.Round(feeValue * 100))
 			}
@@ -136,7 +136,7 @@ func LoadConfig(path string) (config Config, err error) {
 		if feeStr != "" {
 			feeValue, parseErr := strconv.ParseFloat(feeStr, 64)
 			if parseErr != nil {
-				log.Printf("Warning: invalid MONEY_DROP_FEE_NAIRA value %q: %v", feeStr, parseErr)
+				log.Printf("level=warn component=config msg=\"invalid MONEY_DROP_FEE_NAIRA\" value=%q err=%v", feeStr, parseErr)
 			} else {
 				config.MoneyDropFeeKobo = int64(math.Round(feeValue * 100))
 			}
@@ -144,7 +144,7 @@ func LoadConfig(path string) (config Config, err error) {
 	}
 
 	if config.MoneyDropFeeKobo < 0 {
-		log.Printf("Warning: negative money drop fee configured (%d). Coercing to 0.", config.MoneyDropFeeKobo)
+		log.Printf("level=warn component=config msg=\"negative money-drop fee configured; coercing to zero\" fee_kobo=%d", config.MoneyDropFeeKobo)
 		config.MoneyDropFeeKobo = 0
 	}
 

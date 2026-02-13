@@ -90,42 +90,43 @@ func NewWebhookHandler(producer *rabbitmq.EventProducer, secret string, anchorAP
 
 // ServeHTTP implements the http.Handler interface.
 func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	startedAt := time.Now()
 	requestID := r.Header.Get("X-Request-ID")
 	if requestID == "" {
 		requestID = fmt.Sprintf("req_%d", time.Now().UnixNano())
 	}
-
-	log.Printf("[%s] Webhook request started from %s", requestID, r.RemoteAddr)
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxWebhookBodyBytes)
 	defer r.Body.Close()
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Printf("[%s] Error reading webhook body: %v", requestID, err)
 		status := http.StatusBadRequest
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
 			status = http.StatusRequestEntityTooLarge
 		}
+		log.Printf("level=warn component=webhook request_id=%s outcome=reject reason=invalid_body status=%d err=%v", requestID, status, err)
 		http.Error(w, "Invalid request body", status)
 		return
 	}
 	if len(body) == 0 {
-		log.Printf("[%s] Empty webhook body", requestID)
+		log.Printf("level=warn component=webhook request_id=%s outcome=reject reason=empty_body", requestID)
 		http.Error(w, "Empty request body", http.StatusBadRequest)
 		return
 	}
 
 	signatureHeader := r.Header.Get("x-anchor-signature")
 	signatureBodies := buildSignatureBodies(body, r.Header.Get("Content-Encoding"))
+	authMethod := "signature"
 	if !h.isValidSignature(signatureHeader, signatureBodies...) {
 		eventType, eventID := previewWebhookEvent(body)
 		bodyHash := sha1.Sum(body)
 		if h.verifyAnchorEventFallback(r.Context(), body, eventType, eventID) {
-			log.Printf("[%s] WARN: Signature mismatch but Anchor API fallback verification succeeded (event=%s id=%s body_sha1=%x)", requestID, safeSegment(eventType, "unknown"), safeSegment(eventID, "unknown"), bodyHash)
+			authMethod = "anchor_fallback"
+			log.Printf("level=info component=webhook request_id=%s outcome=fallback_auth event=%s event_id=%s body_sha1=%x", requestID, safeSegment(eventType, "unknown"), safeSegment(eventID, "unknown"), bodyHash)
 		} else {
-			log.Printf("[%s] Error: Invalid webhook signature (event=%s id=%s body_sha1=%x content_encoding=%q content_type=%q content_length=%d)", requestID, safeSegment(eventType, "unknown"), safeSegment(eventID, "unknown"), bodyHash, r.Header.Get("Content-Encoding"), r.Header.Get("Content-Type"), r.ContentLength)
+			log.Printf("level=warn component=webhook request_id=%s outcome=reject reason=invalid_signature event=%s event_id=%s body_sha1=%x content_encoding=%q content_type=%q content_length=%d", requestID, safeSegment(eventType, "unknown"), safeSegment(eventID, "unknown"), bodyHash, r.Header.Get("Content-Encoding"), r.Header.Get("Content-Type"), r.ContentLength)
 			http.Error(w, "Invalid signature", http.StatusBadRequest)
 			return
 		}
@@ -141,13 +142,13 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		log.Printf("[%s] Error decoding webhook JSON: %v", requestID, err)
+		log.Printf("level=warn component=webhook request_id=%s outcome=reject reason=invalid_json err=%v", requestID, err)
 		http.Error(w, "Invalid JSON payload", http.StatusBadRequest)
 		return
 	}
 
 	if event.Event == "" {
-		log.Printf("[%s] Webhook missing event type", requestID)
+		log.Printf("level=warn component=webhook request_id=%s outcome=reject reason=missing_event_type", requestID)
 		http.Error(w, "Missing event type", http.StatusBadRequest)
 		return
 	}
@@ -162,29 +163,29 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	eventKey := buildEventKey(event, body)
 	if eventKey != "" && h.isDuplicateEvent(eventKey) {
-		log.Printf("[%s] Duplicate event detected and ignored: %s for event ID: %s", requestID, event.Event, eventKey)
+		log.Printf("level=info component=webhook request_id=%s outcome=duplicate event=%s event_id=%s auth=%s duration_ms=%d", requestID, event.Event, event.Data.ID, authMethod, time.Since(startedAt).Milliseconds())
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Duplicate webhook ignored"))
 		return
 	}
 
-	log.Printf("[%s] Received webhook event: %s for event ID: %s (anchor customer: %s)", requestID, event.Event, event.Data.ID, anchorCustomerID)
-
 	ctx, cancel := context.WithTimeout(context.Background(), webhookPublishTimeout)
 	defer cancel()
 
+	outcome := "accepted"
 	if handler, ok := h.routeEvent(ctx, event, anchorCustomerID); ok {
 		if err := handler(); err != nil {
-			log.Printf("[%s] Failed to process event %s: %v", requestID, event.Event, err)
+			log.Printf("level=error component=webhook request_id=%s outcome=process_error event=%s event_id=%s err=%v", requestID, event.Event, event.Data.ID, err)
 			http.Error(w, "Failed to process webhook", http.StatusInternalServerError)
 			return
 		}
 	} else {
-		log.Printf("[%s] Unhandled webhook event type: %s", requestID, event.Event)
+		outcome = "ignored"
 	}
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("Webhook received"))
+	log.Printf("level=info component=webhook request_id=%s outcome=%s event=%s event_id=%s customer_id=%s auth=%s duration_ms=%d", requestID, outcome, event.Event, event.Data.ID, safeSegment(anchorCustomerID, "unknown"), authMethod, time.Since(startedAt).Milliseconds())
 }
 
 func nullableString(v string) *string {
@@ -336,13 +337,11 @@ func previewWebhookEvent(body []byte) (eventType string, eventID string) {
 // isValidSignature validates the webhook signature using Anchor's documented scheme.
 func (h *WebhookHandler) isValidSignature(signatureHeader string, bodies ...[]byte) bool {
 	if len(h.secrets) == 0 {
-		log.Println("Error: ANCHOR_WEBHOOK_SECRET is not set. Rejecting webhook.")
 		return false
 	}
 
 	signatureCandidates := normalizeSignatureHeader(signatureHeader)
 	if len(signatureCandidates) == 0 {
-		log.Println("Missing x-anchor-signature header")
 		return false
 	}
 
@@ -359,7 +358,6 @@ func (h *WebhookHandler) isValidSignature(signatureHeader string, bodies ...[]by
 		}
 	}
 
-	log.Printf("Signature mismatch. Provided header: %s", strings.Join(signatureCandidates, ","))
 	return false
 }
 
@@ -373,7 +371,6 @@ func buildSignatureBodies(body []byte, contentEncoding string) [][]byte {
 
 	decoded, err := gunzipBody(body)
 	if err != nil {
-		log.Printf("Webhook gzip decode skipped: %v", err)
 		return candidates
 	}
 	if len(decoded) == 0 {
@@ -647,7 +644,6 @@ func (h *WebhookHandler) routeEvent(ctx context.Context, event domain.AnchorWebh
 		routingKey := fmt.Sprintf("transfer.status.%s.%s", safeSegment(payload.TransferType, "unknown"), safeSegment(normalizedStatus, "unknown"))
 		payload.Status = normalizedStatus
 		return func() error {
-			log.Printf("Publishing transfer event: routing_key=%s event_id=%s event_type=%s anchor_transfer_id=%s status=%s anchor_customer_id=%s", routingKey, payload.EventID, payload.EventType, payload.AnchorTransferID, payload.Status, payload.AnchorCustomerID)
 			return h.producer.Publish(ctx, "transfa.events", routingKey, payload)
 		}, true
 	}

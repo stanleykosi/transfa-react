@@ -52,12 +52,12 @@ type Service struct {
 
 func NewService(repo store.Repository, anchor *anchorclient.Client, accountClient *accountclient.Client, producer rmrabbit.Publisher, adminAccountID string, transactionFeeKobo int64, moneyDropFeeKobo int64) *Service {
 	if transactionFeeKobo <= 0 {
-		log.Printf("INFO: Using default transaction fee %d kobo", defaultTransactionFee)
+		log.Printf("level=info component=service msg=\"using default transaction fee\" fee_kobo=%d", defaultTransactionFee)
 		transactionFeeKobo = defaultTransactionFee
 	}
 
 	if adminAccountID == "" {
-		log.Printf("WARN: Admin account ID not provided; fee collection will be disabled")
+		log.Printf("level=warn component=service msg=\"admin account not configured; fee collection disabled\"")
 	}
 
 	svc := &Service{
@@ -98,26 +98,20 @@ func (s *Service) ResolveInternalUserID(ctx context.Context, clerkUserID string)
 
 // ProcessP2PTransfer handles the logic for a peer-to-peer transfer.
 func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, req domain.P2PTransferRequest) (*domain.Transaction, error) {
-	log.Printf("ProcessP2PTransfer: Starting transfer from %s to %s for amount %d", senderID, req.RecipientUsername, req.Amount)
-
 	// 1. Get sender and recipient details
 	sender, err := s.repo.FindUserByID(ctx, senderID)
 	if err != nil {
-		log.Printf("ProcessP2PTransfer: Failed to find sender %s: %v", senderID, err)
 		return nil, fmt.Errorf("failed to find sender: %w", err)
 	}
-	log.Printf("ProcessP2PTransfer: Found sender %s (allow_sending: %v)", sender.ID, sender.AllowSending)
 
 	recipient, err := s.repo.FindUserByUsername(ctx, req.RecipientUsername)
 	if err != nil {
-		log.Printf("ProcessP2PTransfer: Failed to find recipient %s: %v", req.RecipientUsername, err)
 		return nil, fmt.Errorf("failed to find recipient: %w", err)
 	}
-	log.Printf("ProcessP2PTransfer: Found recipient %s", recipient.ID)
 
 	senderDelinquent := false
 	if delinquent, err := s.repo.IsUserDelinquent(ctx, sender.ID); err != nil {
-		log.Printf("WARN: Failed to check platform fee status for sender %s: %v", sender.ID, err)
+		log.Printf("level=warn component=service flow=p2p_transfer msg=\"platform-fee status lookup failed; treating sender as delinquent\" sender_id=%s err=%v", sender.ID, err)
 		senderDelinquent = true
 	} else {
 		senderDelinquent = delinquent
@@ -125,34 +119,29 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 
 	// 2. Validate sender permissions and funds
 	if !sender.AllowSending {
-		log.Printf("ProcessP2PTransfer: Sender %s is not permitted to send funds", sender.ID)
 		return nil, errors.New("sender account is not permitted to send funds")
 	}
 	senderAccount, err := s.repo.FindAccountByUserID(ctx, sender.ID)
 	if err != nil {
-		log.Printf("ProcessP2PTransfer: Failed to find sender account for %s: %v", sender.ID, err)
 		return nil, fmt.Errorf("failed to find sender account: %w", err)
 	}
 
 	// Sync the internal database balance with Anchor before validation
 	if err := s.syncAccountBalance(ctx, sender.ID); err != nil {
-		log.Printf("ProcessP2PTransfer: Failed to sync balance for %s: %v", sender.ID, err)
+		log.Printf("level=warn component=service flow=p2p_transfer msg=\"balance sync failed\" sender_id=%s err=%v", sender.ID, err)
 		// Continue with validation even if sync fails, but log the warning
 	}
 
 	// Get the actual balance from Anchor API for validation
 	anchorBalance, err := s.anchorClient.GetAccountBalance(ctx, senderAccount.AnchorAccountID)
 	if err != nil {
-		log.Printf("ProcessP2PTransfer: Failed to get Anchor balance for %s: %v", sender.ID, err)
 		return nil, fmt.Errorf("failed to get account balance from Anchor: %w", err)
 	}
 
 	availableBalance := anchorBalance.Data.AvailableBalance
 	requiredAmount := req.Amount + s.transactionFeeKobo
-	log.Printf("ProcessP2PTransfer: Sender Anchor balance: %d, required: %d", availableBalance, requiredAmount)
 
 	if availableBalance < requiredAmount {
-		log.Printf("ProcessP2PTransfer: Insufficient funds for sender %s (Anchor balance: %d, required: %d)", sender.ID, availableBalance, requiredAmount)
 		return nil, store.ErrInsufficientFunds
 	}
 
@@ -177,24 +166,22 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 	if err := s.repo.CreateTransaction(ctx, txRecord); err != nil {
 		// Refund the debited amount since transaction creation failed
 		if refundErr := s.repo.CreditWallet(ctx, sender.ID, req.Amount+s.transactionFeeKobo); refundErr != nil {
-			log.Printf("CRITICAL: Failed to refund debited amount for user %s after transaction creation failure: %v", sender.ID, refundErr)
+			log.Printf("level=error component=service flow=p2p_transfer msg=\"wallet refund failed after tx record creation error\" sender_id=%s err=%v", sender.ID, refundErr)
 		}
 		return nil, fmt.Errorf("failed to create transaction record: %w", err)
 	}
 
 	// 3.5. Collect the transaction fee to admin account
 	if err := s.collectTransactionFee(ctx, txRecord, senderAccount, s.transactionFeeKobo, "P2P Transfer Fee"); err != nil {
-		log.Printf("WARN: Failed to collect transaction fee: %v", err)
+		log.Printf("level=warn component=service flow=p2p_transfer msg=\"fee collection failed\" transaction_id=%s err=%v", txRecord.ID, err)
 		// Don't fail the transaction, just log the warning
 	}
 
 	// 5. Determine routing based on recipient's receiving preference and eligibility
 	recipientPreference, err := s.repo.FindOrCreateReceivingPreference(ctx, recipient.ID)
 	if err != nil {
-		log.Printf("WARN: could not get recipient preference for %s: %v. Defaulting to internal transfer.", recipient.ID, err)
+		log.Printf("level=warn component=service flow=p2p_transfer msg=\"recipient preference lookup failed; routing internal\" recipient_id=%s err=%v", recipient.ID, err)
 		recipientPreference = &domain.UserReceivingPreference{UseExternalAccount: false}
-	} else {
-		log.Printf("ProcessP2PTransfer: Recipient %s preference - use_external: %v, default_beneficiary_id: %v", recipient.ID, recipientPreference.UseExternalAccount, recipientPreference.DefaultBeneficiaryID)
 	}
 
 	var anchorResp *anchorclient.TransferResponse
@@ -203,7 +190,7 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		// Check if recipient is eligible for external transfers
 		isEligibleForExternal, err := s.checkRecipientEligibility(ctx, recipient.ID)
 		if err != nil {
-			log.Printf("WARN: could not check recipient eligibility for %s: %v. Defaulting to internal transfer.", recipient.ID, err)
+			log.Printf("level=warn component=service flow=p2p_transfer msg=\"recipient eligibility lookup failed; routing internal\" recipient_id=%s err=%v", recipient.ID, err)
 			isEligibleForExternal = false
 		}
 
@@ -214,7 +201,7 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 				// Use the preferred beneficiary
 				recipientBeneficiary, err = s.repo.FindBeneficiaryByID(ctx, *recipientPreference.DefaultBeneficiaryID, recipient.ID)
 				if err != nil {
-					log.Printf("WARN: recipient %s preferred beneficiary not found: %v. Using first beneficiary.", recipient.ID, err)
+					log.Printf("level=warn component=service flow=p2p_transfer msg=\"preferred beneficiary missing; using default\" recipient_id=%s err=%v", recipient.ID, err)
 					recipientBeneficiary, err = s.repo.FindOrCreateDefaultBeneficiary(ctx, recipient.ID)
 				}
 			} else {
@@ -223,7 +210,7 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 			}
 
 			if err != nil || recipientBeneficiary == nil {
-				log.Printf("WARN: recipient %s wants external transfer but has no beneficiary. Rerouting internally.", recipient.ID)
+				log.Printf("level=warn component=service flow=p2p_transfer msg=\"recipient external preference set but no beneficiary; routing internal\" recipient_id=%s", recipient.ID)
 				reason := fmt.Sprintf("P2P Transfer to %s", req.RecipientUsername)
 				if req.Description != "" {
 					reason = fmt.Sprintf("P2P Transfer to %s: %s", req.RecipientUsername, req.Description)
@@ -239,7 +226,7 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 				anchorResp, err = s.anchorClient.InitiateNIPTransfer(ctx, senderAccount.AnchorAccountID, recipientBeneficiary.AnchorCounterpartyID, reason, req.Amount)
 				if err == nil {
 					if updateErr := s.repo.UpdateTransactionDestinations(ctx, txRecord.ID, nil, &recipientBeneficiary.ID); updateErr != nil {
-						log.Printf("WARN: Failed to persist destination beneficiary for transaction %s: %v", txRecord.ID, updateErr)
+						log.Printf("level=warn component=service flow=p2p_transfer msg=\"failed to persist destination beneficiary\" transaction_id=%s err=%v", txRecord.ID, updateErr)
 					}
 				}
 
@@ -267,7 +254,7 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		s.repo.UpdateTransactionStatus(ctx, txRecord.ID, "", "failed")
 		// Refund the debited amount since Anchor transfer failed
 		if refundErr := s.repo.CreditWallet(ctx, sender.ID, req.Amount+s.transactionFeeKobo); refundErr != nil {
-			log.Printf("CRITICAL: Failed to refund debited amount for user %s after Anchor transfer failure: %v", sender.ID, refundErr)
+			log.Printf("level=error component=service flow=p2p_transfer msg=\"wallet refund failed after anchor transfer error\" sender_id=%s transaction_id=%s err=%v", sender.ID, txRecord.ID, refundErr)
 		}
 		return nil, fmt.Errorf("anchor transfer failed: %w", err)
 	}
@@ -291,7 +278,7 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		}
 
 		if err := s.repo.UpdateTransactionMetadata(ctx, txRecord.ID, metadata); err != nil {
-			log.Printf("WARN: failed to persist transfer metadata for %s: %v", txRecord.ID, err)
+			log.Printf("level=warn component=service flow=p2p_transfer msg=\"failed to persist transfer metadata\" transaction_id=%s err=%v", txRecord.ID, err)
 		}
 	}
 
@@ -327,7 +314,7 @@ func (s *Service) performInternalTransfer(ctx context.Context, txRecord *domain.
 	}
 
 	if err := s.repo.UpdateTransactionDestinations(ctx, txRecord.ID, &recipientAccount.ID, nil); err != nil {
-		log.Printf("WARN: Failed to persist destination account for transaction %s: %v", txRecord.ID, err)
+		log.Printf("level=warn component=service flow=p2p_transfer msg=\"failed to persist destination account\" transaction_id=%s err=%v", txRecord.ID, err)
 	}
 
 	if transferResp != nil {
@@ -380,23 +367,20 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 
 	// Sync the internal database balance with Anchor before validation
 	if err := s.syncAccountBalance(ctx, sender.ID); err != nil {
-		log.Printf("ProcessSelfTransfer: Failed to sync balance for %s: %v", sender.ID, err)
+		log.Printf("level=warn component=service flow=self_transfer msg=\"balance sync failed\" sender_id=%s err=%v", sender.ID, err)
 		// Continue with validation even if sync fails, but log the warning
 	}
 
 	// Get the actual balance from Anchor API for validation
 	anchorBalance, err := s.anchorClient.GetAccountBalance(ctx, senderAccount.AnchorAccountID)
 	if err != nil {
-		log.Printf("ProcessSelfTransfer: Failed to get Anchor balance for %s: %v", sender.ID, err)
 		return nil, fmt.Errorf("failed to get account balance from Anchor: %w", err)
 	}
 
 	availableBalance := anchorBalance.Data.AvailableBalance
 	requiredAmount := req.Amount + s.transactionFeeKobo
-	log.Printf("ProcessSelfTransfer: Sender Anchor balance: %d, required: %d", availableBalance, requiredAmount)
 
 	if availableBalance < requiredAmount {
-		log.Printf("ProcessSelfTransfer: Insufficient funds for sender %s (Anchor balance: %d, required: %d)", sender.ID, availableBalance, requiredAmount)
 		return nil, store.ErrInsufficientFunds
 	}
 
@@ -421,14 +405,14 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 	if err := s.repo.CreateTransaction(ctx, txRecord); err != nil {
 		// Refund the debited amount since transaction creation failed
 		if refundErr := s.repo.CreditWallet(ctx, sender.ID, req.Amount+s.transactionFeeKobo); refundErr != nil {
-			log.Printf("CRITICAL: Failed to refund debited amount for user %s after transaction creation failure: %v", sender.ID, refundErr)
+			log.Printf("level=error component=service flow=self_transfer msg=\"wallet refund failed after tx record creation error\" sender_id=%s err=%v", sender.ID, refundErr)
 		}
 		return nil, fmt.Errorf("failed to create transaction record: %w", err)
 	}
 
 	// 3.5. Collect the transaction fee to admin account
 	if err := s.collectTransactionFee(ctx, txRecord, senderAccount, s.transactionFeeKobo, "Self Transfer Fee"); err != nil {
-		log.Printf("WARN: Failed to collect transaction fee: %v", err)
+		log.Printf("level=warn component=service flow=self_transfer msg=\"fee collection failed\" transaction_id=%s err=%v", txRecord.ID, err)
 		// Don't fail the transaction, just log the warning
 	}
 
@@ -445,7 +429,7 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 		s.repo.UpdateTransactionStatus(ctx, txRecord.ID, "", "failed")
 		// Refund the debited amount since Anchor transfer failed
 		if refundErr := s.repo.CreditWallet(ctx, sender.ID, req.Amount+s.transactionFeeKobo); refundErr != nil {
-			log.Printf("CRITICAL: Failed to refund debited amount for user %s after Anchor transfer failure: %v", sender.ID, refundErr)
+			log.Printf("level=error component=service flow=self_transfer msg=\"wallet refund failed after anchor transfer error\" sender_id=%s transaction_id=%s err=%v", sender.ID, txRecord.ID, refundErr)
 		}
 		return nil, fmt.Errorf("anchor NIP transfer failed: %w", err)
 	}
@@ -465,7 +449,7 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 		metadata.TransferType = &typeCopy
 
 		if err := s.repo.UpdateTransactionMetadata(ctx, txRecord.ID, metadata); err != nil {
-			log.Printf("WARN: failed to persist transfer metadata for %s: %v", txRecord.ID, err)
+			log.Printf("level=warn component=service flow=self_transfer msg=\"failed to persist transfer metadata\" transaction_id=%s err=%v", txRecord.ID, err)
 		}
 	}
 
@@ -505,24 +489,18 @@ func (s *Service) GetAccountBalance(ctx context.Context, userID uuid.UUID) (*dom
 	// Get the user's account from the database
 	account, err := s.repo.FindAccountByUserID(ctx, userID)
 	if err != nil {
-		log.Printf("Failed to find account for user %s: %v", userID, err)
 		return nil, err
 	}
-
-	log.Printf("Fetching balance for account %s (Anchor ID: %s)", account.ID, account.AnchorAccountID)
 
 	// Fetch the balance from Anchor API
 	anchorBalance, err := s.anchorClient.GetAccountBalance(ctx, account.AnchorAccountID)
 	if err != nil {
-		log.Printf("Failed to fetch balance from Anchor for account %s: %v", account.AnchorAccountID, err)
 		return nil, fmt.Errorf("failed to fetch balance from Anchor: %w", err)
 	}
 
-	log.Printf("Successfully fetched balance from Anchor: %+v", anchorBalance)
-
 	// Sync the internal database with the Anchor balance
 	if err := s.syncAccountBalance(ctx, userID); err != nil {
-		log.Printf("WARN: Failed to sync balance for user %s: %v", userID, err)
+		log.Printf("level=warn component=service flow=get_balance msg=\"balance sync failed\" user_id=%s err=%v", userID, err)
 		// Continue even if sync fails, but log the warning
 	}
 
@@ -534,7 +512,6 @@ func (s *Service) GetAccountBalance(ctx context.Context, userID uuid.UUID) (*dom
 		Pending:          anchorBalance.Data.Pending,
 	}
 
-	log.Printf("Converted balance: %+v", balance)
 	return balance, nil
 }
 
@@ -569,7 +546,7 @@ func (s *Service) ProcessPlatformFee(ctx context.Context, userID uuid.UUID, amou
 
 	// Sync balances with Anchor before validating.
 	if err := s.syncAccountBalance(ctx, user.ID); err != nil {
-		log.Printf("ProcessPlatformFee: Failed to sync balance for %s: %v", user.ID, err)
+		log.Printf("level=warn component=service flow=platform_fee msg=\"balance sync failed\" user_id=%s err=%v", user.ID, err)
 	}
 
 	userAccount, err := s.repo.FindAccountByUserID(ctx, user.ID)
@@ -592,7 +569,7 @@ func (s *Service) ProcessPlatformFee(ctx context.Context, userID uuid.UUID, amou
 	transferResp, err := s.anchorClient.InitiateBookTransfer(ctx, userAccount.AnchorAccountID, s.adminAccountID, reason, amount)
 	if err != nil {
 		if refundErr := s.repo.CreditWallet(ctx, user.ID, amount); refundErr != nil {
-			log.Printf("CRITICAL: Failed to refund debited amount for user %s after platform fee transfer failure: %v", user.ID, refundErr)
+			log.Printf("level=error component=service flow=platform_fee msg=\"wallet refund failed after anchor transfer error\" user_id=%s err=%v", user.ID, refundErr)
 		}
 		return nil, fmt.Errorf("failed to transfer platform fee to admin account: %w", err)
 	}
@@ -618,9 +595,9 @@ func (s *Service) ProcessPlatformFee(ctx context.Context, userID uuid.UUID, amou
 	}
 	if err := s.repo.CreateTransaction(ctx, txRecord); err != nil {
 		if anchorTransferID != nil {
-			log.Printf("CRITICAL: Platform fee transfer %s completed but transaction record creation failed for user %s: %v", *anchorTransferID, user.ID, err)
+			log.Printf("level=error component=service flow=platform_fee msg=\"anchor transfer completed but transaction record creation failed\" anchor_transfer_id=%s user_id=%s err=%v", *anchorTransferID, user.ID, err)
 		} else {
-			log.Printf("CRITICAL: Platform fee transfer completed but transaction record creation failed for user %s: %v", user.ID, err)
+			log.Printf("level=error component=service flow=platform_fee msg=\"transaction record creation failed\" user_id=%s err=%v", user.ID, err)
 		}
 		return nil, fmt.Errorf("failed to create platform fee transaction record: %w", err)
 	}
@@ -633,7 +610,7 @@ func (s *Service) ProcessPlatformFee(ctx context.Context, userID uuid.UUID, amou
 			Timestamp: time.Now(),
 		}
 		if err := s.eventProducer.PublishPlatformFeeEvent(ctx, event); err != nil {
-			log.Printf("WARN: Failed to publish platform fee event for user %s: %v", user.ID, err)
+			log.Printf("level=warn component=service flow=platform_fee msg=\"failed to publish platform fee event\" user_id=%s err=%v", user.ID, err)
 		}
 	}
 
@@ -669,7 +646,7 @@ func (s *Service) GetPaymentRequestByID(ctx context.Context, requestID uuid.UUID
 // collectTransactionFee transfers the transaction fee to the admin account.
 func (s *Service) collectTransactionFee(ctx context.Context, parentTx *domain.Transaction, sourceAccount *domain.Account, amount int64, description string) error {
 	if s.adminAccountID == "" {
-		log.Printf("WARN: Admin account ID not configured; skipping fee collection")
+		log.Printf("level=warn component=service flow=fee_collection msg=\"admin account not configured; skipping fee collection\"")
 		return nil
 	}
 
@@ -677,32 +654,22 @@ func (s *Service) collectTransactionFee(ctx context.Context, parentTx *domain.Tr
 		return fmt.Errorf("source account is nil")
 	}
 
-	log.Printf("Collecting transaction fee of %d from %s to admin account %s", amount, sourceAccount.AnchorAccountID, s.adminAccountID)
-
 	// Get the admin account balance to verify it exists
 	adminBalance, err := s.anchorClient.GetAccountBalance(ctx, s.adminAccountID)
 	if err != nil {
-		log.Printf("Failed to get admin account balance: %v", err)
+		log.Printf("level=warn component=service flow=fee_collection msg=\"failed to get admin account balance\" err=%v", err)
 		return fmt.Errorf("failed to get admin account balance: %w", err)
 	}
-
-	log.Printf("Admin account current balance: %d", adminBalance.Data.AvailableBalance)
+	_ = adminBalance
 
 	// Perform the actual transfer from source account to admin account
 	transferResp, err := s.anchorClient.InitiateBookTransfer(ctx, sourceAccount.AnchorAccountID, s.adminAccountID, description, amount)
 	if err != nil {
-		log.Printf("Failed to transfer fee to admin account: %v", err)
+		log.Printf("level=warn component=service flow=fee_collection msg=\"anchor fee transfer failed\" err=%v", err)
 		return fmt.Errorf("failed to transfer fee to admin account: %w", err)
 	}
-
-	log.Printf("Fee transfer successful: %s", transferResp.Data.ID)
-
-	// Create a fee collection transaction record for the admin account
-	// Update parent transaction destination fields when fee collection targets admin account
 	if parentTx != nil {
-		log.Printf("Fee collection recorded for transaction %s: amount=%d, transfer_id=%s", parentTx.ID, amount, transferResp.Data.ID)
-	} else {
-		log.Printf("Fee collection recorded: amount=%d, transfer_id=%s", amount, transferResp.Data.ID)
+		log.Printf("level=info component=service flow=fee_collection msg=\"fee transfer created\" transaction_id=%s amount=%d anchor_transfer_id=%s", parentTx.ID, amount, transferResp.Data.ID)
 	}
 
 	return nil
@@ -725,13 +692,9 @@ func (s *Service) syncAccountBalance(ctx context.Context, userID uuid.UUID) erro
 	// Update the internal database with the Anchor balance
 	newBalance := anchorBalance.Data.AvailableBalance
 	if account.Balance != newBalance {
-		log.Printf("Syncing balance for user %s: internal=%d, anchor=%d", userID, account.Balance, newBalance)
-
 		if err := s.repo.UpdateAccountBalance(ctx, userID, newBalance); err != nil {
 			return fmt.Errorf("failed to update account balance: %w", err)
 		}
-
-		log.Printf("Successfully synced balance for user %s to %d", userID, newBalance)
 	}
 
 	return nil
@@ -751,19 +714,15 @@ func (s *Service) syncMoneyDropAccountBalance(ctx context.Context, accountID uui
 
 	// Update the internal database with the Anchor balance
 	newBalance := anchorBalance.Data.AvailableBalance
-	log.Printf("Syncing money drop account balance for account %s: anchor=%d", accountID, newBalance)
-
 	if err := s.repo.UpdateMoneyDropAccountBalance(ctx, accountID, newBalance); err != nil {
 		return fmt.Errorf("failed to update money drop account balance: %w", err)
 	}
-
-	log.Printf("Successfully synced money drop account balance for account %s to %d", accountID, newBalance)
 	return nil
 }
 
 // CreateMoneyDrop orchestrates the creation of a new money drop.
 func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req domain.CreateMoneyDropRequest) (*domain.CreateMoneyDropResponse, error) {
-	log.Printf("CreateMoneyDrop: Starting creation for user %s", userID)
+	log.Printf("level=info component=service flow=money_drop_create msg=\"request accepted\" user_id=%s", userID)
 
 	// 1. Get user's primary account and validate funds
 	primaryAccount, err := s.repo.FindAccountByUserID(ctx, userID)
@@ -773,7 +732,7 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 
 	// Sync balance with Anchor before validation
 	if err := s.syncAccountBalance(ctx, userID); err != nil {
-		log.Printf("CreateMoneyDrop: Failed to sync balance for %s: %v", userID, err)
+		log.Printf("level=warn component=service flow=money_drop_create msg=\"balance sync failed\" user_id=%s err=%v", userID, err)
 	}
 
 	// Get actual balance from Anchor for validation
@@ -788,8 +747,6 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 	if anchorBalance.Data.AvailableBalance < requiredAmount {
 		return nil, errors.New("insufficient funds in primary wallet")
 	}
-	log.Printf("CreateMoneyDrop: Total amount: %d, Fee: %d, Required: %d", totalAmount, s.moneyDropFeeKobo, requiredAmount)
-
 	// 2. Get or create money drop account via account-service
 	moneyDropAccount, err := s.repo.FindMoneyDropAccountByUserID(ctx, userID)
 	if err != nil && !errors.Is(err, store.ErrAccountNotFound) {
@@ -798,12 +755,12 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 
 	// If account doesn't exist or doesn't have Anchor account, create it via account-service
 	if moneyDropAccount == nil || moneyDropAccount.AnchorAccountID == "" {
-		log.Printf("CreateMoneyDrop: Creating money drop Anchor account for user %s", userID)
+		log.Printf("level=info component=service flow=money_drop_create msg=\"creating money-drop anchor account\" user_id=%s", userID)
 		accountResp, err := s.accountClient.CreateMoneyDropAccount(ctx, userID.String())
 		if err != nil {
 			return nil, fmt.Errorf("failed to create money drop Anchor account: %w", err)
 		}
-		log.Printf("CreateMoneyDrop: Created money drop Anchor account %s for user %s", accountResp.AnchorAccountID, userID)
+		log.Printf("level=info component=service flow=money_drop_create msg=\"money-drop anchor account created\" user_id=%s anchor_account_id=%s", userID, accountResp.AnchorAccountID)
 
 		// Account-service already created/updated the account in the database
 		// Re-fetch to get the updated account with Anchor details
@@ -822,11 +779,11 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 	if err != nil {
 		return nil, fmt.Errorf("failed to transfer funds to money drop account: %w", err)
 	}
-	log.Printf("CreateMoneyDrop: Transferred %d kobo from primary to money drop account via Book Transfer", totalAmount)
+	log.Printf("level=info component=service flow=money_drop_create msg=\"funding transfer created\" user_id=%s amount=%d", userID, totalAmount)
 
 	// 3.5. Sync money drop account balance after funding
 	if err := s.syncMoneyDropAccountBalance(ctx, moneyDropAccount.ID, moneyDropAccount.AnchorAccountID); err != nil {
-		log.Printf("WARN: Failed to sync money drop account balance after funding: %v", err)
+		log.Printf("level=warn component=service flow=money_drop_create msg=\"money-drop account sync failed after funding\" account_id=%s err=%v", moneyDropAccount.ID, err)
 		// Don't fail the operation, balance will sync later
 	}
 
@@ -850,7 +807,7 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 			Description:     "Money Drop Creation Fee",
 		}
 		if err := s.collectTransactionFee(ctx, tempFeeTx, primaryAccount, s.moneyDropFeeKobo, "Money Drop Creation Fee"); err != nil {
-			log.Printf("WARN: Failed to collect money drop creation fee: %v", err)
+			log.Printf("level=warn component=service flow=money_drop_create msg=\"money-drop creation fee collection failed\" user_id=%s err=%v", userID, err)
 			// Don't fail the operation, just log the warning
 		}
 	}
@@ -874,16 +831,16 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 		// Transfer back from money drop account to primary account
 		refundReason := fmt.Sprintf("Money Drop Creation Failed - Refund")
 		if _, refundErr := s.anchorClient.InitiateBookTransfer(ctx, moneyDropAccount.AnchorAccountID, primaryAccount.AnchorAccountID, refundReason, totalAmount); refundErr != nil {
-			log.Printf("CRITICAL: Failed to refund Book Transfer for user %s after drop creation failure: %v", userID, refundErr)
+			log.Printf("level=error component=service flow=money_drop_create msg=\"anchor funding refund failed after record creation error\" user_id=%s err=%v", userID, refundErr)
 			// Also try to credit the database balance (including fee)
 			if dbRefundErr := s.repo.CreditWallet(ctx, userID, requiredAmount); dbRefundErr != nil {
-				log.Printf("CRITICAL: Failed to refund debited amount in database for user %s: %v", userID, dbRefundErr)
+				log.Printf("level=error component=service flow=money_drop_create msg=\"wallet refund failed after record creation error\" user_id=%s err=%v", userID, dbRefundErr)
 			}
 		} else {
 			// If Anchor transfer refund succeeded but drop creation failed, also refund the fee
 			if s.moneyDropFeeKobo > 0 {
 				// Try to refund fee from admin account back to user (if fee was collected)
-				log.Printf("WARN: Money drop creation failed after fee collection. Fee may need manual refund.")
+				log.Printf("level=warn component=service flow=money_drop_create msg=\"drop creation failed after fee collection; manual fee refund may be required\" user_id=%s", userID)
 			}
 		}
 		return nil, fmt.Errorf("failed to create money drop record: %w", err)
@@ -903,7 +860,7 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 		Description:          fmt.Sprintf("Funding for Money Drop #%s", createdDrop.ID.String()),
 	}
 	if err := s.repo.CreateTransaction(ctx, fundingTx); err != nil {
-		log.Printf("WARN: Failed to log money drop funding transaction: %v", err)
+		log.Printf("level=warn component=service flow=money_drop_create msg=\"failed to persist funding transaction log\" user_id=%s err=%v", userID, err)
 		// Don't fail the operation, the drop is already created
 	}
 
@@ -920,13 +877,13 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 		ExpiryTimestamp: expiry,
 	}
 
-	log.Printf("CreateMoneyDrop: Successfully created money drop %s for user %s", dropIDStr, userID)
+	log.Printf("level=info component=service flow=money_drop_create msg=\"money drop created\" money_drop_id=%s user_id=%s", dropIDStr, userID)
 	return response, nil
 }
 
 // ClaimMoneyDrop orchestrates claiming a portion of a money drop.
 func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, dropID uuid.UUID) (*domain.ClaimMoneyDropResponse, error) {
-	log.Printf("ClaimMoneyDrop: Starting claim for drop %s by user %s", dropID, claimantID)
+	log.Printf("level=info component=service flow=money_drop_claim msg=\"claim requested\" money_drop_id=%s claimant_id=%s", dropID, claimantID)
 
 	// 1. Get drop details
 	drop, err := s.repo.FindMoneyDropByID(ctx, dropID)
@@ -972,24 +929,24 @@ func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, drop
 
 	_, err = s.anchorClient.InitiateBookTransfer(ctx, moneyDropAccount.AnchorAccountID, claimantAccount.AnchorAccountID, reason, drop.AmountPerClaim)
 	if err != nil {
-		log.Printf("ERROR: Failed to initiate funds transfer for claim: %v", err)
+		log.Printf("level=error component=service flow=money_drop_claim msg=\"anchor transfer initiation failed\" money_drop_id=%s claimant_id=%s err=%v", dropID, claimantID, err)
 		// Note: The claim has already been recorded in the database.
 		// In a production system, you might want to implement retry logic or a compensation transaction.
 		// For now, we return success but log the error.
 		// The transaction status will be updated by the webhook handler.
 	} else {
-		log.Printf("ClaimMoneyDrop: Transferred %d kobo from money drop account to claimant via Book Transfer", drop.AmountPerClaim)
+		log.Printf("level=info component=service flow=money_drop_claim msg=\"anchor transfer created\" money_drop_id=%s claimant_id=%s amount=%d", dropID, claimantID, drop.AmountPerClaim)
 	}
 
 	// 7.5. Sync money drop account balance after claim
 	if err := s.syncMoneyDropAccountBalance(ctx, moneyDropAccount.ID, moneyDropAccount.AnchorAccountID); err != nil {
-		log.Printf("WARN: Failed to sync money drop account balance after claim: %v", err)
+		log.Printf("level=warn component=service flow=money_drop_claim msg=\"money-drop account sync failed after claim\" account_id=%s err=%v", moneyDropAccount.ID, err)
 		// Don't fail the operation, balance will sync later
 	}
 
 	// 7.6. Sync claimant's account balance after receiving funds
 	if err := s.syncAccountBalance(ctx, claimantID); err != nil {
-		log.Printf("WARN: Failed to sync claimant account balance after claim: %v", err)
+		log.Printf("level=warn component=service flow=money_drop_claim msg=\"claimant balance sync failed\" claimant_id=%s err=%v", claimantID, err)
 		// Don't fail the operation, balance will sync later
 	}
 
@@ -1000,7 +957,7 @@ func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, drop
 		CreatorUsername: creator.Username,
 	}
 
-	log.Printf("ClaimMoneyDrop: Successfully processed claim for drop %s by user %s", dropID, claimantID)
+	log.Printf("level=info component=service flow=money_drop_claim msg=\"claim completed\" money_drop_id=%s claimant_id=%s", dropID, claimantID)
 	return response, nil
 }
 
@@ -1045,7 +1002,7 @@ func (s *Service) GetMoneyDropDetails(ctx context.Context, dropID uuid.UUID) (*d
 
 // RefundMoneyDrop processes a refund for an expired or completed money drop.
 func (s *Service) RefundMoneyDrop(ctx context.Context, dropID uuid.UUID, creatorID uuid.UUID, amount int64) error {
-	log.Printf("RefundMoneyDrop: Processing refund for drop %s, amount %d", dropID, amount)
+	log.Printf("level=info component=service flow=money_drop_refund msg=\"refund requested\" money_drop_id=%s creator_id=%s amount=%d", dropID, creatorID, amount)
 
 	// Get creator's primary account
 	creatorAccount, err := s.repo.FindAccountByUserID(ctx, creatorID)
@@ -1070,23 +1027,23 @@ func (s *Service) RefundMoneyDrop(ctx context.Context, dropID uuid.UUID, creator
 	if err != nil {
 		return fmt.Errorf("failed to transfer funds back to primary account: %w", err)
 	}
-	log.Printf("RefundMoneyDrop: Transferred %d kobo from money drop account to primary account via Book Transfer", amount)
+	log.Printf("level=info component=service flow=money_drop_refund msg=\"anchor transfer created\" money_drop_id=%s creator_id=%s amount=%d", dropID, creatorID, amount)
 
 	// Update database balances (credit primary)
 	if err := s.repo.CreditWallet(ctx, creatorID, amount); err != nil {
-		log.Printf("WARN: Failed to update primary account balance in database: %v", err)
+		log.Printf("level=warn component=service flow=money_drop_refund msg=\"wallet credit failed\" creator_id=%s err=%v", creatorID, err)
 		// Don't fail - Anchor transfer succeeded, balance will sync later
 	}
 
 	// Sync money drop account balance after refund
 	if err := s.syncMoneyDropAccountBalance(ctx, moneyDropAccount.ID, moneyDropAccount.AnchorAccountID); err != nil {
-		log.Printf("WARN: Failed to sync money drop account balance after refund: %v", err)
+		log.Printf("level=warn component=service flow=money_drop_refund msg=\"money-drop account sync failed after refund\" account_id=%s err=%v", moneyDropAccount.ID, err)
 		// Don't fail the operation, balance will sync later
 	}
 
 	// Sync creator's primary account balance after refund
 	if err := s.syncAccountBalance(ctx, creatorID); err != nil {
-		log.Printf("WARN: Failed to sync creator account balance after refund: %v", err)
+		log.Printf("level=warn component=service flow=money_drop_refund msg=\"creator balance sync failed after refund\" creator_id=%s err=%v", creatorID, err)
 		// Don't fail the operation, balance will sync later
 	}
 
@@ -1104,9 +1061,9 @@ func (s *Service) RefundMoneyDrop(ctx context.Context, dropID uuid.UUID, creator
 		Description:          fmt.Sprintf("Refund for Money Drop #%s", dropID.String()),
 	}
 	if err := s.repo.CreateTransaction(ctx, refundTx); err != nil {
-		log.Printf("WARN: Failed to log money drop refund transaction: %v", err)
+		log.Printf("level=warn component=service flow=money_drop_refund msg=\"failed to persist refund transaction log\" creator_id=%s err=%v", creatorID, err)
 	}
 
-	log.Printf("RefundMoneyDrop: Successfully processed refund for drop %s", dropID)
+	log.Printf("level=info component=service flow=money_drop_refund msg=\"refund completed\" money_drop_id=%s creator_id=%s", dropID, creatorID)
 	return nil
 }

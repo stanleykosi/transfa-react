@@ -84,14 +84,13 @@ func (c *Consumer) ConsumeWithBindings(exchange, queueName string, bindings map[
 		for d := range msgs {
 			handler, ok := handlers[d.RoutingKey]
 			if !ok {
-				log.Printf("No handler for routing key %s; acknowledging to drop", d.RoutingKey)
+				log.Printf("level=warn component=rabbitmq_consumer outcome=ack reason=no_handler routing_key=%s", d.RoutingKey)
 				d.Ack(false)
 				continue
 			}
 			if handler(d.Body) {
 				d.Ack(false)
 			} else {
-				log.Printf("Handler for routing key %s failed; re-queuing", d.RoutingKey)
 				d.Nack(false, true)
 			}
 		}
@@ -108,4 +107,3 @@ func (c *Consumer) Close() {
 		c.conn.Close()
 	}
 }
-

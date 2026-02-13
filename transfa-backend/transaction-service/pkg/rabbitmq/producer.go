@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rabbitmq/amqp091-go"
 	"github.com/google/uuid"
+	"github.com/rabbitmq/amqp091-go"
 )
 
 // PlatformFeeEvent represents the payload published to RabbitMQ when a platform fee is debited.
@@ -48,14 +48,14 @@ type Publisher interface {
 type EventProducerFallback struct{}
 
 func (p *EventProducerFallback) Publish(ctx context.Context, exchange, routingKey string, body interface{}) error {
-	log.Printf("[MQ-FALLBACK] Would publish to exchange='%s' routingKey='%s' body=%v", exchange, routingKey, body)
+	log.Printf("level=warn component=rabbitmq_producer mode=fallback msg=\"publish skipped\" exchange=%s routing_key=%s", exchange, routingKey)
 	return nil
 }
 
 func (p *EventProducerFallback) Close() {}
 
 func (p *EventProducerFallback) PublishPlatformFeeEvent(ctx context.Context, event PlatformFeeEvent) error {
-	log.Printf("[MQ-FALLBACK] Would publish platform fee event: %+v", event)
+	log.Printf("level=warn component=rabbitmq_producer mode=fallback msg=\"platform fee event publish skipped\" user_id=%s", event.UserID)
 	return nil
 }
 
@@ -111,7 +111,7 @@ func (p *EventProducer) Publish(ctx context.Context, exchange, routingKey string
 		false,    // noWait
 		nil,      // args
 	); err != nil {
-		log.Printf("Failed to declare exchange '%s': %v. Attempting channel reopen...", exchange, err)
+		log.Printf("level=warn component=rabbitmq_producer msg=\"exchange declare failed; reopening channel\" exchange=%s err=%v", exchange, err)
 		// Attempt simple channel reopen once
 		if p.conn != nil {
 			if ch, chErr := p.conn.Channel(); chErr == nil {
@@ -129,7 +129,7 @@ func (p *EventProducer) Publish(ctx context.Context, exchange, routingKey string
 
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
-		log.Printf("Error marshalling JSON body: %v", err)
+		log.Printf("level=error component=rabbitmq_producer msg=\"json marshal failed\" exchange=%s routing_key=%s err=%v", exchange, routingKey, err)
 		return err
 	}
 
@@ -145,7 +145,7 @@ func (p *EventProducer) Publish(ctx context.Context, exchange, routingKey string
 		},
 	)
 	if err != nil {
-		log.Printf("Failed to publish a message to exchange '%s': %v", exchange, err)
+		log.Printf("level=warn component=rabbitmq_producer msg=\"publish failed; reopening channel\" exchange=%s routing_key=%s err=%v", exchange, routingKey, err)
 		// One-shot retry: reopen channel and try again
 		if p.conn != nil {
 			if ch, chErr := p.conn.Channel(); chErr == nil {
@@ -158,7 +158,6 @@ func (p *EventProducer) Publish(ctx context.Context, exchange, routingKey string
 						Body:        jsonBody,
 					})
 					if err == nil {
-						log.Printf("Successfully published message to exchange '%s' after retry", exchange)
 						return nil
 					}
 				}
@@ -166,8 +165,6 @@ func (p *EventProducer) Publish(ctx context.Context, exchange, routingKey string
 		}
 		return err
 	}
-
-	log.Printf("Successfully published message to exchange '%s' with routing key '%s'", exchange, routingKey)
 	return nil
 }
 

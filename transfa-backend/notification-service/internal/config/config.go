@@ -10,7 +10,7 @@
 package config
 
 import (
-	"log"
+	"fmt"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -49,13 +49,13 @@ func LoadConfig() (config Config, err error) {
 	// Read the config file if it exists.
 	if err = viper.ReadInConfig(); err != nil {
 		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
-			log.Fatalf("Error reading config file: %s", err)
+			return config, fmt.Errorf("read config file: %w", err)
 		}
 	}
 
 	// Unmarshal the config into the Config struct.
 	if err = viper.Unmarshal(&config); err != nil {
-		log.Fatalf("Unable to decode config into struct: %v", err)
+		return config, fmt.Errorf("decode config: %w", err)
 	}
 
 	return

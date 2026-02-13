@@ -36,13 +36,13 @@ import (
 func main() {
 	// Load .env file for local development.
 	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, using environment variables")
+		log.Println("level=info component=bootstrap msg=\"env file not found; using process env\"")
 	}
 
 	// Load application configuration.
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatalf("cannot load config: %v", err)
+		log.Fatalf("level=fatal component=bootstrap msg=\"config load failed\" err=%v", err)
 	}
 
 	// Use Railway's PORT env var if set, otherwise use configured SERVER_PORT
@@ -56,10 +56,10 @@ func main() {
 	// Set up RabbitMQ producer.
 	producer, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL)
 	if err != nil {
-		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
+		log.Fatalf("level=fatal component=bootstrap msg=\"rabbitmq connection failed\" err=%v", err)
 	}
 	defer producer.Close()
-	log.Println("RabbitMQ producer connected")
+	log.Println("level=info component=bootstrap msg=\"rabbitmq connected\"")
 
 	// Set up router and handlers.
 	r := chi.NewRouter()
@@ -88,9 +88,9 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("Server starting on port %s", cfg.ServerPort)
+		log.Printf("level=info component=http msg=\"server starting\" port=%s", cfg.ServerPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Could not start server: %s\n", err)
+			log.Fatalf("level=fatal component=http msg=\"server start failed\" err=%v", err)
 		}
 	}()
 
@@ -98,14 +98,14 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	log.Println("Shutting down server...")
+	log.Println("level=info component=http msg=\"shutdown started\"")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		log.Fatalf("Server shutdown failed: %v", err)
+		log.Fatalf("level=fatal component=http msg=\"shutdown failed\" err=%v", err)
 	}
 
-	log.Println("Server gracefully stopped")
+	log.Println("level=info component=http msg=\"shutdown complete\"")
 }

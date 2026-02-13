@@ -32,12 +32,12 @@ func NewTransferStatusConsumer(repo store.Repository) *TransferStatusConsumer {
 func (c *TransferStatusConsumer) HandleMessage(body []byte) bool {
 	var event domain.TransferStatusEvent
 	if err := json.Unmarshal(body, &event); err != nil {
-		log.Printf("transfer-consumer: failed to unmarshal payload: %v", err)
+		log.Printf("level=warn component=transfer_consumer outcome=drop reason=invalid_payload err=%v", err)
 		return true
 	}
 
 	if event.AnchorTransferID == "" {
-		log.Printf("transfer-consumer: missing anchor transfer id in event %+v", event)
+		log.Printf("level=warn component=transfer_consumer outcome=drop reason=missing_anchor_transfer_id event_type=%s event_id=%s", event.EventType, event.EventID)
 		return true
 	}
 
@@ -48,24 +48,26 @@ func (c *TransferStatusConsumer) HandleMessage(body []byte) bool {
 		if errors.Is(err, store.ErrTransactionNotFound) {
 			// Fee transfer webhooks are expected to not map to a primary user-facing transaction.
 			if looksLikeFeeEvent(event) {
-				log.Printf("transfer-consumer: ignoring fee transfer event with no transaction for anchor transfer %s", event.AnchorTransferID)
+				log.Printf("level=info component=transfer_consumer outcome=ack reason=fee_event_without_transaction anchor_transfer_id=%s", event.AnchorTransferID)
 				return true
 			}
 
 			attempt := c.incrementMissingAttempt(event.AnchorTransferID)
 			if attempt < maxMissingTransferRetries {
 				backoff := missingTransferRetryBackoff(attempt)
-				log.Printf("transfer-consumer: transaction not found for transfer %s, retrying (%d/%d)", event.AnchorTransferID, attempt, maxMissingTransferRetries)
+				if attempt == 1 || attempt == maxMissingTransferRetries-1 || attempt%5 == 0 {
+					log.Printf("level=warn component=transfer_consumer outcome=retry reason=transaction_not_found anchor_transfer_id=%s attempt=%d max_attempts=%d backoff_ms=%d", event.AnchorTransferID, attempt, maxMissingTransferRetries, backoff.Milliseconds())
+				}
 				time.Sleep(backoff)
 				return false
 			}
 
-			log.Printf("transfer-consumer: transaction still not found for transfer %s after %d attempts; acknowledging", event.AnchorTransferID, attempt)
+			log.Printf("level=warn component=transfer_consumer outcome=ack reason=transaction_not_found anchor_transfer_id=%s attempts=%d", event.AnchorTransferID, attempt)
 			c.clearMissingAttempt(event.AnchorTransferID)
 			return true
 		}
 
-		log.Printf("transfer-consumer: processing error for transfer %s: %v", event.AnchorTransferID, err)
+		log.Printf("level=error component=transfer_consumer outcome=requeue reason=processing_error anchor_transfer_id=%s err=%v", event.AnchorTransferID, err)
 		return false
 	}
 
@@ -119,7 +121,7 @@ func (c *TransferStatusConsumer) handleFailure(ctx context.Context, tx *domain.T
 	}
 
 	if err := c.repo.RefundTransactionFee(ctx, tx.ID, tx.SenderID, tx.Fee); err != nil {
-		log.Printf("transfer-consumer: fee refund warning for tx %s: %v", tx.ID, err)
+		log.Printf("level=warn component=transfer_consumer msg=\"fee refund failed\" transaction_id=%s err=%v", tx.ID, err)
 	}
 
 	return nil

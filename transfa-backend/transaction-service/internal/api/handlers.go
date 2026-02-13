@@ -74,7 +74,6 @@ func (h *TransactionHandlers) P2PTransferHandler(w http.ResponseWriter, r *http.
 	// Retrieve the authenticated user's ID from the context.
 	userIDStr, ok := GetClerkUserID(r.Context())
 	if !ok {
-		log.Printf("P2P Transfer: Could not get user ID from context")
 		http.Error(w, "Could not get user ID from context", http.StatusInternalServerError)
 		return
 	}
@@ -82,32 +81,30 @@ func (h *TransactionHandlers) P2PTransferHandler(w http.ResponseWriter, r *http.
 	// Resolve Clerk user id (e.g., user_abc) to internal UUID
 	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
 	if err != nil {
-		log.Printf("P2P Transfer: Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		log.Printf("level=warn component=api endpoint=p2p_transfer outcome=reject reason=user_resolution_failed clerk_user_id=%s err=%v", userIDStr, err)
 		http.Error(w, "User not found", http.StatusBadRequest)
 		return
 	}
 	senderID, err := uuid.Parse(internalIDStr)
 	if err != nil {
-		log.Printf("P2P Transfer: Invalid user ID format: %s", internalIDStr)
+		log.Printf("level=warn component=api endpoint=p2p_transfer outcome=reject reason=invalid_user_id internal_user_id=%s", internalIDStr)
 		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
 		return
 	}
 
 	var req domain.P2PTransferRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("P2P Transfer JSON decode error: %v", err)
-		log.Printf("Request headers: %v", r.Header)
-		log.Printf("Request body: %v", r.Body)
+		log.Printf("level=warn component=api endpoint=p2p_transfer outcome=reject reason=invalid_json err=%v", err)
 		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("P2P Transfer request: sender=%s, recipient=%s, amount=%d", senderID, req.RecipientUsername, req.Amount)
+	log.Printf("level=info component=api endpoint=p2p_transfer outcome=accepted sender_id=%s recipient=%s amount=%d", senderID, req.RecipientUsername, req.Amount)
 
 	// Call the core service logic.
 	tx, err := h.service.ProcessP2PTransfer(r.Context(), senderID, req)
 	if err != nil {
-		log.Printf("P2P Transfer failed for user %s: %v", senderID, err)
+		log.Printf("level=warn component=api endpoint=p2p_transfer outcome=failed sender_id=%s err=%v", senderID, err)
 		if errors.Is(err, store.ErrInsufficientFunds) {
 			http.Error(w, err.Error(), http.StatusPaymentRequired)
 			return
@@ -129,7 +126,6 @@ func (h *TransactionHandlers) SelfTransferHandler(w http.ResponseWriter, r *http
 	// Retrieve the authenticated user's ID from the context.
 	userIDStr, ok := GetClerkUserID(r.Context())
 	if !ok {
-		log.Printf("Self Transfer: Could not get user ID from context")
 		http.Error(w, "Could not get user ID from context", http.StatusInternalServerError)
 		return
 	}
@@ -137,30 +133,30 @@ func (h *TransactionHandlers) SelfTransferHandler(w http.ResponseWriter, r *http
 	// Resolve Clerk user id (e.g., user_abc) to internal UUID
 	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
 	if err != nil {
-		log.Printf("Self Transfer: Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		log.Printf("level=warn component=api endpoint=self_transfer outcome=reject reason=user_resolution_failed clerk_user_id=%s err=%v", userIDStr, err)
 		http.Error(w, "User not found", http.StatusBadRequest)
 		return
 	}
 	senderID, err := uuid.Parse(internalIDStr)
 	if err != nil {
-		log.Printf("Self Transfer: Invalid user ID format: %s", internalIDStr)
+		log.Printf("level=warn component=api endpoint=self_transfer outcome=reject reason=invalid_user_id internal_user_id=%s", internalIDStr)
 		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
 		return
 	}
 
 	var req domain.SelfTransferRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("Self Transfer JSON decode error: %v", err)
+		log.Printf("level=warn component=api endpoint=self_transfer outcome=reject reason=invalid_json err=%v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("Self Transfer request: sender=%s, beneficiary=%s, amount=%d", senderID, req.BeneficiaryID, req.Amount)
+	log.Printf("level=info component=api endpoint=self_transfer outcome=accepted sender_id=%s beneficiary_id=%s amount=%d", senderID, req.BeneficiaryID, req.Amount)
 
 	// Call the core service logic.
 	tx, err := h.service.ProcessSelfTransfer(r.Context(), senderID, req)
 	if err != nil {
-		log.Printf("Self Transfer failed for user %s: %v", senderID, err)
+		log.Printf("level=warn component=api endpoint=self_transfer outcome=failed sender_id=%s err=%v", senderID, err)
 		if errors.Is(err, store.ErrInsufficientFunds) {
 			http.Error(w, err.Error(), http.StatusPaymentRequired)
 			return
@@ -193,7 +189,7 @@ func (h *TransactionHandlers) ListBeneficiariesHandler(w http.ResponseWriter, r 
 	// Resolve Clerk user id (e.g., user_abc) to internal UUID
 	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
 	if err != nil {
-		log.Printf("Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		log.Printf("level=warn component=api endpoint=list_beneficiaries outcome=reject reason=user_resolution_failed clerk_user_id=%s err=%v", userIDStr, err)
 		http.Error(w, "User not found", http.StatusBadRequest)
 		return
 	}
@@ -206,7 +202,7 @@ func (h *TransactionHandlers) ListBeneficiariesHandler(w http.ResponseWriter, r 
 	// Get user's beneficiaries
 	beneficiaries, err := h.service.GetUserBeneficiaries(r.Context(), userID)
 	if err != nil {
-		log.Printf("Failed to get beneficiaries for user %s: %v", userID, err)
+		log.Printf("level=error component=api endpoint=list_beneficiaries outcome=failed user_id=%s err=%v", userID, err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -228,7 +224,7 @@ func (h *TransactionHandlers) GetDefaultBeneficiaryHandler(w http.ResponseWriter
 
 	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
 	if err != nil {
-		log.Printf("Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		log.Printf("level=warn component=api endpoint=get_default_beneficiary outcome=reject reason=user_resolution_failed clerk_user_id=%s err=%v", userIDStr, err)
 		http.Error(w, "User not found", http.StatusBadRequest)
 		return
 	}
@@ -245,7 +241,7 @@ func (h *TransactionHandlers) GetDefaultBeneficiaryHandler(w http.ResponseWriter
 			http.Error(w, "No default beneficiary found", http.StatusNotFound)
 			return
 		}
-		log.Printf("Failed to get default beneficiary for user %s: %v", userID, err)
+		log.Printf("level=error component=api endpoint=get_default_beneficiary outcome=failed user_id=%s err=%v", userID, err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -267,7 +263,7 @@ func (h *TransactionHandlers) SetDefaultBeneficiaryHandler(w http.ResponseWriter
 
 	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
 	if err != nil {
-		log.Printf("Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		log.Printf("level=warn component=api endpoint=set_default_beneficiary outcome=reject reason=user_resolution_failed clerk_user_id=%s err=%v", userIDStr, err)
 		http.Error(w, "User not found", http.StatusBadRequest)
 		return
 	}
@@ -293,7 +289,7 @@ func (h *TransactionHandlers) SetDefaultBeneficiaryHandler(w http.ResponseWriter
 			http.Error(w, "Beneficiary not found or does not belong to user", http.StatusNotFound)
 			return
 		}
-		log.Printf("Failed to set default beneficiary for user %s: %v", userID, err)
+		log.Printf("level=error component=api endpoint=set_default_beneficiary outcome=failed user_id=%s beneficiary_id=%s err=%v", userID, req.BeneficiaryID, err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -315,7 +311,7 @@ func (h *TransactionHandlers) GetReceivingPreferenceHandler(w http.ResponseWrite
 
 	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
 	if err != nil {
-		log.Printf("Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		log.Printf("level=warn component=api endpoint=get_receiving_preference outcome=reject reason=user_resolution_failed clerk_user_id=%s err=%v", userIDStr, err)
 		http.Error(w, "User not found", http.StatusBadRequest)
 		return
 	}
@@ -328,7 +324,7 @@ func (h *TransactionHandlers) GetReceivingPreferenceHandler(w http.ResponseWrite
 	// Get user's receiving preference
 	preference, err := h.service.GetReceivingPreference(r.Context(), userID)
 	if err != nil {
-		log.Printf("Failed to get receiving preference for user %s: %v", userID, err)
+		log.Printf("level=error component=api endpoint=get_receiving_preference outcome=failed user_id=%s err=%v", userID, err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -350,7 +346,7 @@ func (h *TransactionHandlers) UpdateReceivingPreferenceHandler(w http.ResponseWr
 
 	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
 	if err != nil {
-		log.Printf("Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		log.Printf("level=warn component=api endpoint=update_receiving_preference outcome=reject reason=user_resolution_failed clerk_user_id=%s err=%v", userIDStr, err)
 		http.Error(w, "User not found", http.StatusBadRequest)
 		return
 	}
@@ -377,7 +373,7 @@ func (h *TransactionHandlers) UpdateReceivingPreferenceHandler(w http.ResponseWr
 			http.Error(w, "Beneficiary not found or does not belong to user", http.StatusNotFound)
 			return
 		}
-		log.Printf("Failed to update receiving preference for user %s: %v", userID, err)
+		log.Printf("level=error component=api endpoint=update_receiving_preference outcome=failed user_id=%s err=%v", userID, err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
@@ -390,47 +386,38 @@ func (h *TransactionHandlers) UpdateReceivingPreferenceHandler(w http.ResponseWr
 
 // GetAccountBalanceHandler handles requests to get user's account balance.
 func (h *TransactionHandlers) GetAccountBalanceHandler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("GetAccountBalanceHandler called")
-
 	// Retrieve the authenticated user's ID from the context.
 	userIDStr, ok := GetClerkUserID(r.Context())
 	if !ok {
-		log.Printf("Could not get user ID from context")
 		http.Error(w, "Could not get user ID from context", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("User ID from context: %s", userIDStr)
-
 	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
 	if err != nil {
-		log.Printf("Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		log.Printf("level=warn component=api endpoint=get_balance outcome=reject reason=user_resolution_failed clerk_user_id=%s err=%v", userIDStr, err)
 		http.Error(w, "User not found", http.StatusBadRequest)
 		return
 	}
 	userID, err := uuid.Parse(internalIDStr)
 	if err != nil {
-		log.Printf("Invalid user ID format: %s, error: %v", internalIDStr, err)
+		log.Printf("level=warn component=api endpoint=get_balance outcome=reject reason=invalid_user_id internal_user_id=%s err=%v", internalIDStr, err)
 		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
 		return
 	}
-
-	log.Printf("Parsed user ID: %s", userID)
 
 	// Get user's account balance
 	balance, err := h.service.GetAccountBalance(r.Context(), userID)
 	if err != nil {
 		if errors.Is(err, store.ErrAccountNotFound) {
-			log.Printf("Account not found for user %s", userID)
+			log.Printf("level=warn component=api endpoint=get_balance outcome=not_found user_id=%s", userID)
 			http.Error(w, "Account not found", http.StatusNotFound)
 			return
 		}
-		log.Printf("Failed to get account balance for user %s: %v", userID, err)
+		log.Printf("level=error component=api endpoint=get_balance outcome=failed user_id=%s err=%v", userID, err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-
-	log.Printf("Successfully retrieved balance for user %s: %+v", userID, balance)
 
 	// Respond with the account balance
 	w.Header().Set("Content-Type", "application/json")
@@ -441,8 +428,8 @@ func (h *TransactionHandlers) GetAccountBalanceHandler(w http.ResponseWriter, r 
 // GetFeesHandler returns the currently configured transaction fees.
 func (h *TransactionHandlers) GetFeesHandler(w http.ResponseWriter, r *http.Request) {
 	fees := map[string]int64{
-		"p2p_fee_kobo":       h.service.GetTransactionFee(),
-		"self_fee_kobo":      h.service.GetTransactionFee(),
+		"p2p_fee_kobo":        h.service.GetTransactionFee(),
+		"self_fee_kobo":       h.service.GetTransactionFee(),
 		"money_drop_fee_kobo": h.service.GetMoneyDropFee(),
 	}
 
@@ -453,42 +440,33 @@ func (h *TransactionHandlers) GetFeesHandler(w http.ResponseWriter, r *http.Requ
 
 // GetTransactionHistoryHandler handles requests to get user's transaction history.
 func (h *TransactionHandlers) GetTransactionHistoryHandler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("GetTransactionHistoryHandler called")
-
 	// Retrieve the authenticated user's ID from the context.
 	userIDStr, ok := GetClerkUserID(r.Context())
 	if !ok {
-		log.Printf("Could not get user ID from context")
 		http.Error(w, "Could not get user ID from context", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("User ID from context: %s", userIDStr)
-
 	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
 	if err != nil {
-		log.Printf("Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		log.Printf("level=warn component=api endpoint=get_history outcome=reject reason=user_resolution_failed clerk_user_id=%s err=%v", userIDStr, err)
 		http.Error(w, "User not found", http.StatusBadRequest)
 		return
 	}
 	userID, err := uuid.Parse(internalIDStr)
 	if err != nil {
-		log.Printf("Invalid user ID format: %s, error: %v", internalIDStr, err)
+		log.Printf("level=warn component=api endpoint=get_history outcome=reject reason=invalid_user_id internal_user_id=%s err=%v", internalIDStr, err)
 		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("Parsed user ID: %s", userID)
-
 	// Get user's transaction history
 	transactions, err := h.service.GetTransactionHistory(r.Context(), userID)
 	if err != nil {
-		log.Printf("Failed to get transaction history for user %s: %v", userID, err)
+		log.Printf("level=error component=api endpoint=get_history outcome=failed user_id=%s err=%v", userID, err)
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
-
-	log.Printf("Successfully retrieved %d transactions for user %s", len(transactions), userID)
 
 	// Respond with the transaction history
 	w.Header().Set("Content-Type", "application/json")
@@ -506,7 +484,7 @@ func (h *TransactionHandlers) GetTransactionByIDHandler(w http.ResponseWriter, r
 
 	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
 	if err != nil {
-		log.Printf("GetTransactionByID: failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		log.Printf("level=warn component=api endpoint=get_transaction_by_id outcome=reject reason=user_resolution_failed clerk_user_id=%s err=%v", userIDStr, err)
 		h.writeError(w, http.StatusBadRequest, "User not found")
 		return
 	}
@@ -534,7 +512,7 @@ func (h *TransactionHandlers) GetTransactionByIDHandler(w http.ResponseWriter, r
 			h.writeError(w, http.StatusNotFound, "Transaction not found")
 			return
 		}
-		log.Printf("GetTransactionByID: failed to fetch transaction %s for user %s: %v", transactionID, requestorID, err)
+		log.Printf("level=error component=api endpoint=get_transaction_by_id outcome=failed transaction_id=%s user_id=%s err=%v", transactionID, requestorID, err)
 		h.writeError(w, http.StatusInternalServerError, "Internal server error")
 		return
 	}
@@ -571,9 +549,9 @@ func (h *TransactionHandlers) PlatformFeeHandler(w http.ResponseWriter, r *http.
 	tx, err := h.service.ProcessPlatformFee(r.Context(), userID, req.Amount, req.Reason)
 	if err != nil {
 		if req.InvoiceID != "" {
-			log.Printf("Platform fee debit failed for user %s invoice %s: %v", userID, req.InvoiceID, err)
+			log.Printf("level=warn component=api endpoint=platform_fee outcome=failed user_id=%s invoice_id=%s err=%v", userID, req.InvoiceID, err)
 		} else {
-			log.Printf("Platform fee debit failed for user %s: %v", userID, err)
+			log.Printf("level=warn component=api endpoint=platform_fee outcome=failed user_id=%s err=%v", userID, err)
 		}
 		if errors.Is(err, store.ErrInsufficientFunds) {
 			http.Error(w, err.Error(), http.StatusPaymentRequired)

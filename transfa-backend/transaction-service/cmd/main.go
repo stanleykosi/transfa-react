@@ -42,17 +42,17 @@ func main() {
 	// Load application configuration from environment variables.
 	cfg, err := config.LoadConfig(".")
 	if err != nil {
-		log.Fatalf("could not load config: %v", err)
+		log.Fatalf("level=fatal component=bootstrap msg=\"config load failed\" err=%v", err)
 	}
 
 	// Use the configured SERVER_PORT (defaults to 8083, can be overridden by environment)
 	// This matches the pattern used by account-service
-	log.Printf("Using SERVER_PORT: %s", cfg.ServerPort)
+	log.Printf("level=info component=bootstrap msg=\"starting transaction-service\" port=%s", cfg.ServerPort)
 
 	// Establish a connection pool to the PostgreSQL database with retry logic.
 	poolConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("unable to parse database URL: %v", err)
+		log.Fatalf("level=fatal component=bootstrap msg=\"database url parse failed\" err=%v", err)
 	}
 
 	// Configure connection pool for high-traffic scenarios (100k+ users)
@@ -67,29 +67,27 @@ func main() {
 
 	dbpool, err := pgxpool.NewWithConfig(context.Background(), poolConfig)
 	if err != nil {
-		log.Fatalf("unable to connect to database: %v", err)
+		log.Fatalf("level=fatal component=bootstrap msg=\"database connection failed\" err=%v", err)
 	}
 	defer dbpool.Close()
-	log.Println("Database connection established.")
+	log.Println("level=info component=bootstrap msg=\"database connected\"")
 
 	// Initialize the RabbitMQ producer to publish events.
 	// This service only needs to publish, so we use a producer.
 	rabbitProducer, err := rmrabbit.NewEventProducer(cfg.RabbitMQURL)
 	if err != nil {
-		log.Printf("WARNING: Failed to connect to RabbitMQ at startup: %v. Continuing without MQ.", err)
+		log.Printf("level=warn component=bootstrap msg=\"rabbitmq producer unavailable; using fallback\" err=%v", err)
 		rabbitProducer = nil
 	} else {
 		defer rabbitProducer.Close()
-		log.Println("RabbitMQ producer initialized.")
+		log.Println("level=info component=bootstrap msg=\"rabbitmq producer connected\"")
 	}
 
 	// Initialize the client for the Anchor BaaS API.
 	anchorClient := anchorclient.NewClient(cfg.AnchorAPIBaseURL, cfg.AnchorAPIKey)
-	log.Println("Anchor API client initialized.")
 
 	// Initialize the client for the account-service.
 	accountClient := accountclient.NewClient(cfg.AccountServiceURL)
-	log.Println("Account service client initialized.")
 
 	// Initialize the data access layer (repository).
 	repository := store.NewPostgresRepository(dbpool)
@@ -107,26 +105,26 @@ func main() {
 	// Start the HTTP server.
 	// Use the same pattern as account-service - bind to all interfaces
 	serverAddr := fmt.Sprintf(":%s", cfg.ServerPort)
-	log.Printf("Starting server on %s", serverAddr)
+	log.Printf("level=info component=http msg=\"server listening\" addr=%s", serverAddr)
 
 	// Wire up the new consumer: create a RabbitMQ consumer, bind to transfer status events, and ensure graceful shutdown.
 	transferConsumer := transactionService.TransferStatusConsumer()
 
 	rabbitConsumer, err := rmrabbit.NewConsumer(cfg.RabbitMQURL)
 	if err != nil {
-		log.Fatalf("could not initialize RabbitMQ consumer: %v", err)
+		log.Fatalf("level=fatal component=bootstrap msg=\"rabbitmq consumer init failed\" err=%v", err)
 	}
 	defer rabbitConsumer.Close()
 
 	transferBindings := map[string]func([]byte) bool{
-		"transfer.status.nip.successful": transferConsumer.HandleMessage,
-		"transfer.status.nip.failed":     transferConsumer.HandleMessage,
+		"transfer.status.nip.successful":  transferConsumer.HandleMessage,
+		"transfer.status.nip.failed":      transferConsumer.HandleMessage,
 		"transfer.status.book.successful": transferConsumer.HandleMessage,
 		"transfer.status.book.failed":     transferConsumer.HandleMessage,
 	}
 
 	if err := rabbitConsumer.ConsumeWithBindings("transfa.events", cfg.TransferEventQueue, transferBindings); err != nil {
-		log.Fatalf("failed to start transfer consumer: %v", err)
+		log.Fatalf("level=fatal component=bootstrap msg=\"transfer consumer start failed\" err=%v", err)
 	}
 
 	server := &http.Server{
@@ -136,21 +134,21 @@ func main() {
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("could not start server: %v", err)
+			log.Fatalf("level=fatal component=http msg=\"server stopped unexpectedly\" err=%v", err)
 		}
 	}()
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
-	log.Println("Shutting down transaction-service...")
+	log.Println("level=info component=http msg=\"shutdown started\"")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		log.Printf("Server shutdown error: %v", err)
+		log.Printf("level=error component=http msg=\"shutdown failed\" err=%v", err)
 	}
 
-	log.Println("Shutdown complete.")
+	log.Println("level=info component=http msg=\"shutdown complete\"")
 }

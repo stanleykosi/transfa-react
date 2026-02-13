@@ -59,7 +59,7 @@ func (h *TransactionHandlers) CreatePaymentRequestHandler(w http.ResponseWriter,
 	// Call the service to create the payment request.
 	request, err := h.service.CreatePaymentRequest(r.Context(), userID, payload)
 	if err != nil {
-		log.Printf("Failed to create payment request for user %s: %v", userID, err)
+		log.Printf("level=error component=api endpoint=create_payment_request outcome=failed user_id=%s err=%v", userID, err)
 		h.writeError(w, http.StatusInternalServerError, "Could not create payment request.")
 		return
 	}
@@ -98,7 +98,7 @@ func (h *TransactionHandlers) ListPaymentRequestsHandler(w http.ResponseWriter, 
 	// Call the service to get the list of requests.
 	requests, err := h.service.ListPaymentRequests(r.Context(), userID)
 	if err != nil {
-		log.Printf("Failed to list payment requests for user %s: %v", userID, err)
+		log.Printf("level=error component=api endpoint=list_payment_requests outcome=failed user_id=%s err=%v", userID, err)
 		h.writeError(w, http.StatusInternalServerError, "Could not retrieve payment requests.")
 		return
 	}
@@ -128,7 +128,7 @@ func (h *TransactionHandlers) GetPaymentRequestByIDHandler(w http.ResponseWriter
 	// Call the service to get the request.
 	request, err := h.service.GetPaymentRequestByID(r.Context(), requestID)
 	if err != nil {
-		log.Printf("Failed to get payment request by ID %s: %v", requestID, err)
+		log.Printf("level=error component=api endpoint=get_payment_request_by_id outcome=failed request_id=%s err=%v", requestID, err)
 		h.writeError(w, http.StatusInternalServerError, "Could not retrieve payment request.")
 		return
 	}

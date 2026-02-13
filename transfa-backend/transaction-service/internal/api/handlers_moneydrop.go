@@ -34,7 +34,7 @@ func (h *TransactionHandlers) CreateMoneyDropHandler(w http.ResponseWriter, r *h
 	// Resolve Clerk user id to internal UUID
 	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
 	if err != nil {
-		log.Printf("Create Money Drop: Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		log.Printf("level=warn component=api endpoint=create_money_drop outcome=reject reason=user_resolution_failed clerk_user_id=%s err=%v", userIDStr, err)
 		h.writeError(w, http.StatusBadRequest, "User not found")
 		return
 	}
@@ -67,7 +67,7 @@ func (h *TransactionHandlers) CreateMoneyDropHandler(w http.ResponseWriter, r *h
 	// Create the money drop
 	response, err := h.service.CreateMoneyDrop(r.Context(), userID, req)
 	if err != nil {
-		log.Printf("Create Money Drop: Service error: %v", err)
+		log.Printf("level=warn component=api endpoint=create_money_drop outcome=failed user_id=%s err=%v", userID, err)
 		if err.Error() == "insufficient funds in primary wallet" {
 			h.writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -91,7 +91,7 @@ func (h *TransactionHandlers) ClaimMoneyDropHandler(w http.ResponseWriter, r *ht
 	// Resolve Clerk user id to internal UUID
 	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
 	if err != nil {
-		log.Printf("Claim Money Drop: Failed to resolve internal user id for clerk %s: %v", userIDStr, err)
+		log.Printf("level=warn component=api endpoint=claim_money_drop outcome=reject reason=user_resolution_failed clerk_user_id=%s err=%v", userIDStr, err)
 		h.writeError(w, http.StatusBadRequest, "User not found")
 		return
 	}
@@ -112,7 +112,7 @@ func (h *TransactionHandlers) ClaimMoneyDropHandler(w http.ResponseWriter, r *ht
 	// Process the claim
 	response, err := h.service.ClaimMoneyDrop(r.Context(), claimantID, dropID)
 	if err != nil {
-		log.Printf("Claim Money Drop: Service error: %v", err)
+		log.Printf("level=warn component=api endpoint=claim_money_drop outcome=failed claimant_id=%s drop_id=%s err=%v", claimantID, dropID, err)
 		h.writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -133,7 +133,7 @@ func (h *TransactionHandlers) GetMoneyDropDetailsHandler(w http.ResponseWriter, 
 	// Get drop details
 	details, err := h.service.GetMoneyDropDetails(r.Context(), dropID)
 	if err != nil {
-		log.Printf("Get Money Drop Details: Service error: %v", err)
+		log.Printf("level=warn component=api endpoint=get_money_drop_details outcome=failed drop_id=%s err=%v", dropID, err)
 		h.writeError(w, http.StatusNotFound, "Money drop not found")
 		return
 	}
@@ -144,8 +144,8 @@ func (h *TransactionHandlers) GetMoneyDropDetailsHandler(w http.ResponseWriter, 
 // RefundMoneyDropHandler handles internal requests to refund a money drop.
 // This is called by the scheduler-service and doesn't require authentication.
 func (h *TransactionHandlers) RefundMoneyDropHandler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("RefundMoneyDropHandler: Received refund request at path %s", r.URL.Path)
-	
+	log.Printf("level=info component=api endpoint=refund_money_drop outcome=accepted path=%s", r.URL.Path)
+
 	var req struct {
 		DropID    string `json:"drop_id"`
 		CreatorID string `json:"creator_id"`
@@ -153,12 +153,12 @@ func (h *TransactionHandlers) RefundMoneyDropHandler(w http.ResponseWriter, r *h
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		log.Printf("Refund Money Drop JSON decode error: %v", err)
+		log.Printf("level=warn component=api endpoint=refund_money_drop outcome=reject reason=invalid_json err=%v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("RefundMoneyDropHandler: Processing refund - DropID: %s, CreatorID: %s, Amount: %d", req.DropID, req.CreatorID, req.Amount)
+	log.Printf("level=info component=api endpoint=refund_money_drop msg=\"processing request\" drop_id=%s creator_id=%s amount=%d", req.DropID, req.CreatorID, req.Amount)
 
 	dropID, err := uuid.Parse(req.DropID)
 	if err != nil {
@@ -174,7 +174,7 @@ func (h *TransactionHandlers) RefundMoneyDropHandler(w http.ResponseWriter, r *h
 
 	// Process the refund
 	if err := h.service.RefundMoneyDrop(r.Context(), dropID, creatorID, req.Amount); err != nil {
-		log.Printf("Refund Money Drop: Service error: %v", err)
+		log.Printf("level=warn component=api endpoint=refund_money_drop outcome=failed drop_id=%s creator_id=%s err=%v", dropID, creatorID, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -185,14 +185,13 @@ func (c *Client) doTransfer(ctx context.Context, payload interface{}) (*Transfer
 		return nil, fmt.Errorf("failed to read transfer response: %w", err)
 	}
 
-	log.Printf("Anchor transfer response status: %d body: %s", resp.StatusCode, string(bodyBytes))
-
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var errResp ErrorResponse
 		if err := json.Unmarshal(bodyBytes, &errResp); err != nil {
-			log.Printf("Anchor transfer error body: %s", string(bodyBytes))
+			log.Printf("level=warn component=anchor_client op=transfer status=%d msg=\"non-2xx response (unparsable error body)\"", resp.StatusCode)
 			return nil, fmt.Errorf("failed to decode error response (status %d)", resp.StatusCode)
 		}
+		log.Printf("level=warn component=anchor_client op=transfer status=%d title=%q detail=%q", resp.StatusCode, firstErrorTitle(errResp), firstErrorDetail(errResp))
 		return nil, &errResp
 	}
 
@@ -207,8 +206,7 @@ func (c *Client) doTransfer(ctx context.Context, payload interface{}) (*Transfer
 // GetAccountBalance fetches the balance for a specific account from Anchor API.
 func (c *Client) GetAccountBalance(ctx context.Context, accountID string) (*BalanceResponse, error) {
 	url := c.BaseURL + "/api/v1/accounts/balance/" + accountID
-	fmt.Printf("Making Anchor API request to: %s\n", url)
-	
+
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create balance request: %w", err)
@@ -217,30 +215,44 @@ func (c *Client) GetAccountBalance(ctx context.Context, accountID string) (*Bala
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("x-anchor-key", c.APIKey)
 
-	fmt.Printf("Request headers: Accept=%s, x-anchor-key=%s\n", req.Header.Get("Accept"), req.Header.Get("x-anchor-key"))
-
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute balance request: %w", err)
 	}
 	defer resp.Body.Close()
-
-	fmt.Printf("Anchor API response status: %d\n", resp.StatusCode)
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read balance response: %w", err)
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var errResp ErrorResponse
-		if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		if err := json.Unmarshal(bodyBytes, &errResp); err != nil {
+			log.Printf("level=warn component=anchor_client op=get_balance account_id=%s status=%d msg=\"non-2xx response (unparsable error body)\"", accountID, resp.StatusCode)
 			return nil, fmt.Errorf("failed to decode error response (status %d)", resp.StatusCode)
 		}
-		fmt.Printf("Anchor API error response: %+v\n", errResp)
+		log.Printf("level=warn component=anchor_client op=get_balance account_id=%s status=%d title=%q detail=%q", accountID, resp.StatusCode, firstErrorTitle(errResp), firstErrorDetail(errResp))
 		return nil, &errResp
 	}
 
 	var balanceResp BalanceResponse
-	if err := json.NewDecoder(resp.Body).Decode(&balanceResp); err != nil {
+	if err := json.Unmarshal(bodyBytes, &balanceResp); err != nil {
 		return nil, fmt.Errorf("failed to decode balance response: %w", err)
 	}
 
-	fmt.Printf("Anchor API success response: %+v\n", balanceResp)
 	return &balanceResp, nil
+}
+
+func firstErrorTitle(resp ErrorResponse) string {
+	if len(resp.Errors) == 0 {
+		return ""
+	}
+	return resp.Errors[0].Title
+}
+
+func firstErrorDetail(resp ErrorResponse) string {
+	if len(resp.Errors) == 0 {
+		return ""
+	}
+	return resp.Errors[0].Detail
 }
