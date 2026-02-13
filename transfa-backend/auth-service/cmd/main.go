@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
@@ -24,6 +25,19 @@ import (
 	"github.com/transfa/auth-service/internal/store"
 	"github.com/transfa/auth-service/pkg/rabbitmq"
 )
+
+type onboardingState struct {
+	Status   string  `json:"status"`
+	Reason   *string `json:"reason,omitempty"`
+	NextStep string  `json:"next_step"`
+}
+
+type authSessionResponse struct {
+	Authenticated bool            `json:"authenticated"`
+	ClerkUserID   string          `json:"clerk_user_id"`
+	User          *domain.User    `json:"user,omitempty"`
+	Onboarding    onboardingState `json:"onboarding"`
+}
 
 func maskAMQPURLForLog(raw string) string {
 	trimmed := strings.TrimSpace(raw)
@@ -38,51 +52,44 @@ func maskAMQPURLForLog(raw string) string {
 }
 
 func main() {
-	// Load .env file for local development. In production, env vars are set directly.
 	if err := godotenv.Load(); err != nil {
 		log.Println("No .env file found, using environment variables")
 	}
 
-	// Load application configuration
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		log.Fatalf("cannot load config: %v", err)
 	}
 
-	// If a platform-provided PORT is set (e.g., Railway/Render), prefer it
 	if port := os.Getenv("PORT"); port != "" {
 		cfg.ServerPort = port
 	}
-	// Ensure we have a port fallback if neither env is set
 	if cfg.ServerPort == "" {
 		cfg.ServerPort = "8080"
 	}
 
-	// Establish database connection pool with better configuration
-	dbConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
-	if err != nil {
-		log.Fatalf("Unable to parse database URL: %v\n", err)
+	if strings.TrimSpace(cfg.ClerkJWKSURL) == "" && !cfg.AllowInsecureHeaderAuth {
+		log.Fatal("CLERK_JWKS_URL is required when ALLOW_INSECURE_HEADER_AUTH is false")
 	}
 
-	// Configure connection pool to prevent prepared statement conflict
+	dbConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("Unable to parse database URL: %v", err)
+	}
 	dbConfig.MaxConns = 10
 	dbConfig.MinConns = 2
 	dbConfig.MaxConnLifetime = 30 * time.Minute
 	dbConfig.MaxConnIdleTime = 5 * time.Minute
-
-	// Disable prepared statement caching to prevent conflicts
 	dbConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 
 	dbpool, err := pgxpool.NewWithConfig(context.Background(), dbConfig)
 	if err != nil {
-		log.Fatalf("Unable to connect to database: %v\n", err)
+		log.Fatalf("Unable to connect to database: %v", err)
 	}
 	defer dbpool.Close()
 	log.Println("Database connection established")
 
 	log.Printf("RABBITMQ_URL (masked)=%s", maskAMQPURLForLog(cfg.RabbitMQURL))
-
-	// Set up RabbitMQ producer with bounded dial timeout; allow nil on failure
 	var producer *rabbitmq.EventProducer
 	if p, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL); err != nil {
 		log.Printf("WARNING: Failed to connect to RabbitMQ at startup: %v. Continuing without MQ.", err)
@@ -93,241 +100,153 @@ func main() {
 		log.Println("RabbitMQ producer connected")
 	}
 
-	// Set up repository
 	userRepo := store.NewPostgresUserRepository(dbpool)
 
-	// Ensure required tables exist (idempotent)
-	if _, err := dbpool.Exec(context.Background(), `
-        CREATE TABLE IF NOT EXISTS onboarding_status (
-            user_id UUID NOT NULL,
-            stage TEXT NOT NULL,
-            status TEXT NOT NULL,
-            reason TEXT,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            PRIMARY KEY (user_id, stage)
-        );
-        CREATE TABLE IF NOT EXISTS accounts (
-            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-            user_id UUID NOT NULL,
-            anchor_account_id TEXT NOT NULL,
-            virtual_nuban TEXT,
-            account_type TEXT,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        );
-    `); err != nil {
-		log.Printf("Warning: failed ensuring tables (may already exist): %v", err)
+	if err := verifyRequiredSchema(context.Background(), dbpool); err != nil {
+		log.Fatalf("database schema validation failed: %v", err)
 	}
 
-	// Set up router and handlers
 	r := chi.NewRouter()
-	r.Use(middleware.Logger)    // Log API requests
-	r.Use(middleware.Recoverer) // Recover from panics
+	r.Use(middleware.RequestID)
+	r.Use(middleware.RealIP)
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+	r.Use(middleware.Timeout(30 * time.Second))
+	r.Use(securityHeadersMiddleware)
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins: parseAllowedOrigins(cfg.AllowedOrigins),
+		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
+		AllowedHeaders: []string{
+			"Accept",
+			"Authorization",
+			"Content-Type",
+			"X-Clerk-User-Id",
+			"X-User-Email",
+			"X-Request-ID",
+		},
+		ExposedHeaders:   []string{"X-Request-ID"},
+		AllowCredentials: false,
+		MaxAge:           300,
+	}))
 
-	// Create the onboarding handler with its dependencies
 	onboardingHandler := api.NewOnboardingHandler(userRepo, producer)
-
-	resolveUser := func(r *http.Request) (*domain.User, int, error) {
-		clerkUserID := strings.TrimSpace(r.Header.Get("X-Clerk-User-Id"))
-		if clerkUserID == "" {
-			return nil, http.StatusUnauthorized, errors.New("clerk user id missing")
-		}
-
-		existing, err := userRepo.FindByClerkUserID(r.Context(), clerkUserID)
-		if err == nil && existing != nil {
-			return existing, http.StatusOK, nil
-		}
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return nil, http.StatusInternalServerError, err
-		}
-
-		email := strings.TrimSpace(r.Header.Get("X-User-Email"))
-		if email == "" {
-			return nil, http.StatusNotFound, errors.New("user not found")
-		}
-
-		byEmail, emailErr := userRepo.FindByEmail(r.Context(), email)
-		if emailErr != nil {
-			if errors.Is(emailErr, pgx.ErrNoRows) {
-				return nil, http.StatusNotFound, emailErr
-			}
-			return nil, http.StatusInternalServerError, emailErr
-		}
-
-		if byEmail != nil && byEmail.ClerkUserID != clerkUserID {
-			if updateErr := userRepo.UpdateClerkUserID(r.Context(), byEmail.ID, clerkUserID); updateErr != nil {
-				log.Printf("WARN: Failed updating clerk_user_id for user %s: %v", byEmail.ID, updateErr)
-			} else {
-				byEmail.ClerkUserID = clerkUserID
-			}
-		}
-
-		return byEmail, http.StatusOK, nil
-	}
-
-	// Define routes
-	r.Post("/onboarding", onboardingHandler.ServeHTTP)
-	r.Post("/onboarding/tier2", onboardingHandler.HandleTier2)
-
-	r.Get("/onboarding/status", func(w http.ResponseWriter, r *http.Request) {
-		existing, statusCode, err := resolveUser(r)
-		if err != nil || existing == nil {
-			if statusCode == http.StatusUnauthorized {
-				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte("Unauthorized: Clerk User ID missing"))
-				return
-			}
-			if statusCode == http.StatusNotFound {
-				w.WriteHeader(http.StatusNotFound)
-				w.Write([]byte("User not found"))
-				return
-			}
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Failed to resolve user"))
-			return
-		}
-		// Derive a normalized, frontend-friendly status
-		// Priority: completed (has account) > tier2_pending > tier1_created/pending > new
-		status := "new"
-		var reason *string
-		if conn, err := dbpool.Acquire(r.Context()); err == nil {
-			defer conn.Release()
-
-			// 1) Completed if user has any account
-			var accountCount int
-			_ = conn.QueryRow(r.Context(), `SELECT COUNT(1) FROM accounts WHERE user_id = $1`, existing.ID).Scan(&accountCount)
-			if accountCount > 0 {
-				status = "completed"
-			} else {
-				// 2) Tier2 status
-				var t2 string
-				if err := conn.QueryRow(r.Context(), `SELECT status, reason FROM onboarding_status WHERE user_id = $1 AND stage = 'tier2'`, existing.ID).Scan(&t2, &reason); err != nil {
-					t2 = ""
-				}
-				if t2 != "" {
-					// Treat any presence of tier2 record as pending until account exists unless completed with account
-					status = "tier2_" + strings.ToLower(t2)
-					if t2 == "failed" || t2 == "error" {
-						status = "tier2_failed"
-					}
-					if t2 == "completed" {
-						status = "tier2_completed"
-					}
-				} else {
-					// 3) Tier1 status
-					var t1 string
-					_ = conn.QueryRow(r.Context(), `SELECT status, reason FROM onboarding_status WHERE user_id = $1 AND stage = 'tier1'`, existing.ID).Scan(&t1, &reason)
-					if t1 != "" {
-						switch t1 {
-						case "created":
-							status = "tier1_created"
-						case "pending", "processing":
-							status = "tier1_pending"
-						case "failed":
-							status = "tier1_failed"
-						default:
-							status = "tier1_" + t1
-						}
-					} else {
-						status = "new"
-					}
-				}
-			}
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		if reason != nil {
-			w.Write([]byte("{\"status\": \"" + status + "\", \"reason\": " + jsonString(*reason) + "}"))
-			return
-		}
-		w.Write([]byte("{\"status\": \"" + status + "\"}"))
+	authMiddleware := api.ClerkAuthMiddleware(api.AuthMiddlewareConfig{
+		JWKSURL:             cfg.ClerkJWKSURL,
+		ExpectedAudience:    cfg.ClerkAudience,
+		ExpectedIssuer:      cfg.ClerkIssuer,
+		AllowHeaderFallback: cfg.AllowInsecureHeaderAuth,
 	})
+
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("Auth service is healthy"))
+		writeJSON(w, http.StatusOK, map[string]string{"status": "healthy"})
 	})
 
-	// Endpoint to fetch the user's profile including username, email, and UUID
-	r.Get("/me/profile", func(w http.ResponseWriter, r *http.Request) {
-		existing, statusCode, err := resolveUser(r)
-		if err != nil || existing == nil {
-			if statusCode == http.StatusUnauthorized {
-				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte("Unauthorized: Clerk User ID missing"))
-				return
-			}
-			if statusCode == http.StatusNotFound {
-				w.WriteHeader(http.StatusNotFound)
-				w.Write([]byte("User not found"))
-				return
-			}
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Failed to resolve user"))
-			return
-		}
-		// Return user profile data
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(existing)
-	})
+	r.Group(func(r chi.Router) {
+		r.Use(authMiddleware)
+		r.Use(middleware.ThrottleBacklog(200, 200, 5*time.Second))
 
-	// Lightweight helper to fetch the user's primary account number (NUBAN) and bank name
-	r.Get("/me/primary-account", func(w http.ResponseWriter, r *http.Request) {
-		existing, statusCode, err := resolveUser(r)
-		if err != nil || existing == nil {
-			if statusCode == http.StatusUnauthorized {
-				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte("Unauthorized: Clerk User ID missing"))
+		r.Post("/onboarding", onboardingHandler.ServeHTTP)
+		r.Post("/onboarding/tier2", onboardingHandler.HandleTier2)
+
+		r.Get("/onboarding/status", func(w http.ResponseWriter, r *http.Request) {
+			existing, statusCode, err := resolveAuthenticatedUser(r, userRepo)
+			if err != nil || existing == nil {
+				writeError(w, statusCode, err)
 				return
 			}
-			if statusCode == http.StatusNotFound {
-				w.WriteHeader(http.StatusNotFound)
-				w.Write([]byte("User not found"))
+
+			status, reason, err := deriveOnboardingStatus(r.Context(), dbpool, existing.ID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
 				return
 			}
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Failed to resolve user"))
-			return
-		}
-		var accountNumber, bankName *string
-		if conn, err := dbpool.Acquire(r.Context()); err == nil {
-			defer conn.Release()
-			_ = conn.QueryRow(r.Context(), `SELECT virtual_nuban, bank_name FROM accounts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`, existing.ID).Scan(&accountNumber, &bankName)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		if accountNumber != nil {
-			response := map[string]interface{}{
-				"accountNumber": *accountNumber,
+
+			writeJSON(w, http.StatusOK, onboardingState{Status: status, Reason: reason, NextStep: mapNextStep(status)})
+		})
+
+		r.Get("/me/profile", func(w http.ResponseWriter, r *http.Request) {
+			existing, statusCode, err := resolveAuthenticatedUser(r, userRepo)
+			if err != nil || existing == nil {
+				writeError(w, statusCode, err)
+				return
 			}
-			if bankName != nil && *bankName != "" {
+			writeJSON(w, http.StatusOK, existing)
+		})
+
+		r.Get("/me/primary-account", func(w http.ResponseWriter, r *http.Request) {
+			existing, statusCode, err := resolveAuthenticatedUser(r, userRepo)
+			if err != nil || existing == nil {
+				writeError(w, statusCode, err)
+				return
+			}
+
+			accountNumber, bankName, err := getPrimaryAccount(r.Context(), dbpool, existing.ID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			if accountNumber == nil {
+				writeJSON(w, http.StatusOK, map[string]any{})
+				return
+			}
+
+			response := map[string]any{"accountNumber": *accountNumber}
+			if bankName != nil && strings.TrimSpace(*bankName) != "" {
 				response["bankName"] = *bankName
 			}
-			json.NewEncoder(w).Encode(response)
-		} else {
-			w.Write([]byte("{}"))
-		}
+			writeJSON(w, http.StatusOK, response)
+		})
+
+		r.Get("/auth/session", func(w http.ResponseWriter, r *http.Request) {
+			existing, statusCode, err := resolveAuthenticatedUser(r, userRepo)
+			if err != nil || existing == nil {
+				writeError(w, statusCode, err)
+				return
+			}
+
+			status, reason, err := deriveOnboardingStatus(r.Context(), dbpool, existing.ID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			clerkUserID, _ := api.GetClerkUserID(r.Context())
+			writeJSON(w, http.StatusOK, authSessionResponse{
+				Authenticated: true,
+				ClerkUserID:   clerkUserID,
+				User:          existing,
+				Onboarding: onboardingState{
+					Status:   status,
+					Reason:   reason,
+					NextStep: mapNextStep(status),
+				},
+			})
+		})
 	})
-	// Start the server
+
 	server := &http.Server{
-		Addr:    ":" + cfg.ServerPort,
-		Handler: r,
+		Addr:              ":" + cfg.ServerPort,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	go func() {
 		log.Printf("Server starting on port %s", cfg.ServerPort)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Could not start server: %s\n", err)
+			log.Fatalf("Could not start server: %s", err)
 		}
 	}()
 
-	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("Shutting down server...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
@@ -337,11 +256,264 @@ func main() {
 	log.Println("Server gracefully stopped")
 }
 
-// jsonString safely marshals a string to a JSON quoted string, falling back if needed.
-func jsonString(s string) string {
-	b, err := json.Marshal(s)
-	if err != nil {
-		return "\"" + strings.ReplaceAll(s, "\"", "\\\"") + "\""
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func parseAllowedOrigins(raw string) []string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return []string{"http://localhost:3000", "http://localhost:19006", "http://localhost:8081"}
 	}
-	return string(b)
+
+	parts := strings.Split(trimmed, ",")
+	origins := make([]string, 0, len(parts))
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value != "" {
+			origins = append(origins, value)
+		}
+	}
+
+	if len(origins) == 0 {
+		return []string{"*"}
+	}
+	return origins
+}
+
+func resolveAuthenticatedUser(r *http.Request, userRepo store.UserRepository) (*domain.User, int, error) {
+	clerkUserID, ok := api.GetClerkUserID(r.Context())
+	if !ok || strings.TrimSpace(clerkUserID) == "" {
+		return nil, http.StatusUnauthorized, errors.New("unauthorized")
+	}
+
+	existing, err := userRepo.FindByClerkUserID(r.Context(), clerkUserID)
+	if err == nil && existing != nil {
+		return existing, http.StatusOK, nil
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, http.StatusInternalServerError, err
+	}
+
+	email := strings.TrimSpace(r.Header.Get("X-User-Email"))
+	if email == "" {
+		return nil, http.StatusNotFound, errors.New("user not found")
+	}
+
+	byEmail, emailErr := userRepo.FindByEmail(r.Context(), email)
+	if emailErr != nil {
+		if errors.Is(emailErr, pgx.ErrNoRows) {
+			return nil, http.StatusNotFound, errors.New("user not found")
+		}
+		return nil, http.StatusInternalServerError, emailErr
+	}
+
+	if byEmail != nil && byEmail.ClerkUserID != clerkUserID {
+		if updateErr := userRepo.UpdateClerkUserID(r.Context(), byEmail.ID, clerkUserID); updateErr != nil {
+			log.Printf("WARN: Failed updating clerk_user_id for user %s: %v", byEmail.ID, updateErr)
+		} else {
+			byEmail.ClerkUserID = clerkUserID
+		}
+	}
+
+	return byEmail, http.StatusOK, nil
+}
+
+func deriveOnboardingStatus(
+	ctx context.Context,
+	dbpool *pgxpool.Pool,
+	userID string,
+) (string, *string, error) {
+	var accountCount int
+	if err := dbpool.QueryRow(ctx, `SELECT COUNT(1) FROM accounts WHERE user_id = $1`, userID).Scan(&accountCount); err != nil {
+		return "", nil, err
+	}
+	if accountCount > 0 {
+		return "completed", nil, nil
+	}
+
+	var reason *string
+	var tier2Status string
+	if err := dbpool.QueryRow(
+		ctx,
+		`SELECT status, reason FROM onboarding_status WHERE user_id = $1 AND stage = 'tier2'`,
+		userID,
+	).Scan(&tier2Status, &reason); err == nil {
+		t2 := strings.ToLower(strings.TrimSpace(tier2Status))
+		if t2 == "failed" || t2 == "error" {
+			return "tier2_failed", reason, nil
+		}
+		if t2 == "completed" {
+			return "tier2_completed", reason, nil
+		}
+		if t2 != "" {
+			return "tier2_" + t2, reason, nil
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, err
+	}
+
+	var tier1Status string
+	reason = nil
+	if err := dbpool.QueryRow(
+		ctx,
+		`SELECT status, reason FROM onboarding_status WHERE user_id = $1 AND stage = 'tier1'`,
+		userID,
+	).Scan(&tier1Status, &reason); err == nil {
+		t1 := strings.ToLower(strings.TrimSpace(tier1Status))
+		switch t1 {
+		case "created":
+			return "tier1_created", reason, nil
+		case "pending", "processing":
+			return "tier1_pending", reason, nil
+		case "failed":
+			return "tier1_failed", reason, nil
+		default:
+			if t1 != "" {
+				return "tier1_" + t1, reason, nil
+			}
+		}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, err
+	}
+
+	return "new", nil, nil
+}
+
+func mapNextStep(status string) string {
+	switch status {
+	case "completed":
+		return "app_tabs"
+	case "tier2_processing", "tier2_pending", "tier2_manual_review", "tier2_error", "tier2_failed", "tier2_completed", "tier1_created":
+		return "create_account"
+	default:
+		return "onboarding_form"
+	}
+}
+
+func getPrimaryAccount(ctx context.Context, dbpool *pgxpool.Pool, userID string) (*string, *string, error) {
+	var accountNumber *string
+	var bankName *string
+	err := dbpool.QueryRow(
+		ctx,
+		`SELECT virtual_nuban, bank_name FROM accounts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1`,
+		userID,
+	).Scan(&accountNumber, &bankName)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	return accountNumber, bankName, nil
+}
+
+func writeJSON(w http.ResponseWriter, statusCode int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func writeError(w http.ResponseWriter, statusCode int, err error) {
+	message := "Internal server error"
+	switch statusCode {
+	case http.StatusUnauthorized:
+		message = "Unauthorized"
+	case http.StatusNotFound:
+		message = "User not found"
+	case http.StatusBadRequest:
+		message = "Bad request"
+	case http.StatusConflict:
+		message = "Conflict"
+	}
+
+	if statusCode >= 500 {
+		log.Printf("Request failed with %d: %v", statusCode, err)
+	}
+
+	writeJSON(w, statusCode, map[string]string{"error": message})
+}
+
+func verifyRequiredSchema(ctx context.Context, dbpool *pgxpool.Pool) error {
+	requiredTables := []string{
+		"users",
+		"accounts",
+		"onboarding_status",
+	}
+
+	for _, tableName := range requiredTables {
+		exists, err := tableExists(ctx, dbpool, tableName)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return errors.New("missing table: public." + tableName + " (run DB migrations first)")
+		}
+	}
+
+	requiredColumnsByTable := map[string][]string{
+		"users":             {"id", "clerk_user_id", "email"},
+		"accounts":          {"user_id", "virtual_nuban", "bank_name"},
+		"onboarding_status": {"user_id", "stage", "status", "reason", "updated_at"},
+	}
+
+	for tableName, columns := range requiredColumnsByTable {
+		for _, columnName := range columns {
+			exists, err := columnExists(ctx, dbpool, tableName, columnName)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				return errors.New("missing column: public." + tableName + "." + columnName + " (run DB migrations first)")
+			}
+		}
+	}
+
+	return nil
+}
+
+func tableExists(ctx context.Context, dbpool *pgxpool.Pool, tableName string) (bool, error) {
+	var exists bool
+	err := dbpool.QueryRow(
+		ctx,
+		`SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.tables
+			WHERE table_schema = 'public' AND table_name = $1
+		)`,
+		tableName,
+	).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+func columnExists(
+	ctx context.Context,
+	dbpool *pgxpool.Pool,
+	tableName string,
+	columnName string,
+) (bool, error) {
+	var exists bool
+	err := dbpool.QueryRow(
+		ctx,
+		`SELECT EXISTS (
+			SELECT 1
+			FROM information_schema.columns
+			WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2
+		)`,
+		tableName,
+		columnName,
+	).Scan(&exists)
+	if err != nil {
+		return false, err
+	}
+	return exists, nil
 }

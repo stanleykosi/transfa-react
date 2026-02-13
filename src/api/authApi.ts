@@ -15,7 +15,7 @@
  */
 import { useMutation, type UseMutationOptions } from '@tanstack/react-query';
 import apiClient from './apiClient';
-import { OnboardingPayload, OnboardingResponse } from '@/types/api';
+import { AuthSessionResponse, OnboardingPayload, OnboardingResponse } from '@/types/api';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 
 /**
@@ -57,4 +57,13 @@ export const useOnboardingMutation = (
     mutationFn: onboardingMutation,
     ...(options || {}),
   });
+};
+
+/**
+ * Fetches authenticated session bootstrap data from auth-service.
+ * This endpoint is used after login to determine onboarding progression.
+ */
+export const fetchAuthSession = async (): Promise<AuthSessionResponse> => {
+  const { data } = await apiClient.get<AuthSessionResponse>('/auth/session');
+  return data;
 };

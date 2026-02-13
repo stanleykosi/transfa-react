@@ -40,6 +40,30 @@ export interface OnboardingResponse {
   anchor_customer_id?: string;
 }
 
+export interface AuthSessionOnboarding {
+  status: string;
+  reason?: string;
+  next_step: 'app_tabs' | 'onboarding_form' | 'create_account';
+}
+
+export interface AuthSessionResponse {
+  authenticated: boolean;
+  clerk_user_id: string;
+  user?: {
+    id: string;
+    clerk_user_id: string;
+    username: string;
+    email?: string;
+    phone_number?: string;
+    full_name?: string;
+    user_type: 'personal' | 'merchant';
+    allow_sending: boolean;
+    created_at: string;
+    updated_at: string;
+  };
+  onboarding: AuthSessionOnboarding;
+}
+
 // Represents a single beneficiary (external bank account).
 // This shape matches the response from the GET /beneficiaries endpoint.
 export interface Beneficiary {

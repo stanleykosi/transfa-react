@@ -1,134 +1,485 @@
-/**
- * @description
- * The Sign In screen utilizes Clerk's pre-built `<SignIn />` component to provide
- * a complete and secure authentication flow. This component handles all aspects
- * of the sign-in process, including UI for entering credentials, handling social
- * logins, and managing multi-factor authentication challenges.
- *
- * @dependencies
- * - @clerk/clerk-expo: Provides the `<SignIn />` component.
- * - @/components/ScreenWrapper: Ensures consistent screen layout with safe areas.
- * - @/constants/theme: Used for styling the container.
- *
- * @notes
- * - By using the pre-built component, we delegate the complexity of the auth UI
- *   to Clerk, reducing our code footprint and ensuring a robust implementation.
- * - After a successful sign-in, Clerk's context updates, and the `RootNavigator`
- *   will automatically transition the user to the main application stack (`AppStack`).
- */
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Alert, TouchableOpacity, Platform } from 'react-native';
-import { useSignIn } from '@/hooks/useSignIn';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Alert,
+  TouchableOpacity,
+  TextInput,
+  Pressable,
+  Platform,
+  KeyboardAvoidingView,
+  ScrollView,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as SecureStore from 'expo-secure-store';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import ScreenWrapper from '@/components/ScreenWrapper';
-import FormInput from '@/components/FormInput';
-import PrimaryButton from '@/components/PrimaryButton';
-import { SignIn as ClerkSignIn } from '@/components/ClerkComponents';
-import { theme } from '@/constants/theme';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+
+import { useSignIn } from '@/hooks/useSignIn';
+import { fetchAuthSession } from '@/api/authApi';
+import { AuthStackParamList } from '@/navigation/AuthStack';
+
+const REMEMBER_ME_KEY = 'auth.remember_me';
+const REMEMBERED_IDENTIFIER_KEY = 'auth.remembered_identifier';
+
+type AuthNavigation = NativeStackNavigationProp<AuthStackParamList, 'SignIn'>;
+
+const TransfaMark = () => {
+  return (
+    <View style={styles.logoMark}>
+      <View style={styles.logoSlash} />
+      <View style={styles.logoBottomMark} />
+    </View>
+  );
+};
 
 const SignInScreen = () => {
   const { signIn, setActive, isLoaded } = useSignIn();
-  const navigation = useNavigation();
-  const [emailAddress, setEmailAddress] = useState('');
+  const navigation = useNavigation<AuthNavigation>();
+
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isResetLoading, setIsResetLoading] = useState(false);
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
 
-  const onSignInPress = async () => {
-    if (!isLoaded) {
+  useEffect(() => {
+    let mounted = true;
+
+    const loadRememberedIdentity = async () => {
+      try {
+        const storedRememberMe = await loadStoredValue(REMEMBER_ME_KEY);
+        const enabled = storedRememberMe !== 'false';
+        const storedIdentifier = await loadStoredValue(REMEMBERED_IDENTIFIER_KEY);
+
+        if (!mounted) {
+          return;
+        }
+
+        setRememberMe(enabled);
+        if (enabled && storedIdentifier) {
+          setIdentifier(storedIdentifier);
+        }
+      } catch {
+        // Ignore storage failures. Login should still function.
+      }
+    };
+
+    loadRememberedIdentity();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const canSubmit = useMemo(
+    () => identifier.trim() !== '' && password.trim() !== '',
+    [identifier, password]
+  );
+
+  const persistRememberedIdentifier = async (value: string, shouldRemember: boolean) => {
+    await storeValue(REMEMBER_ME_KEY, shouldRemember ? 'true' : 'false');
+    if (shouldRemember) {
+      await storeValue(REMEMBERED_IDENTIFIER_KEY, value.trim());
       return;
     }
+    await deleteValue(REMEMBERED_IDENTIFIER_KEY);
+  };
+
+  const onSignInPress = async () => {
+    if (!isLoaded || !canSubmit) {
+      return;
+    }
+
     setIsLoading(true);
     try {
-      const completeSignIn = await signIn.create({ identifier: emailAddress, password });
-      if (completeSignIn.status === 'complete') {
-        await setActive({ session: completeSignIn.createdSessionId });
+      const completeSignIn = await signIn.create({
+        identifier: identifier.trim(),
+        password,
+      });
+
+      if (completeSignIn.status !== 'complete' || !completeSignIn.createdSessionId) {
+        Alert.alert('Sign in incomplete', 'Additional verification is required to continue.');
+        return;
+      }
+
+      await setActive({ session: completeSignIn.createdSessionId });
+      await persistRememberedIdentifier(identifier, rememberMe);
+
+      try {
+        await fetchAuthSession();
+      } catch (bootstrapError) {
+        console.warn('Auth bootstrap check failed after sign-in', bootstrapError);
       }
     } catch (err: any) {
-      Alert.alert('Error', err.errors?.[0]?.message || 'An error occurred during sign in');
+      Alert.alert(
+        'Login failed',
+        err?.errors?.[0]?.message || 'Unable to sign in with these credentials.'
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Use platform-specific SignIn component for web
-  if (Platform.OS === 'web') {
-    return (
-      <ScreenWrapper>
-        <View style={styles.container}>
-          <ClerkSignIn />
-        </View>
-      </ScreenWrapper>
-    );
-  }
+  const onForgotPasswordPress = async () => {
+    if (!isLoaded) {
+      return;
+    }
 
-  if (!isLoaded) {
-    return (
-      <ScreenWrapper>
-        <View style={styles.container}>
-          <Text>Loading...</Text>
-        </View>
-      </ScreenWrapper>
-    );
-  }
+    const trimmedIdentifier = identifier.trim();
+    if (!trimmedIdentifier) {
+      Alert.alert('Missing identifier', 'Enter your email, username, or phone number first.');
+      return;
+    }
+
+    setIsResetLoading(true);
+    try {
+      await signIn.create({
+        strategy: 'reset_password_email_code',
+        identifier: trimmedIdentifier,
+      } as any);
+
+      Alert.alert(
+        'Reset initiated',
+        'If your account exists, a password reset code has been sent.'
+      );
+    } catch (err: any) {
+      Alert.alert(
+        'Could not start reset',
+        err?.errors?.[0]?.message || 'Please verify your identifier and try again.'
+      );
+    } finally {
+      setIsResetLoading(false);
+    }
+  };
 
   return (
-    <ScreenWrapper>
-      <View style={styles.container}>
-        <Text style={styles.title}>Welcome Back</Text>
-        <FormInput
-          label="Email"
-          value={emailAddress}
-          onChangeText={setEmailAddress}
-          placeholder="Enter your email"
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
-        <FormInput
-          label="Password"
-          value={password}
-          onChangeText={setPassword}
-          placeholder="Enter your password"
-          secureTextEntry
-        />
-        <PrimaryButton title="Sign In" onPress={onSignInPress} isLoading={isLoading} />
-
-        <TouchableOpacity
-          style={styles.signUpLink}
-          onPress={() => navigation.navigate('SignUp' as never)}
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
+      <LinearGradient colors={['#242424', '#121212', '#060708']} style={styles.gradient}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.keyboardContainer}
         >
-          <Text style={styles.signUpText}>
-            Don't have an account? <Text style={styles.signUpLinkText}>Sign Up</Text>
-          </Text>
-        </TouchableOpacity>
-      </View>
-    </ScreenWrapper>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+          >
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => {
+                if (navigation.canGoBack()) {
+                  navigation.goBack();
+                }
+              }}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            <View style={styles.contentContainer}>
+              <TransfaMark />
+              <Text style={styles.title}>Login to Transfa</Text>
+              <Text style={styles.subtitle}>Hi! Welcome back</Text>
+
+              <View style={styles.formSection}>
+                <Text style={styles.label}>Username or Email or Phone number</Text>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="person-circle-outline" size={20} color="#9B9B9B" />
+                  <TextInput
+                    style={styles.textInput}
+                    value={identifier}
+                    onChangeText={setIdentifier}
+                    placeholder="Username or Email or Phone number"
+                    placeholderTextColor="#7E7E7E"
+                    autoCapitalize="none"
+                    keyboardType="default"
+                    textContentType="username"
+                    autoCorrect={false}
+                  />
+                </View>
+
+                <View style={styles.passwordLabelRow}>
+                  <Text style={styles.label}>Password</Text>
+                  <TouchableOpacity
+                    onPress={onForgotPasswordPress}
+                    activeOpacity={0.7}
+                    disabled={isResetLoading}
+                  >
+                    <Text style={styles.forgotPasswordText}>
+                      {isResetLoading ? 'Sending...' : 'Forgot Password?'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="lock-closed-outline" size={20} color="#9B9B9B" />
+                  <TextInput
+                    style={styles.textInput}
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder="Password"
+                    placeholderTextColor="#7E7E7E"
+                    autoCapitalize="none"
+                    secureTextEntry={!isPasswordVisible}
+                    textContentType="password"
+                  />
+                  <TouchableOpacity
+                    onPress={() => setIsPasswordVisible((prev) => !prev)}
+                    activeOpacity={0.7}
+                    style={styles.eyeButton}
+                  >
+                    <Ionicons
+                      name={isPasswordVisible ? 'eye-outline' : 'eye-off-outline'}
+                      size={20}
+                      color="#9B9B9B"
+                    />
+                  </TouchableOpacity>
+                </View>
+
+                <Pressable
+                  style={styles.rememberRow}
+                  onPress={() => setRememberMe((prev) => !prev)}
+                  accessibilityRole="checkbox"
+                  accessibilityState={{ checked: rememberMe }}
+                >
+                  <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
+                    {rememberMe && <Ionicons name="checkmark" size={12} color="#050505" />}
+                  </View>
+                  <Text style={styles.rememberText}>Remember Me</Text>
+                </Pressable>
+
+                <TouchableOpacity
+                  style={[
+                    styles.loginButton,
+                    (!canSubmit || isLoading) && styles.loginButtonDisabled,
+                  ]}
+                  onPress={onSignInPress}
+                  activeOpacity={0.85}
+                  disabled={!canSubmit || isLoading}
+                >
+                  <Text style={styles.loginButtonText}>
+                    {isLoading ? 'Logging in...' : 'Log In'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.signUpRow}
+                  onPress={() => navigation.navigate('SignUp')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.signUpText}>
+                    Do not have an account? <Text style={styles.signUpAccent}>Sign Up</Text>
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </LinearGradient>
+    </SafeAreaView>
   );
 };
 
+const storeValue = async (key: string, value: string) => {
+  if (Platform.OS === 'web') {
+    const localStorageRef = (globalThis as any)?.localStorage;
+    if (localStorageRef) {
+      localStorageRef.setItem(key, value);
+    }
+    return;
+  }
+  await SecureStore.setItemAsync(key, value);
+};
+
+const loadStoredValue = async (key: string): Promise<string | null> => {
+  if (Platform.OS === 'web') {
+    const localStorageRef = (globalThis as any)?.localStorage;
+    if (!localStorageRef) {
+      return null;
+    }
+    return localStorageRef.getItem(key);
+  }
+  return SecureStore.getItemAsync(key);
+};
+
+const deleteValue = async (key: string) => {
+  if (Platform.OS === 'web') {
+    const localStorageRef = (globalThis as any)?.localStorage;
+    if (localStorageRef) {
+      localStorageRef.removeItem(key);
+    }
+    return;
+  }
+  await SecureStore.deleteItemAsync(key);
+};
+
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
-    justifyContent: 'center',
+    backgroundColor: '#0A0A0A',
+  },
+  gradient: {
+    flex: 1,
+  },
+  keyboardContainer: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: 24,
+    paddingTop: 8,
+    paddingBottom: 24,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
-    paddingHorizontal: theme.spacing.s24,
+    justifyContent: 'center',
+    marginTop: 6,
+  },
+  contentContainer: {
+    flex: 1,
+    alignItems: 'center',
+    paddingTop: 40,
+  },
+  logoMark: {
+    width: 42,
+    height: 20,
+    borderRadius: 3,
+    backgroundColor: '#FFD300',
+    marginBottom: 16,
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
+  },
+  logoSlash: {
+    position: 'absolute',
+    width: 60,
+    height: 11,
+    backgroundColor: '#0A0A0A',
+    transform: [{ rotate: '-12deg' }],
+    top: 4,
+    right: -17,
+  },
+  logoBottomMark: {
+    width: 8,
+    height: 6,
+    borderTopLeftRadius: 1,
+    borderTopRightRadius: 1,
+    backgroundColor: '#0A0A0A',
+    alignSelf: 'center',
+    marginBottom: 2,
   },
   title: {
-    fontSize: theme.fontSizes['2xl'],
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.s16,
+    color: '#F4F4F4',
+    fontSize: 38,
+    fontWeight: '700',
+    letterSpacing: -0.5,
   },
-  signUpLink: {
-    marginTop: theme.spacing.s24,
+  subtitle: {
+    color: '#6E6E6E',
+    fontSize: 30,
+    fontWeight: '500',
+    marginTop: 4,
+  },
+  formSection: {
+    width: '100%',
+    marginTop: 56,
+  },
+  label: {
+    color: '#D7D7D7',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 10,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(79, 79, 79, 0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 8,
+    minHeight: 48,
+    paddingHorizontal: 12,
+    marginBottom: 18,
+  },
+  textInput: {
+    flex: 1,
+    color: '#E9E9E9',
+    fontSize: 15,
+    marginLeft: 10,
+    paddingVertical: Platform.OS === 'ios' ? 12 : 8,
+  },
+  passwordLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  forgotPasswordText: {
+    color: '#D2B108',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  eyeButton: {
+    paddingLeft: 8,
+    paddingVertical: 4,
+  },
+  rememberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  checkbox: {
+    width: 15,
+    height: 15,
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: '#FFD300',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#FFD300',
+  },
+  rememberText: {
+    color: '#CDCDCD',
+    marginLeft: 10,
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  loginButton: {
+    marginTop: 24,
+    backgroundColor: '#FFD300',
+    borderRadius: 8,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loginButtonDisabled: {
+    opacity: 0.6,
+  },
+  loginButtonText: {
+    color: '#121212',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  signUpRow: {
+    marginTop: 20,
     alignItems: 'center',
   },
   signUpText: {
-    fontSize: theme.fontSizes.base,
-    color: theme.colors.textSecondary,
+    color: '#C5C5C5',
+    fontSize: 15,
+    fontWeight: '500',
   },
-  signUpLinkText: {
-    color: theme.colors.primary,
-    fontWeight: theme.fontWeights.semibold,
+  signUpAccent: {
+    color: '#D2B108',
+    fontWeight: '700',
   },
 });
 

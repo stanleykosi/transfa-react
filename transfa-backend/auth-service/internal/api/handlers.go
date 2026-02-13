@@ -26,9 +26,9 @@ func NewOnboardingHandler(repo store.UserRepository, producer *rabbitmq.EventPro
 
 // HandleTier2 receives BVN/DOB/Gender and records onboarding_status (tier2 -> pending). Returns 202.
 func (h *OnboardingHandler) HandleTier2(w http.ResponseWriter, r *http.Request) {
-	clerkUserID := r.Header.Get("X-Clerk-User-Id")
-	if clerkUserID == "" {
-		http.Error(w, "Unauthorized: Clerk User ID missing", http.StatusUnauthorized)
+	clerkUserID, ok := GetClerkUserID(r.Context())
+	if !ok || strings.TrimSpace(clerkUserID) == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 	existing, err := h.repo.FindByClerkUserID(r.Context(), clerkUserID)
@@ -108,11 +108,9 @@ func (h *OnboardingHandler) HandleTier2(w http.ResponseWriter, r *http.Request) 
 
 // ServeHTTP implements the http.Handler interface.
 func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// The API Gateway is expected to validate the JWT and pass the Clerk User ID.
-	// For this implementation, we assume it's in a header like "X-Clerk-User-Id".
-	clerkUserID := r.Header.Get("X-Clerk-User-Id")
-	if clerkUserID == "" {
-		http.Error(w, "Unauthorized: Clerk User ID missing", http.StatusUnauthorized)
+	clerkUserID, ok := GetClerkUserID(r.Context())
+	if !ok || strings.TrimSpace(clerkUserID) == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 

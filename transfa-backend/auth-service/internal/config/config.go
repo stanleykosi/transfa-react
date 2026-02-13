@@ -10,9 +10,14 @@ import (
 // Config stores all configuration for the application.
 // The values are read by viper from a config file or environment variables.
 type Config struct {
-	ServerPort  string `mapstructure:"SERVER_PORT"`
-	DatabaseURL string `mapstructure:"DATABASE_URL"`
-	RabbitMQURL string `mapstructure:"RABBITMQ_URL"`
+	ServerPort              string `mapstructure:"SERVER_PORT"`
+	DatabaseURL             string `mapstructure:"DATABASE_URL"`
+	RabbitMQURL             string `mapstructure:"RABBITMQ_URL"`
+	ClerkJWKSURL            string `mapstructure:"CLERK_JWKS_URL"`
+	ClerkAudience           string `mapstructure:"CLERK_AUDIENCE"`
+	ClerkIssuer             string `mapstructure:"CLERK_ISSUER"`
+	AllowedOrigins          string `mapstructure:"ALLOWED_ORIGINS"`
+	AllowInsecureHeaderAuth bool   `mapstructure:"ALLOW_INSECURE_HEADER_AUTH"`
 }
 
 // LoadConfig reads configuration from file or environment variables.
@@ -33,6 +38,11 @@ func LoadConfig() (config Config, err error) {
 	_ = viper.BindEnv("SERVER_PORT")
 	_ = viper.BindEnv("DATABASE_URL")
 	_ = viper.BindEnv("RABBITMQ_URL")
+	_ = viper.BindEnv("CLERK_JWKS_URL")
+	_ = viper.BindEnv("CLERK_AUDIENCE")
+	_ = viper.BindEnv("CLERK_ISSUER")
+	_ = viper.BindEnv("ALLOWED_ORIGINS")
+	_ = viper.BindEnv("ALLOW_INSECURE_HEADER_AUTH")
 
 	// Read the config file (optional)
 	err = viper.ReadInConfig()

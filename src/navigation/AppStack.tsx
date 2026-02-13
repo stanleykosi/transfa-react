@@ -21,7 +21,7 @@ import React, { useEffect, useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigatorScreenParams } from '@react-navigation/native';
 import { View, ActivityIndicator } from 'react-native';
-import { useAuth, useUser } from '@clerk/clerk-expo';
+import { useUser } from '@clerk/clerk-expo';
 
 import AppTabs, { AppTabsParamList } from './AppTabs';
 import OnboardingFormScreen from '@/screens/Onboarding/OnboardingFormScreen';
@@ -34,7 +34,7 @@ import PaymentRequestsListScreen from '@/screens/PaymentRequests/PaymentRequests
 import CreateDropWizardScreen from '@/screens/MoneyDrop/CreateDropWizardScreen';
 import MoneyDropSuccessScreen from '@/screens/MoneyDrop/MoneyDropSuccessScreen';
 import ClaimDropScreen from '@/screens/MoneyDrop/ClaimDropScreen';
-import apiClient from '@/api/apiClient';
+import { fetchAuthSession } from '@/api/authApi';
 import { theme } from '@/constants/theme';
 
 // Define the parameter list for the AppStack routes for type safety.
@@ -67,7 +67,6 @@ export type AppStackParamList = {
 const Stack = createNativeStackNavigator<AppStackParamList>();
 
 const AppStack = () => {
-  const { getToken } = useAuth();
   const { user } = useUser();
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
   const [initialRoute, setInitialRoute] = useState<'AppTabs' | 'OnboardingForm' | 'CreateAccount'>(
@@ -81,30 +80,15 @@ const AppStack = () => {
       }
 
       try {
-        const token = await getToken().catch(() => undefined);
-        const { data } = await apiClient.get<{ status: string }>('/onboarding/status', {
-          headers: {
-            'X-Clerk-User-Id': user.id,
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        });
-
-        switch (data?.status) {
-          case 'completed':
+        const session = await fetchAuthSession();
+        switch (session?.onboarding?.next_step) {
+          case 'app_tabs':
             setInitialRoute('AppTabs');
             break;
-          case 'tier2_processing':
-          case 'tier2_pending':
-          case 'tier2_manual_review':
-          case 'tier2_error':
-          case 'tier2_failed':
-          case 'tier2_completed':
-          case 'tier1_created':
+          case 'create_account':
             setInitialRoute('CreateAccount');
             break;
-          case 'tier1_pending':
-          case 'tier1_processing':
-          case 'new':
+          case 'onboarding_form':
           default:
             setInitialRoute('OnboardingForm');
             break;
@@ -123,7 +107,7 @@ const AppStack = () => {
     };
 
     checkUserStatus();
-  }, [user?.id, getToken]);
+  }, [user?.id]);
 
   // Show loading while checking status
   if (isCheckingStatus) {
