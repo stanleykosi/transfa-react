@@ -22,6 +22,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigatorScreenParams } from '@react-navigation/native';
 import { View, ActivityIndicator } from 'react-native';
 import { useUser } from '@clerk/clerk-expo';
+import type { UserDiscoveryResult } from '@/types/api';
 
 import AppTabs, { AppTabsParamList } from './AppTabs';
 import OnboardingFormScreen from '@/screens/Onboarding/OnboardingFormScreen';
@@ -35,6 +36,7 @@ import UserSearchScreen from '@/screens/Home/UserSearchScreen';
 import PayUserScreen from '@/screens/PaymentFlow/PayUserScreen';
 import SelfTransferScreen from '@/screens/PaymentFlow/SelfTransferScreen';
 import TransferStatusScreen from '@/screens/PaymentFlow/TransferStatusScreen';
+import MultiReceiptScreen from '@/screens/PaymentFlow/MultiReceiptScreen';
 import CreateRequestScreen from '@/screens/PaymentRequests/CreateRequestScreen';
 import PaymentRequestSuccessScreen from '@/screens/PaymentRequests/PaymentRequestSuccessScreen';
 import PaymentRequestsListScreen from '@/screens/PaymentRequests/PaymentRequestsListScreen';
@@ -64,7 +66,11 @@ export type AppStackParamList = {
     reason?: string;
   };
   UserSearch: undefined;
-  PayUser: undefined;
+  PayUser:
+    | {
+        initialRecipient?: UserDiscoveryResult;
+      }
+    | undefined;
   SelfTransfer: undefined;
   TransferStatus: {
     transactionId: string;
@@ -75,6 +81,21 @@ export type AppStackParamList = {
     transferType?: string;
     initialStatus?: 'pending' | 'failed';
     failureReason?: string;
+  };
+  MultiTransferReceipts: {
+    receipts: Array<{
+      transactionId: string;
+      amount: number;
+      fee: number;
+      description: string;
+      recipientUsername: string;
+    }>;
+    failures?: Array<{
+      recipient_username: string;
+      amount: number;
+      description: string;
+      error: string;
+    }>;
   };
   PaymentRequestsList: undefined; // New screen for viewing payment request history
   CreatePaymentRequest: undefined;
@@ -222,6 +243,11 @@ const AppStack = () => {
       <Stack.Screen
         name="TransferStatus"
         component={TransferStatusScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="MultiTransferReceipts"
+        component={MultiReceiptScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen

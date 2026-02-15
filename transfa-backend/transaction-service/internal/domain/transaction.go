@@ -51,6 +51,63 @@ type P2PTransferRequest struct {
 	TransactionPIN    string `json:"transaction_pin"`
 }
 
+// BulkP2PTransferRequest is the DTO for initiating multiple P2P transfers in one request.
+type BulkP2PTransferRequest struct {
+	Transfers      []BulkP2PTransferItem `json:"transfers"`
+	TransactionPIN string                `json:"transaction_pin"`
+}
+
+// BulkP2PTransferItem represents one recipient transfer instruction within a bulk request.
+type BulkP2PTransferItem struct {
+	RecipientUsername string `json:"recipient_username"`
+	Amount            int64  `json:"amount"` // in kobo
+	Description       string `json:"description"`
+}
+
+// BulkP2PTransferFailure captures a failed transfer item and reason.
+type BulkP2PTransferFailure struct {
+	RecipientUsername string `json:"recipient_username"`
+	Amount            int64  `json:"amount"`
+	Description       string `json:"description"`
+	Error             string `json:"error"`
+}
+
+// BulkP2PTransferResult summarizes successful and failed transfers for a batch.
+type BulkP2PTransferResult struct {
+	BatchID    uuid.UUID
+	Successful []*Transaction
+	Failed     []BulkP2PTransferFailure
+}
+
+// TransferBatch captures aggregate processing state for a bulk transfer request.
+type TransferBatch struct {
+	ID             uuid.UUID `json:"id"`
+	SenderID       uuid.UUID `json:"sender_id"`
+	Status         string    `json:"status"`
+	RequestedCount int       `json:"requested_count"`
+	SuccessCount   int       `json:"success_count"`
+	FailureCount   int       `json:"failure_count"`
+	TotalAmount    int64     `json:"total_amount"`
+	TotalFee       int64     `json:"total_fee"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// TransferBatchItem captures processing state for one recipient within a batch.
+type TransferBatchItem struct {
+	ID                uuid.UUID  `json:"id"`
+	BatchID           uuid.UUID  `json:"batch_id"`
+	RecipientUsername string     `json:"recipient_username"`
+	Amount            int64      `json:"amount"`
+	Description       string     `json:"description"`
+	Status            string     `json:"status"`
+	Fee               int64      `json:"fee"`
+	TransactionID     *uuid.UUID `json:"transaction_id,omitempty"`
+	FailureReason     *string    `json:"failure_reason,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+}
+
 // SelfTransferRequest is the DTO for incoming self-transfer (withdrawal) API requests.
 type SelfTransferRequest struct {
 	BeneficiaryID  uuid.UUID `json:"beneficiary_id"`

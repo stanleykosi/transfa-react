@@ -19,6 +19,7 @@ import { useAccountBalance, useTransactionHistory, useUserProfile } from '@/api/
 import { useFrequentUsers } from '@/api/userDiscoveryApi';
 import { formatCurrency } from '@/utils/formatCurrency';
 import type { TransactionHistoryItem, UserDiscoveryResult } from '@/types/api';
+import type { AppNavigationProp } from '@/types/navigation';
 
 const BRAND_YELLOW = '#FFD300';
 const BG_BOTTOM = '#050607';
@@ -27,8 +28,11 @@ const CARD_BORDER = 'rgba(255,255,255,0.06)';
 
 const avatarPalette = ['#ABABFD', '#A8E6B5', '#F4CE9B', '#F3ABA7', '#BDE3FF', '#FFDCC0'];
 
+const stripUsernamePrefix = (username?: string | null): string =>
+  (username ?? 'new_user').replace(/^_+/, '');
+
 const HomeScreen = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<AppNavigationProp>();
 
   const [refreshing, setRefreshing] = useState(false);
   const [isBalanceHidden, setIsBalanceHidden] = useState(false);
@@ -39,11 +43,11 @@ const HomeScreen = () => {
       PanResponder.create({
         onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 8,
         onPanResponderRelease: (_, gestureState) => {
-          if (gestureState.dy < -32) {
+          if (gestureState.dy < -24) {
             setIsExpandedHistory(true);
             return;
           }
-          if (gestureState.dy > 32) {
+          if (gestureState.dy > 24) {
             setIsExpandedHistory(false);
           }
         },
@@ -99,6 +103,8 @@ const HomeScreen = () => {
     );
   }
 
+  const username = stripUsernamePrefix(userProfile?.username);
+
   return (
     <View style={styles.root}>
       <LinearGradient
@@ -122,21 +128,21 @@ const HomeScreen = () => {
           <View style={styles.headerRow}>
             <View style={styles.userIdentityRow}>
               <View style={styles.avatarSquare}>
-                <Ionicons name="person" size={24} color="#0D0E10" />
+                <Ionicons name="person" size={16} color="#0D0E10" />
               </View>
 
               <View>
                 <Text style={styles.welcomeText}>Welcome back</Text>
-                <Text style={styles.usernameText}>_{userProfile?.username ?? 'new_user'}</Text>
+                <Text style={styles.usernameText}>{username}</Text>
               </View>
             </View>
 
             <View style={styles.headerActions}>
               <TouchableOpacity style={styles.headerIconButton} activeOpacity={0.8}>
-                <Ionicons name="wallet-outline" size={20} color="#F2F2F2" />
+                <Ionicons name="wallet-outline" size={18} color="#F2F2F2" />
               </TouchableOpacity>
               <TouchableOpacity style={styles.headerIconButton} activeOpacity={0.8}>
-                <Ionicons name="notifications-outline" size={20} color="#F2F2F2" />
+                <Ionicons name="notifications-outline" size={18} color="#F2F2F2" />
               </TouchableOpacity>
             </View>
           </View>
@@ -157,7 +163,7 @@ const HomeScreen = () => {
               >
                 <Ionicons
                   name={isBalanceHidden ? 'eye-outline' : 'eye-off-outline'}
-                  size={20}
+                  size={18}
                   color="#CECECE"
                 />
               </TouchableOpacity>
@@ -168,13 +174,13 @@ const HomeScreen = () => {
             <ActionCard
               icon="arrow-up-outline"
               title="Send"
-              onPress={() => navigation.navigate('PayUser' as never)}
+              onPress={() => navigation.navigate('PayUser')}
             />
             <ActionCard icon="scan-outline" title="Scan" onPress={() => {}} />
             <ActionCard
               icon="arrow-down-outline"
               title="Receive"
-              onPress={() => navigation.navigate('CreatePaymentRequest' as never)}
+              onPress={() => navigation.navigate('CreatePaymentRequest')}
             />
           </View>
 
@@ -184,9 +190,9 @@ const HomeScreen = () => {
             <TouchableOpacity
               activeOpacity={0.8}
               style={styles.searchPill}
-              onPress={() => navigation.navigate('UserSearch' as never)}
+              onPress={() => navigation.navigate('UserSearch')}
             >
-              <Ionicons name="search" size={17} color="#D7D7D7" />
+              <Ionicons name="search" size={15} color="#D7D7D7" />
               <Text style={styles.searchPillText}>Search</Text>
             </TouchableOpacity>
           </View>
@@ -199,10 +205,10 @@ const HomeScreen = () => {
             <TouchableOpacity
               activeOpacity={0.8}
               style={styles.listChip}
-              onPress={() => navigation.navigate('UserSearch' as never)}
+              onPress={() => navigation.navigate('UserSearch')}
             >
               <View style={styles.listChipIconWrap}>
-                <Ionicons name="list-outline" size={22} color="#F4F4F4" />
+                <Ionicons name="list-outline" size={16} color="#F4F4F4" />
               </View>
               <Text style={styles.listChipLabel}>List</Text>
             </TouchableOpacity>
@@ -219,7 +225,7 @@ const HomeScreen = () => {
                     key={user.id}
                     user={user}
                     color={avatarPalette[index % avatarPalette.length]}
-                    onPress={() => navigation.navigate('PayUser' as never)}
+                    onPress={() => navigation.navigate('PayUser', { initialRecipient: user })}
                   />
                 ))}
           </ScrollView>
@@ -286,7 +292,7 @@ const ActionCard = ({
   onPress: () => void;
 }) => (
   <TouchableOpacity activeOpacity={0.85} style={styles.actionCard} onPress={onPress}>
-    <Ionicons name={icon} size={22} color="#F4F4F4" />
+    <Ionicons name={icon} size={18} color="#F4F4F4" />
     <Text style={styles.actionCardText}>{title}</Text>
   </TouchableOpacity>
 );
@@ -300,7 +306,7 @@ const FrequentUserChip = ({
   color: string;
   onPress: () => void;
 }) => {
-  const label = user.username.startsWith('_') ? user.username : `_${user.username}`;
+  const label = stripUsernamePrefix(user.username);
 
   return (
     <TouchableOpacity style={styles.userChip} activeOpacity={0.8} onPress={onPress}>
@@ -341,7 +347,7 @@ const TransactionHistoryCard = ({
     <View style={styles.historyItemCard}>
       <View style={styles.historyItemLeft}>
         <View style={styles.historyIconWrap}>
-          <Ionicons name={iconName} size={17} color={BRAND_YELLOW} />
+          <Ionicons name={iconName} size={14} color={BRAND_YELLOW} />
         </View>
         <View style={styles.historyItemTextWrap}>
           <Text style={styles.historyItemTitle} numberOfLines={1}>
@@ -385,14 +391,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   loadingText: {
-    marginTop: 12,
+    marginTop: 10,
     color: '#F1F1F1',
-    fontSize: 14,
+    fontSize: 13,
   },
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 8,
-    paddingBottom: 330,
+    paddingBottom: 280,
     backgroundColor: BG_BOTTOM,
   },
   headerRow: {
@@ -406,21 +412,21 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   avatarSquare: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+    width: 38,
+    height: 38,
+    borderRadius: 10,
     backgroundColor: '#F4DDB5',
     alignItems: 'center',
     justifyContent: 'center',
   },
   welcomeText: {
     color: '#8A8B8D',
-    fontSize: 19,
+    fontSize: 13,
   },
   usernameText: {
-    marginTop: 2,
+    marginTop: 1,
     color: '#F4F4F4',
-    fontSize: 29,
+    fontSize: 17,
     fontWeight: '700',
   },
   headerActions: {
@@ -433,61 +439,61 @@ const styles = StyleSheet.create({
   },
   balanceWrap: {
     alignItems: 'center',
-    marginTop: 26,
+    marginTop: 20,
   },
   balanceLabel: {
     color: '#B2B2B3',
-    fontSize: 14,
-    letterSpacing: 1,
+    fontSize: 13,
+    letterSpacing: 0.6,
   },
   balanceRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 6,
+    marginTop: 5,
   },
   balanceAmount: {
     color: '#F8F8F8',
-    fontSize: 45,
+    fontSize: 40,
     fontWeight: '700',
   },
   eyeButton: {
     marginLeft: 8,
-    marginTop: 4,
+    marginTop: 3,
     padding: 6,
   },
   primaryActionRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 26,
+    marginTop: 24,
   },
   actionCard: {
     width: '31.5%',
-    borderRadius: 20,
+    borderRadius: 16,
     backgroundColor: CARD_BG,
     borderWidth: 1,
     borderColor: CARD_BORDER,
     alignItems: 'center',
-    paddingVertical: 18,
-    gap: 10,
+    paddingVertical: 14,
+    gap: 7,
   },
   actionCardText: {
     color: '#EDEDED',
-    fontSize: 21,
+    fontSize: 15,
     fontWeight: '500',
   },
   findUsersHeader: {
-    marginTop: 28,
+    marginTop: 24,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
   findUsersTitle: {
     color: '#EDEDED',
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '500',
   },
   searchPill: {
-    height: 39,
+    height: 36,
     borderRadius: 12,
     backgroundColor: CARD_BG,
     borderWidth: 1,
@@ -495,11 +501,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
+    gap: 6,
   },
   searchPillText: {
     color: '#D5D5D6',
-    fontSize: 22,
+    fontSize: 16,
   },
   userChipsRow: {
     marginTop: 14,
@@ -507,13 +513,13 @@ const styles = StyleSheet.create({
     paddingRight: 18,
   },
   listChip: {
-    width: 72,
+    width: 62,
     alignItems: 'center',
   },
   listChipIconWrap: {
-    width: 60,
-    height: 60,
-    borderRadius: 20,
+    width: 52,
+    height: 52,
+    borderRadius: 16,
     backgroundColor: CARD_BG,
     borderWidth: 1,
     borderColor: CARD_BORDER,
@@ -521,49 +527,49 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   listChipLabel: {
-    marginTop: 8,
+    marginTop: 7,
     color: '#EDEDED',
-    fontSize: 29,
+    fontSize: 12,
     fontWeight: '700',
   },
   loadingUserChip: {
-    width: 72,
+    width: 62,
     alignItems: 'center',
   },
   loadingAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 20,
+    width: 52,
+    height: 52,
+    borderRadius: 16,
     backgroundColor: 'rgba(255,255,255,0.2)',
   },
   loadingTextBar: {
-    width: 54,
-    height: 9,
-    borderRadius: 5,
+    width: 44,
+    height: 8,
+    borderRadius: 4,
     marginTop: 8,
     backgroundColor: 'rgba(255,255,255,0.12)',
   },
   userChip: {
-    width: 72,
+    width: 62,
     alignItems: 'center',
   },
   userAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 20,
+    width: 52,
+    height: 52,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   userAvatarInitial: {
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: '700',
     color: '#121212',
   },
   userChipLabel: {
-    marginTop: 8,
+    marginTop: 7,
     color: '#EDEDED',
-    fontSize: 18,
-    maxWidth: 72,
+    fontSize: 12,
+    maxWidth: 62,
   },
   overlayDimmer: {
     ...StyleSheet.absoluteFillObject,
@@ -574,14 +580,14 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    minHeight: 280,
-    maxHeight: 360,
+    minHeight: 258,
+    maxHeight: 340,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     backgroundColor: '#F8F8F8',
     paddingHorizontal: 18,
     paddingTop: 10,
-    paddingBottom: 106,
+    paddingBottom: 96,
   },
   historySheetExpanded: {
     maxHeight: 710,
@@ -606,7 +612,7 @@ const styles = StyleSheet.create({
   },
   historyTitle: {
     color: '#424347',
-    fontSize: 24,
+    fontSize: 21,
     fontWeight: '500',
   },
   showAllButton: {
@@ -617,7 +623,7 @@ const styles = StyleSheet.create({
   },
   showAllButtonText: {
     color: '#424347',
-    fontSize: 19,
+    fontSize: 16,
     fontWeight: '500',
   },
   historyLoadingWrap: {
@@ -632,13 +638,13 @@ const styles = StyleSheet.create({
     color: '#777',
   },
   historyList: {
-    gap: 12,
+    gap: 10,
     paddingBottom: 18,
   },
   historyItemCard: {
     backgroundColor: '#E8E8E9',
     borderRadius: 12,
-    padding: 12,
+    padding: 11,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -651,8 +657,8 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   historyIconWrap: {
-    width: 32,
-    height: 32,
+    width: 28,
+    height: 28,
     borderRadius: 8,
     backgroundColor: '#101214',
     justifyContent: 'center',
@@ -662,18 +668,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   historyItemTitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#36373B',
     fontWeight: '600',
   },
   historyItemSubText: {
-    marginTop: 2,
-    fontSize: 12,
+    marginTop: 1,
+    fontSize: 11,
     color: '#5D5E61',
   },
   historyAmountText: {
     color: '#36373B',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '500',
   },
 });

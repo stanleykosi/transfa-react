@@ -13,9 +13,12 @@ import { useNavigation } from '@react-navigation/native';
 
 import { useUserSearch } from '@/api/userDiscoveryApi';
 import type { UserDiscoveryResult } from '@/types/api';
+import type { AppNavigationProp } from '@/types/navigation';
+
+const cleanUsername = (value: string) => value.replace(/^_+/, '');
 
 const UserSearchScreen = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<AppNavigationProp>();
   const [searchQuery, setSearchQuery] = useState('');
 
   const normalizedQuery = useMemo(() => searchQuery.trim(), [searchQuery]);
@@ -32,11 +35,11 @@ const UserSearchScreen = () => {
           accessibilityRole="button"
           accessibilityLabel="Go back"
         >
-          <Ionicons name="arrow-back" size={24} color="#EDEDED" />
+          <Ionicons name="arrow-back" size={22} color="#EDEDED" />
         </TouchableOpacity>
 
         <View style={styles.searchWrap}>
-          <Ionicons name="search" size={19} color="#EDEDED" />
+          <Ionicons name="search" size={17} color="#EDEDED" />
           <TextInput
             style={styles.searchInput}
             value={searchQuery}
@@ -62,7 +65,7 @@ const UserSearchScreen = () => {
               <UserResultCard
                 key={user.id}
                 user={user}
-                onPress={() => navigation.navigate('PayUser' as never)}
+                onPress={() => navigation.navigate('PayUser', { initialRecipient: user })}
               />
             ))}
           </View>
@@ -74,7 +77,8 @@ const UserSearchScreen = () => {
 
 const UserResultCard = ({ user, onPress }: { user: UserDiscoveryResult; onPress: () => void }) => {
   const initials =
-    user.full_name?.slice(0, 1)?.toUpperCase() || user.username.slice(0, 1).toUpperCase();
+    user.full_name?.slice(0, 1)?.toUpperCase() ||
+    cleanUsername(user.username).slice(0, 1).toUpperCase();
 
   return (
     <TouchableOpacity activeOpacity={0.8} style={styles.resultCard} onPress={onPress}>
@@ -83,14 +87,14 @@ const UserResultCard = ({ user, onPress }: { user: UserDiscoveryResult; onPress:
       </View>
 
       <View style={styles.resultTextWrap}>
-        <Text style={styles.resultUsername}>_{user.username}</Text>
+        <Text style={styles.resultUsername}>{cleanUsername(user.username)}</Text>
         <Text style={styles.resultFullName} numberOfLines={1}>
           {user.full_name || 'Transfa User'}
         </Text>
       </View>
 
       <View style={styles.badgeWrap}>
-        <Ionicons name="lock-closed" size={11} color="#0A0A0A" />
+        <Ionicons name="lock-closed" size={10} color="#0A0A0A" />
       </View>
     </TouchableOpacity>
   );
@@ -112,7 +116,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   searchWrap: {
-    height: 40,
+    height: 38,
     borderRadius: 10,
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1,
@@ -125,13 +129,13 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     color: '#ECECEC',
-    fontSize: 18,
+    fontSize: 14,
     paddingVertical: 0,
   },
   helperText: {
     marginTop: 20,
     color: '#9C9EA1',
-    fontSize: 15,
+    fontSize: 14,
   },
   centerState: {
     marginTop: 28,
@@ -142,10 +146,10 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   resultCard: {
-    minHeight: 66,
+    minHeight: 64,
     backgroundColor: '#F6F6F7',
     borderRadius: 8,
-    paddingHorizontal: 14,
+    paddingHorizontal: 12,
     paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
@@ -161,7 +165,7 @@ const styles = StyleSheet.create({
   resultAvatarInitial: {
     color: '#141516',
     fontWeight: '700',
-    fontSize: 16,
+    fontSize: 15,
   },
   resultTextWrap: {
     marginLeft: 12,
@@ -170,7 +174,7 @@ const styles = StyleSheet.create({
   resultUsername: {
     color: '#141516',
     fontWeight: '700',
-    fontSize: 22,
+    fontSize: 20,
   },
   resultFullName: {
     marginTop: 2,

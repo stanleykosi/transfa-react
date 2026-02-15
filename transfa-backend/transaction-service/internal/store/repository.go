@@ -52,6 +52,12 @@ type Repository interface {
 	UpdateTransactionMetadata(ctx context.Context, transactionID uuid.UUID, metadata UpdateTransactionMetadataParams) error
 	DebitWallet(ctx context.Context, userID uuid.UUID, amount int64) error
 	CreditWallet(ctx context.Context, userID uuid.UUID, amount int64) error
+	CreateTransferBatchWithItems(ctx context.Context, batch *domain.TransferBatch, items []domain.TransferBatchItem) error
+	CreateTransferBatch(ctx context.Context, batch *domain.TransferBatch) error
+	CreateTransferBatchItems(ctx context.Context, items []domain.TransferBatchItem) error
+	MarkTransferBatchItemCompleted(ctx context.Context, itemID uuid.UUID, transactionID uuid.UUID, fee int64) error
+	MarkTransferBatchItemFailed(ctx context.Context, itemID uuid.UUID, failureReason string) error
+	FinalizeTransferBatch(ctx context.Context, batchID uuid.UUID) (*domain.TransferBatch, error)
 
 	// Payment Request methods
 	CreatePaymentRequest(ctx context.Context, req *domain.PaymentRequest) (*domain.PaymentRequest, error)

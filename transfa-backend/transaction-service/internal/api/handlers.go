@@ -49,6 +49,26 @@ type transferInitiationResponse struct {
 	AnchorReason     *string `json:"anchor_reason,omitempty"`
 }
 
+type bulkTransferFailureResponse struct {
+	RecipientUsername string `json:"recipient_username"`
+	Amount            int64  `json:"amount"`
+	Description       string `json:"description"`
+	Error             string `json:"error"`
+}
+
+type bulkTransferInitiationResponse struct {
+	BatchID                 string                        `json:"batch_id"`
+	Status                  string                        `json:"status"`
+	Message                 string                        `json:"message"`
+	TotalAmount             int64                         `json:"total_amount"`
+	TotalFee                int64                         `json:"total_fee"`
+	SuccessCount            int                           `json:"success_count"`
+	FailureCount            int                           `json:"failure_count"`
+	SuccessfulTransfers     []transferInitiationResponse  `json:"successful_transfers"`
+	FailedTransfers         []bulkTransferFailureResponse `json:"failed_transfers"`
+	SuccessfulTransactionID []string                      `json:"successful_transaction_ids"`
+}
+
 func buildTransferInitiationResponse(tx *domain.Transaction, message string) transferInitiationResponse {
 	return transferInitiationResponse{
 		TransactionID:    tx.ID.String(),
@@ -140,12 +160,118 @@ func (h *TransactionHandlers) P2PTransferHandler(w http.ResponseWriter, r *http.
 			http.Error(w, "Recipient user not found", http.StatusNotFound)
 			return
 		}
+		if errors.Is(err, app.ErrInvalidTransferAmount) || errors.Is(err, app.ErrInvalidDescription) || errors.Is(err, app.ErrInvalidRecipient) || errors.Is(err, app.ErrSelfTransferNotAllowed) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
 		return
 	}
 
 	response := buildTransferInitiationResponse(tx, "Transfer initiated")
 	h.writeJSON(w, http.StatusCreated, response)
+}
+
+// BulkP2PTransferHandler handles requests for multi-recipient peer-to-peer transfers.
+func (h *TransactionHandlers) BulkP2PTransferHandler(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := GetClerkUserID(r.Context())
+	if !ok {
+		http.Error(w, "Could not get user ID from context", http.StatusInternalServerError)
+		return
+	}
+
+	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
+	if err != nil {
+		log.Printf("level=warn component=api endpoint=bulk_p2p_transfer outcome=reject reason=user_resolution_failed clerk_user_id=%s err=%v", userIDStr, err)
+		http.Error(w, "User not found", http.StatusBadRequest)
+		return
+	}
+	senderID, err := uuid.Parse(internalIDStr)
+	if err != nil {
+		log.Printf("level=warn component=api endpoint=bulk_p2p_transfer outcome=reject reason=invalid_user_id internal_user_id=%s", internalIDStr)
+		http.Error(w, "Invalid user ID format", http.StatusBadRequest)
+		return
+	}
+
+	var req domain.BulkP2PTransferRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("level=warn component=api endpoint=bulk_p2p_transfer outcome=reject reason=invalid_json err=%v", err)
+		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+	if !h.authorizeTransactionPIN(r, w, senderID, req.TransactionPIN) {
+		return
+	}
+
+	log.Printf("level=info component=api endpoint=bulk_p2p_transfer outcome=accepted sender_id=%s transfer_count=%d", senderID, len(req.Transfers))
+
+	result, err := h.service.ProcessBulkP2PTransfer(r.Context(), senderID, req.Transfers)
+	if err != nil {
+		log.Printf("level=warn component=api endpoint=bulk_p2p_transfer outcome=failed sender_id=%s err=%v", senderID, err)
+		switch {
+		case errors.Is(err, store.ErrInsufficientFunds):
+			http.Error(w, err.Error(), http.StatusPaymentRequired)
+			return
+		case errors.Is(err, app.ErrBulkTransferEmpty),
+			errors.Is(err, app.ErrBulkTransferLimit),
+			errors.Is(err, app.ErrDuplicateRecipient),
+			errors.Is(err, app.ErrInvalidTransferAmount),
+			errors.Is(err, app.ErrInvalidDescription),
+			errors.Is(err, app.ErrInvalidRecipient):
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		default:
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	successes := make([]transferInitiationResponse, 0, len(result.Successful))
+	successfulTransactionIDs := make([]string, 0, len(result.Successful))
+	failures := make([]bulkTransferFailureResponse, 0, len(result.Failed))
+	var totalAmount int64
+	var totalFee int64
+
+	for _, tx := range result.Successful {
+		successes = append(successes, buildTransferInitiationResponse(tx, "Transfer initiated"))
+		successfulTransactionIDs = append(successfulTransactionIDs, tx.ID.String())
+		totalAmount += tx.Amount
+		totalFee += tx.Fee
+	}
+	for _, failed := range result.Failed {
+		failures = append(failures, bulkTransferFailureResponse{
+			RecipientUsername: failed.RecipientUsername,
+			Amount:            failed.Amount,
+			Description:       failed.Description,
+			Error:             failed.Error,
+		})
+	}
+
+	status := "completed"
+	message := "All transfers initiated successfully"
+	if len(result.Successful) == 0 {
+		status = "failed"
+		message = "All transfers failed"
+	}
+	if len(result.Successful) > 0 && len(result.Failed) > 0 {
+		status = "partial_failed"
+		message = "Some transfers failed while others were initiated"
+	}
+
+	response := bulkTransferInitiationResponse{
+		BatchID:                 result.BatchID.String(),
+		Status:                  status,
+		Message:                 message,
+		TotalAmount:             totalAmount,
+		TotalFee:                totalFee,
+		SuccessCount:            len(result.Successful),
+		FailureCount:            len(result.Failed),
+		SuccessfulTransfers:     successes,
+		FailedTransfers:         failures,
+		SuccessfulTransactionID: successfulTransactionIDs,
+	}
+
+	h.writeJSON(w, http.StatusOK, response)
 }
 
 // SelfTransferHandler handles requests for self-transfers (withdrawals).
@@ -197,6 +323,10 @@ func (h *TransactionHandlers) SelfTransferHandler(w http.ResponseWriter, r *http
 		}
 		if errors.Is(err, store.ErrPlatformFeeDelinquent) {
 			http.Error(w, "Platform fee overdue: external transfers are disabled", http.StatusForbidden)
+			return
+		}
+		if errors.Is(err, app.ErrInvalidTransferAmount) || errors.Is(err, app.ErrInvalidDescription) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		http.Error(w, "Internal server error", http.StatusInternalServerError)

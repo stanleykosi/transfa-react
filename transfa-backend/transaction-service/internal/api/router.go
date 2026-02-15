@@ -41,6 +41,7 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 
 		// Define the protected API endpoints.
 		r.Post("/p2p", h.P2PTransferHandler)
+		r.Post("/p2p/bulk", h.BulkP2PTransferHandler)
 		r.Post("/self-transfer", h.SelfTransferHandler)
 
 		// Beneficiary management endpoints
@@ -69,8 +70,8 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 
 		// Money Drop routes
 		r.Route("/money-drops", func(r chi.Router) {
-			r.Post("/", h.CreateMoneyDropHandler)                    // Create a new money drop
-			r.Post("/{drop_id}/claim", h.ClaimMoneyDropHandler)      // Claim a money drop
+			r.Post("/", h.CreateMoneyDropHandler)                     // Create a new money drop
+			r.Post("/{drop_id}/claim", h.ClaimMoneyDropHandler)       // Claim a money drop
 			r.Get("/{drop_id}/details", h.GetMoneyDropDetailsHandler) // Get money drop details
 		})
 	})

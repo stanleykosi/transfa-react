@@ -24,6 +24,8 @@ import {
 import axios from 'axios';
 import apiClient from './apiClient';
 import {
+  BulkP2PTransferPayload,
+  BulkP2PTransferResponse,
   P2PTransferPayload,
   SelfTransferPayload,
   TransactionResponse,
@@ -94,6 +96,41 @@ export const useP2PTransfer = (
     mutationFn: p2pTransferMutation,
     onSuccess: () => {
       // Invalidate transactions list and account balance to refresh the UI
+      queryClient.invalidateQueries({ queryKey: [TRANSACTIONS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
+    },
+    ...options,
+  });
+};
+
+/**
+ * Custom hook to perform bulk P2P transfers in a single authorized request.
+ */
+export const useBulkP2PTransfer = (
+  options?: UseMutationOptions<BulkP2PTransferResponse, Error, BulkP2PTransferPayload>
+) => {
+  const queryClient = useQueryClient();
+
+  const bulkP2PTransferMutation = async (
+    payload: BulkP2PTransferPayload
+  ): Promise<BulkP2PTransferResponse> => {
+    try {
+      const { data } = await apiClient.post<BulkP2PTransferResponse>(
+        '/transactions/p2p/bulk',
+        payload,
+        {
+          baseURL: TRANSACTION_SERVICE_URL,
+        }
+      );
+      return data;
+    } catch (error) {
+      throw toReadableError(error);
+    }
+  };
+
+  return useMutation<BulkP2PTransferResponse, Error, BulkP2PTransferPayload>({
+    mutationFn: bulkP2PTransferMutation,
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [TRANSACTIONS_QUERY_KEY] });
       queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
     },

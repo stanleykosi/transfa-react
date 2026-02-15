@@ -572,6 +572,206 @@ func (r *PostgresRepository) CreditWallet(ctx context.Context, userID uuid.UUID,
 	return tx.Commit(ctx)
 }
 
+// CreateTransferBatch inserts a transfer batch audit record.
+func (r *PostgresRepository) CreateTransferBatch(ctx context.Context, batch *domain.TransferBatch) error {
+	query := `
+		INSERT INTO transfer_batches (
+			id, sender_id, status, requested_count, success_count, failure_count, total_amount, total_fee
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`
+	_, err := r.db.Exec(ctx, query,
+		batch.ID,
+		batch.SenderID,
+		batch.Status,
+		batch.RequestedCount,
+		batch.SuccessCount,
+		batch.FailureCount,
+		batch.TotalAmount,
+		batch.TotalFee,
+	)
+	return err
+}
+
+// CreateTransferBatchWithItems inserts a transfer batch and its item rows atomically.
+func (r *PostgresRepository) CreateTransferBatchWithItems(ctx context.Context, batch *domain.TransferBatch, items []domain.TransferBatchItem) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	batchQuery := `
+		INSERT INTO transfer_batches (
+			id, sender_id, status, requested_count, success_count, failure_count, total_amount, total_fee
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`
+	if _, err := tx.Exec(ctx, batchQuery,
+		batch.ID,
+		batch.SenderID,
+		batch.Status,
+		batch.RequestedCount,
+		batch.SuccessCount,
+		batch.FailureCount,
+		batch.TotalAmount,
+		batch.TotalFee,
+	); err != nil {
+		return err
+	}
+
+	if len(items) > 0 {
+		itemQuery := `
+			INSERT INTO transfer_batch_items (
+				id, batch_id, recipient_username, amount, description, status, fee, transaction_id, failure_reason
+			)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		`
+		for _, item := range items {
+			if _, err := tx.Exec(ctx, itemQuery,
+				item.ID,
+				item.BatchID,
+				item.RecipientUsername,
+				item.Amount,
+				item.Description,
+				item.Status,
+				item.Fee,
+				item.TransactionID,
+				item.FailureReason,
+			); err != nil {
+				return err
+			}
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+// CreateTransferBatchItems inserts all pending item rows for a transfer batch atomically.
+func (r *PostgresRepository) CreateTransferBatchItems(ctx context.Context, items []domain.TransferBatchItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	query := `
+		INSERT INTO transfer_batch_items (
+			id, batch_id, recipient_username, amount, description, status, fee, transaction_id, failure_reason
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`
+	for _, item := range items {
+		_, err := tx.Exec(ctx, query,
+			item.ID,
+			item.BatchID,
+			item.RecipientUsername,
+			item.Amount,
+			item.Description,
+			item.Status,
+			item.Fee,
+			item.TransactionID,
+			item.FailureReason,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+// MarkTransferBatchItemCompleted updates one batch item as completed.
+func (r *PostgresRepository) MarkTransferBatchItemCompleted(ctx context.Context, itemID uuid.UUID, transactionID uuid.UUID, fee int64) error {
+	query := `
+		UPDATE transfer_batch_items
+		SET status = 'completed', transaction_id = $2, fee = $3, failure_reason = NULL, updated_at = NOW()
+		WHERE id = $1
+	`
+	result, err := r.db.Exec(ctx, query, itemID, transactionID, fee)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return ErrTransactionNotFound
+	}
+	return nil
+}
+
+// MarkTransferBatchItemFailed updates one batch item as failed.
+func (r *PostgresRepository) MarkTransferBatchItemFailed(ctx context.Context, itemID uuid.UUID, failureReason string) error {
+	query := `
+		UPDATE transfer_batch_items
+		SET status = 'failed', failure_reason = $2, transaction_id = NULL, fee = 0, updated_at = NOW()
+		WHERE id = $1
+	`
+	result, err := r.db.Exec(ctx, query, itemID, failureReason)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return ErrTransactionNotFound
+	}
+	return nil
+}
+
+// FinalizeTransferBatch computes and persists aggregate batch metrics from item rows.
+func (r *PostgresRepository) FinalizeTransferBatch(ctx context.Context, batchID uuid.UUID) (*domain.TransferBatch, error) {
+	query := `
+		WITH agg AS (
+			SELECT
+				COUNT(*) FILTER (WHERE status = 'completed') AS success_count,
+				COUNT(*) FILTER (WHERE status = 'failed') AS failure_count,
+				COALESCE(SUM(amount) FILTER (WHERE status = 'completed'), 0) AS total_amount,
+				COALESCE(SUM(fee) FILTER (WHERE status = 'completed'), 0) AS total_fee
+			FROM transfer_batch_items
+			WHERE batch_id = $1
+		)
+		UPDATE transfer_batches b
+		SET
+			success_count = agg.success_count,
+			failure_count = agg.failure_count,
+			total_amount = agg.total_amount,
+			total_fee = agg.total_fee,
+			status = CASE
+				WHEN agg.success_count = 0 AND agg.failure_count > 0 THEN 'failed'
+				WHEN agg.failure_count = 0 THEN 'completed'
+				WHEN agg.success_count > 0 AND agg.failure_count > 0 THEN 'partial_failed'
+				ELSE 'processing'
+			END,
+			updated_at = NOW()
+		FROM agg
+		WHERE b.id = $1
+		RETURNING b.id, b.sender_id, b.status, b.requested_count, b.success_count, b.failure_count, b.total_amount, b.total_fee, b.created_at, b.updated_at
+	`
+
+	var batch domain.TransferBatch
+	err := r.db.QueryRow(ctx, query, batchID).Scan(
+		&batch.ID,
+		&batch.SenderID,
+		&batch.Status,
+		&batch.RequestedCount,
+		&batch.SuccessCount,
+		&batch.FailureCount,
+		&batch.TotalAmount,
+		&batch.TotalFee,
+		&batch.CreatedAt,
+		&batch.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrTransactionNotFound
+		}
+		return nil, err
+	}
+
+	return &batch, nil
+}
+
 // FindOrCreateDefaultBeneficiary implements updated default beneficiary logic:
 // - Returns the user's default beneficiary if one exists
 // - If no default exists, returns the first beneficiary (which should be the default)

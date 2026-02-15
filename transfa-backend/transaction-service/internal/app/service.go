@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -39,11 +40,23 @@ const (
 	defaultTransactionFee = 500
 	pinMaxAttempts        = 5
 	pinLockoutSeconds     = 900
+	maxBulkP2PTransfers   = 10
 )
 
+type serviceContextKey string
+
+const skipAnchorBalanceCheckCtxKey serviceContextKey = "skip_anchor_balance_check"
+
 var (
-	ErrInvalidTransactionPIN = errors.New("invalid transaction pin")
-	ErrTransactionPINLocked  = errors.New("transaction pin temporarily locked")
+	ErrInvalidTransactionPIN  = errors.New("invalid transaction pin")
+	ErrTransactionPINLocked   = errors.New("transaction pin temporarily locked")
+	ErrInvalidTransferAmount  = errors.New("transfer amount must be greater than zero")
+	ErrInvalidDescription     = errors.New("description must be between 3 and 100 characters")
+	ErrInvalidRecipient       = errors.New("recipient username is required")
+	ErrSelfTransferNotAllowed = errors.New("self transfer is not allowed on p2p endpoint")
+	ErrBulkTransferEmpty      = errors.New("at least one transfer item is required")
+	ErrBulkTransferLimit      = errors.New("bulk transfer supports a maximum of 10 recipients")
+	ErrDuplicateRecipient     = errors.New("duplicate recipient in bulk transfer request")
 )
 
 // Service provides the core business logic for transactions.
@@ -147,6 +160,18 @@ func (s *Service) VerifyTransactionPIN(ctx context.Context, userID uuid.UUID, pi
 
 // ProcessP2PTransfer handles the logic for a peer-to-peer transfer.
 func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, req domain.P2PTransferRequest) (*domain.Transaction, error) {
+	req.RecipientUsername = strings.TrimSpace(req.RecipientUsername)
+	req.Description = strings.TrimSpace(req.Description)
+	if req.RecipientUsername == "" {
+		return nil, ErrInvalidRecipient
+	}
+	if req.Amount <= 0 {
+		return nil, ErrInvalidTransferAmount
+	}
+	if !isValidTransferDescription(req.Description) {
+		return nil, ErrInvalidDescription
+	}
+
 	// 1. Get sender and recipient details
 	sender, err := s.repo.FindUserByID(ctx, senderID)
 	if err != nil {
@@ -156,6 +181,9 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 	recipient, err := s.repo.FindUserByUsername(ctx, req.RecipientUsername)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find recipient: %w", err)
+	}
+	if recipient.ID == sender.ID {
+		return nil, ErrSelfTransferNotAllowed
 	}
 
 	senderDelinquent := false
@@ -175,23 +203,24 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 		return nil, fmt.Errorf("failed to find sender account: %w", err)
 	}
 
-	// Sync the internal database balance with Anchor before validation
-	if err := s.syncAccountBalance(ctx, sender.ID); err != nil {
-		log.Printf("level=warn component=service flow=p2p_transfer msg=\"balance sync failed\" sender_id=%s err=%v", sender.ID, err)
-		// Continue with validation even if sync fails, but log the warning
-	}
+	if !shouldSkipAnchorBalanceCheck(ctx) {
+		// Sync the internal database balance with Anchor before validation.
+		if err := s.syncAccountBalance(ctx, sender.ID); err != nil {
+			log.Printf("level=warn component=service flow=p2p_transfer msg=\"balance sync failed\" sender_id=%s err=%v", sender.ID, err)
+			// Continue with validation even if sync fails, but log the warning.
+		}
 
-	// Get the actual balance from Anchor API for validation
-	anchorBalance, err := s.anchorClient.GetAccountBalance(ctx, senderAccount.AnchorAccountID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get account balance from Anchor: %w", err)
-	}
+		// Get the actual balance from Anchor API for validation.
+		anchorBalance, err := s.anchorClient.GetAccountBalance(ctx, senderAccount.AnchorAccountID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get account balance from Anchor: %w", err)
+		}
 
-	availableBalance := anchorBalance.Data.AvailableBalance
-	requiredAmount := req.Amount + s.transactionFeeKobo
-
-	if availableBalance < requiredAmount {
-		return nil, store.ErrInsufficientFunds
+		availableBalance := anchorBalance.Data.AvailableBalance
+		requiredAmount := req.Amount + s.transactionFeeKobo
+		if availableBalance < requiredAmount {
+			return nil, store.ErrInsufficientFunds
+		}
 	}
 
 	// 3. Debit the sender's wallet immediately to lock funds
@@ -223,7 +252,16 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 	// 3.5. Collect the transaction fee to admin account
 	if err := s.collectTransactionFee(ctx, txRecord, senderAccount, s.transactionFeeKobo, "P2P Transfer Fee"); err != nil {
 		log.Printf("level=warn component=service flow=p2p_transfer msg=\"fee collection failed\" transaction_id=%s err=%v", txRecord.ID, err)
-		// Don't fail the transaction, just log the warning
+		if s.eventProducer != nil {
+			_ = s.eventProducer.Publish(ctx, "transfa.events", "transfer.fee.collection.failed", map[string]interface{}{
+				"transaction_id": txRecord.ID.String(),
+				"sender_id":      sender.ID.String(),
+				"amount":         s.transactionFeeKobo,
+				"category":       "p2p_transfer_fee",
+				"error":          err.Error(),
+				"occurred_at":    time.Now().UTC(),
+			})
+		}
 	}
 
 	// 5. Determine routing based on recipient's receiving preference and eligibility
@@ -336,6 +374,225 @@ func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, re
 	return txRecord, nil
 }
 
+// ProcessBulkP2PTransfer processes up to 10 P2P transfers in one authenticated request.
+// It performs shared pre-validation and best-effort execution per item so one recipient
+// failure does not block other valid recipients.
+func (s *Service) ProcessBulkP2PTransfer(ctx context.Context, senderID uuid.UUID, items []domain.BulkP2PTransferItem) (*domain.BulkP2PTransferResult, error) {
+	startedAt := time.Now()
+
+	if len(items) == 0 {
+		return nil, ErrBulkTransferEmpty
+	}
+	if len(items) > maxBulkP2PTransfers {
+		return nil, ErrBulkTransferLimit
+	}
+
+	sender, err := s.repo.FindUserByID(ctx, senderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find sender: %w", err)
+	}
+	if !sender.AllowSending {
+		return nil, errors.New("sender account is not permitted to send funds")
+	}
+
+	senderAccount, err := s.repo.FindAccountByUserID(ctx, senderID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find sender account: %w", err)
+	}
+
+	requests := make([]domain.P2PTransferRequest, 0, len(items))
+	batchItems := make([]domain.TransferBatchItem, 0, len(items))
+	seenRecipients := make(map[string]struct{}, len(items))
+	var estimatedTotalDebit int64
+
+	for _, item := range items {
+		recipient := strings.TrimSpace(item.RecipientUsername)
+		description := strings.TrimSpace(item.Description)
+		if recipient == "" {
+			return nil, ErrInvalidRecipient
+		}
+		if item.Amount <= 0 {
+			return nil, ErrInvalidTransferAmount
+		}
+		if !isValidTransferDescription(description) {
+			return nil, ErrInvalidDescription
+		}
+
+		normalized := strings.ToLower(recipient)
+		if _, exists := seenRecipients[normalized]; exists {
+			return nil, ErrDuplicateRecipient
+		}
+		seenRecipients[normalized] = struct{}{}
+
+		estimatedTotalDebit += item.Amount + s.transactionFeeKobo
+		requests = append(requests, domain.P2PTransferRequest{
+			RecipientUsername: recipient,
+			Amount:            item.Amount,
+			Description:       description,
+		})
+		batchItems = append(batchItems, domain.TransferBatchItem{
+			ID:                uuid.New(),
+			RecipientUsername: recipient,
+			Amount:            item.Amount,
+			Description:       description,
+			Status:            "pending",
+		})
+	}
+
+	// Soft pre-check: if balance is clearly insufficient for full batch, reject early.
+	if err := s.syncAccountBalance(ctx, senderID); err != nil {
+		log.Printf("level=warn component=service flow=bulk_p2p_transfer msg=\"balance sync failed\" sender_id=%s err=%v", senderID, err)
+	}
+	anchorBalance, err := s.anchorClient.GetAccountBalance(ctx, senderAccount.AnchorAccountID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get account balance from Anchor: %w", err)
+	}
+	if anchorBalance.Data.AvailableBalance < estimatedTotalDebit {
+		return nil, store.ErrInsufficientFunds
+	}
+
+	batch := &domain.TransferBatch{
+		ID:             uuid.New(),
+		SenderID:       senderID,
+		Status:         "processing",
+		RequestedCount: len(requests),
+	}
+	for i := range batchItems {
+		batchItems[i].BatchID = batch.ID
+	}
+	if err := s.repo.CreateTransferBatchWithItems(ctx, batch, batchItems); err != nil {
+		return nil, fmt.Errorf("failed to create transfer batch and items: %w", err)
+	}
+
+	result := &domain.BulkP2PTransferResult{
+		BatchID:    batch.ID,
+		Successful: make([]*domain.Transaction, 0, len(requests)),
+		Failed:     make([]domain.BulkP2PTransferFailure, 0),
+	}
+
+	batchCtx := context.WithValue(ctx, skipAnchorBalanceCheckCtxKey, true)
+
+	for idx, req := range requests {
+		item := batchItems[idx]
+		tx, transferErr := s.ProcessP2PTransfer(batchCtx, senderID, req)
+		if transferErr != nil {
+			if err := s.markBatchItemFailedWithRetry(ctx, item.ID, mapTransferError(transferErr)); err != nil {
+				log.Printf("level=error component=service flow=bulk_p2p_transfer msg=\"failed to persist failed batch item\" batch_id=%s item_id=%s err=%v", batch.ID, item.ID, err)
+			}
+			result.Failed = append(result.Failed, domain.BulkP2PTransferFailure{
+				RecipientUsername: req.RecipientUsername,
+				Amount:            req.Amount,
+				Description:       req.Description,
+				Error:             mapTransferError(transferErr),
+			})
+			continue
+		}
+
+		if err := s.markBatchItemCompletedWithRetry(ctx, item.ID, tx.ID, tx.Fee); err != nil {
+			log.Printf("level=error component=service flow=bulk_p2p_transfer msg=\"failed to persist completed batch item\" batch_id=%s item_id=%s transaction_id=%s err=%v", batch.ID, item.ID, tx.ID, err)
+		}
+		result.Successful = append(result.Successful, tx)
+	}
+
+	if finalized, err := s.repo.FinalizeTransferBatch(ctx, batch.ID); err != nil {
+		log.Printf("level=error component=service flow=bulk_p2p_transfer msg=\"failed to finalize transfer batch\" batch_id=%s err=%v", batch.ID, err)
+	} else {
+		log.Printf(
+			"level=info component=service flow=bulk_p2p_transfer msg=\"transfer batch finalized\" batch_id=%s status=%s success_count=%d failure_count=%d total_amount=%d total_fee=%d",
+			finalized.ID,
+			finalized.Status,
+			finalized.SuccessCount,
+			finalized.FailureCount,
+			finalized.TotalAmount,
+			finalized.TotalFee,
+		)
+	}
+
+	log.Printf(
+		"level=info component=service flow=bulk_p2p_transfer msg=\"bulk transfer processed\" sender_id=%s batch_id=%s total=%d successful=%d failed=%d duration_ms=%d",
+		senderID,
+		batch.ID,
+		len(requests),
+		len(result.Successful),
+		len(result.Failed),
+		time.Since(startedAt).Milliseconds(),
+	)
+
+	return result, nil
+}
+
+func isValidTransferDescription(description string) bool {
+	length := len(strings.TrimSpace(description))
+	return length >= 3 && length <= 100
+}
+
+func mapTransferError(err error) string {
+	switch {
+	case errors.Is(err, store.ErrInsufficientFunds):
+		return "Insufficient funds"
+	case errors.Is(err, store.ErrUserNotFound):
+		return "Recipient user not found"
+	case errors.Is(err, ErrInvalidTransferAmount):
+		return ErrInvalidTransferAmount.Error()
+	case errors.Is(err, ErrInvalidDescription):
+		return ErrInvalidDescription.Error()
+	case errors.Is(err, ErrInvalidRecipient):
+		return ErrInvalidRecipient.Error()
+	case errors.Is(err, ErrSelfTransferNotAllowed):
+		return ErrSelfTransferNotAllowed.Error()
+	default:
+		return "Transfer failed"
+	}
+}
+
+func shouldSkipAnchorBalanceCheck(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+
+	value := ctx.Value(skipAnchorBalanceCheckCtxKey)
+	flag, ok := value.(bool)
+	return ok && flag
+}
+
+func (s *Service) markBatchItemCompletedWithRetry(ctx context.Context, itemID uuid.UUID, transactionID uuid.UUID, fee int64) error {
+	const maxAttempts = 3
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err = s.repo.MarkTransferBatchItemCompleted(ctx, itemID, transactionID, fee)
+		if err == nil {
+			return nil
+		}
+		if attempt < maxAttempts {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}
+	return err
+}
+
+func (s *Service) markBatchItemFailedWithRetry(ctx context.Context, itemID uuid.UUID, reason string) error {
+	const maxAttempts = 3
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err = s.repo.MarkTransferBatchItemFailed(ctx, itemID, reason)
+		if err == nil {
+			return nil
+		}
+		if attempt < maxAttempts {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(100 * time.Millisecond):
+			}
+		}
+	}
+	return err
+}
+
 // performInternalTransfer executes a book transfer and updates the transaction record.
 func (s *Service) performInternalTransfer(ctx context.Context, txRecord *domain.Transaction, senderAccount *domain.Account, recipient *domain.User, reason string) (*anchorclient.TransferResponse, error) {
 	recipientAccount, err := s.repo.FindAccountByUserID(ctx, recipient.ID)
@@ -387,6 +644,14 @@ func (s *Service) checkRecipientEligibility(ctx context.Context, recipientID uui
 
 // ProcessSelfTransfer handles the logic for a withdrawal to an external account.
 func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, req domain.SelfTransferRequest) (*domain.Transaction, error) {
+	req.Description = strings.TrimSpace(req.Description)
+	if req.Amount <= 0 {
+		return nil, ErrInvalidTransferAmount
+	}
+	if !isValidTransferDescription(req.Description) {
+		return nil, ErrInvalidDescription
+	}
+
 	// 1. Get sender and beneficiary details
 	sender, err := s.repo.FindUserByID(ctx, senderID)
 	if err != nil {
@@ -462,7 +727,16 @@ func (s *Service) ProcessSelfTransfer(ctx context.Context, senderID uuid.UUID, r
 	// 3.5. Collect the transaction fee to admin account
 	if err := s.collectTransactionFee(ctx, txRecord, senderAccount, s.transactionFeeKobo, "Self Transfer Fee"); err != nil {
 		log.Printf("level=warn component=service flow=self_transfer msg=\"fee collection failed\" transaction_id=%s err=%v", txRecord.ID, err)
-		// Don't fail the transaction, just log the warning
+		if s.eventProducer != nil {
+			_ = s.eventProducer.Publish(ctx, "transfa.events", "transfer.fee.collection.failed", map[string]interface{}{
+				"transaction_id": txRecord.ID.String(),
+				"sender_id":      sender.ID.String(),
+				"amount":         s.transactionFeeKobo,
+				"category":       "self_transfer_fee",
+				"error":          err.Error(),
+				"occurred_at":    time.Now().UTC(),
+			})
+		}
 	}
 
 	// 5. Initiate NIP transfer via Anchor
@@ -711,8 +985,23 @@ func (s *Service) collectTransactionFee(ctx context.Context, parentTx *domain.Tr
 	}
 	_ = adminBalance
 
-	// Perform the actual transfer from source account to admin account
-	transferResp, err := s.anchorClient.InitiateBookTransfer(ctx, sourceAccount.AnchorAccountID, s.adminAccountID, description, amount)
+	// Perform the actual transfer from source account to admin account with one retry.
+	const maxAttempts = 2
+	var transferResp *anchorclient.TransferResponse
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		transferResp, err = s.anchorClient.InitiateBookTransfer(ctx, sourceAccount.AnchorAccountID, s.adminAccountID, description, amount)
+		if err == nil {
+			break
+		}
+		if attempt < maxAttempts {
+			log.Printf("level=warn component=service flow=fee_collection msg=\"anchor fee transfer attempt failed; retrying\" attempt=%d err=%v", attempt, err)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(200 * time.Millisecond):
+			}
+		}
+	}
 	if err != nil {
 		log.Printf("level=warn component=service flow=fee_collection msg=\"anchor fee transfer failed\" err=%v", err)
 		return fmt.Errorf("failed to transfer fee to admin account: %w", err)

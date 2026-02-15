@@ -198,6 +198,37 @@ export interface P2PTransferPayload {
   transaction_pin: string;
 }
 
+export interface BulkP2PTransferItemPayload {
+  recipient_username: string;
+  amount: number; // in kobo
+  description: string; // Required for Anchor API compliance
+}
+
+export interface BulkP2PTransferPayload {
+  transfers: BulkP2PTransferItemPayload[];
+  transaction_pin: string;
+}
+
+export interface BulkP2PTransferFailure {
+  recipient_username: string;
+  amount: number;
+  description: string;
+  error: string;
+}
+
+export interface BulkP2PTransferResponse {
+  batch_id: string;
+  status: 'completed' | 'partial_failed' | 'failed';
+  message: string;
+  total_amount: number;
+  total_fee: number;
+  success_count: number;
+  failure_count: number;
+  successful_transfers: TransactionResponse[];
+  failed_transfers: BulkP2PTransferFailure[];
+  successful_transaction_ids: string[];
+}
+
 // Payload for POST /transactions/self-transfer
 export interface SelfTransferPayload {
   beneficiary_id: string;
