@@ -51,7 +51,7 @@ const PaymentRequestSuccessScreen = () => {
     <ScreenWrapper>
       <View style={styles.header}>
         <TouchableOpacity
-          onPress={() => navigation.navigate('AppTabs', { screen: 'Payments' })}
+          onPress={() => navigation.navigate('AppTabs', { screen: 'Home' })}
           style={styles.backButton}
           accessibilityRole="button"
           accessibilityLabel="Go back"
@@ -91,7 +91,7 @@ const PaymentRequestSuccessScreen = () => {
           <PrimaryButton title="Share Link" onPress={onShare} />
           <TouchableOpacity
             style={styles.doneButton}
-            onPress={() => navigation.navigate('AppTabs', { screen: 'Payments' })}
+            onPress={() => navigation.navigate('AppTabs', { screen: 'Home' })}
           >
             <Text style={styles.doneButtonText}>Done</Text>
           </TouchableOpacity>

@@ -27,6 +27,9 @@ type Repository interface {
 	FindUserIDByClerkUserID(ctx context.Context, clerkUserID string) (string, error)
 	FindUserByUsername(ctx context.Context, username string) (*domain.User, error)
 	FindUserByID(ctx context.Context, userID uuid.UUID) (*domain.User, error)
+	GetUserSecurityCredentialByUserID(ctx context.Context, userID uuid.UUID) (*domain.UserSecurityCredential, error)
+	RecordFailedTransactionPINAttempt(ctx context.Context, userID uuid.UUID, maxAttempts int, lockoutDurationSeconds int) (*domain.UserSecurityCredential, error)
+	ResetTransactionPINFailureState(ctx context.Context, userID uuid.UUID) error
 	FindAccountByUserID(ctx context.Context, userID uuid.UUID) (*domain.Account, error)
 	UpdateAccountBalance(ctx context.Context, userID uuid.UUID, balance int64) error
 	FindBeneficiaryByID(ctx context.Context, beneficiaryID uuid.UUID, userID uuid.UUID) (*domain.Beneficiary, error)
@@ -37,16 +40,16 @@ type Repository interface {
 
 	// Receiving preference methods
 	FindOrCreateReceivingPreference(ctx context.Context, userID uuid.UUID) (*domain.UserReceivingPreference, error)
-    UpdateReceivingPreference(ctx context.Context, userID uuid.UUID, useExternal bool, beneficiaryID *uuid.UUID) error
+	UpdateReceivingPreference(ctx context.Context, userID uuid.UUID, useExternal bool, beneficiaryID *uuid.UUID) error
 
 	// Platform fee methods
 	IsUserDelinquent(ctx context.Context, userID uuid.UUID) (bool, error)
 
 	// Transaction methods
 	CreateTransaction(ctx context.Context, tx *domain.Transaction) error
-    UpdateTransactionStatus(ctx context.Context, transactionID uuid.UUID, anchorTransferID, status string) error
-    UpdateTransactionStatusAndFee(ctx context.Context, transactionID uuid.UUID, anchorTransferID, status string, fee int64) error
-    UpdateTransactionMetadata(ctx context.Context, transactionID uuid.UUID, metadata UpdateTransactionMetadataParams) error
+	UpdateTransactionStatus(ctx context.Context, transactionID uuid.UUID, anchorTransferID, status string) error
+	UpdateTransactionStatusAndFee(ctx context.Context, transactionID uuid.UUID, anchorTransferID, status string, fee int64) error
+	UpdateTransactionMetadata(ctx context.Context, transactionID uuid.UUID, metadata UpdateTransactionMetadataParams) error
 	DebitWallet(ctx context.Context, userID uuid.UUID, amount int64) error
 	CreditWallet(ctx context.Context, userID uuid.UUID, amount int64) error
 
@@ -56,13 +59,13 @@ type Repository interface {
 	GetPaymentRequestByID(ctx context.Context, requestID uuid.UUID) (*domain.PaymentRequest, error)
 
 	// Transaction history methods
-    FindTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]domain.Transaction, error)
-    UpdateTransactionDestinations(ctx context.Context, transactionID uuid.UUID, destinationAccountID *uuid.UUID, destinationBeneficiaryID *uuid.UUID) error
-    FindTransactionByID(ctx context.Context, transactionID uuid.UUID) (*domain.Transaction, error)
-    FindTransactionByAnchorTransferID(ctx context.Context, anchorTransferID string) (*domain.Transaction, error)
-    MarkTransactionAsFailed(ctx context.Context, transactionID uuid.UUID, anchorTransferID, failureReason string) error
-    MarkTransactionAsCompleted(ctx context.Context, transactionID uuid.UUID, anchorTransferID string) error
-    RefundTransactionFee(ctx context.Context, transactionID uuid.UUID, userID uuid.UUID, fee int64) error
+	FindTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]domain.Transaction, error)
+	UpdateTransactionDestinations(ctx context.Context, transactionID uuid.UUID, destinationAccountID *uuid.UUID, destinationBeneficiaryID *uuid.UUID) error
+	FindTransactionByID(ctx context.Context, transactionID uuid.UUID) (*domain.Transaction, error)
+	FindTransactionByAnchorTransferID(ctx context.Context, anchorTransferID string) (*domain.Transaction, error)
+	MarkTransactionAsFailed(ctx context.Context, transactionID uuid.UUID, anchorTransferID, failureReason string) error
+	MarkTransactionAsCompleted(ctx context.Context, transactionID uuid.UUID, anchorTransferID string) error
+	RefundTransactionFee(ctx context.Context, transactionID uuid.UUID, userID uuid.UUID, fee int64) error
 
 	// Money Drop methods
 	FindMoneyDropAccountByUserID(ctx context.Context, userID uuid.UUID) (*domain.Account, error)
@@ -77,10 +80,10 @@ type Repository interface {
 }
 
 type UpdateTransactionMetadataParams struct {
-	Status            *string
-	AnchorTransferID  *string
-	TransferType      *string
-	FailureReason     *string
-	AnchorSessionID   *string
-	AnchorReason      *string
+	Status           *string
+	AnchorTransferID *string
+	TransferType     *string
+	FailureReason    *string
+	AnchorSessionID  *string
+	AnchorReason     *string
 }

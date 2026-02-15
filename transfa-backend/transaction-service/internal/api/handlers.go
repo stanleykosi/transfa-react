@@ -64,6 +64,30 @@ func buildTransferInitiationResponse(tx *domain.Transaction, message string) tra
 	}
 }
 
+func (h *TransactionHandlers) authorizeTransactionPIN(r *http.Request, w http.ResponseWriter, userID uuid.UUID, pin string) bool {
+	err := h.service.VerifyTransactionPIN(r.Context(), userID, pin)
+	if err == nil {
+		return true
+	}
+
+	if errors.Is(err, store.ErrTransactionPINNotSet) {
+		h.writeError(w, http.StatusPreconditionFailed, "Transaction PIN is not set. Please create your PIN first.")
+		return false
+	}
+	if errors.Is(err, app.ErrTransactionPINLocked) {
+		h.writeError(w, http.StatusLocked, "Too many incorrect PIN attempts. Please wait and try again.")
+		return false
+	}
+	if errors.Is(err, app.ErrInvalidTransactionPIN) {
+		h.writeError(w, http.StatusUnauthorized, "Invalid transaction PIN.")
+		return false
+	}
+
+	log.Printf("level=error component=api msg=\"transaction pin verification failed\" user_id=%s err=%v", userID, err)
+	h.writeError(w, http.StatusInternalServerError, "Unable to verify transaction PIN")
+	return false
+}
+
 // NewTransactionHandlers creates a new instance of TransactionHandlers.
 func NewTransactionHandlers(service *app.Service) *TransactionHandlers {
 	return &TransactionHandlers{service: service}
@@ -96,6 +120,9 @@ func (h *TransactionHandlers) P2PTransferHandler(w http.ResponseWriter, r *http.
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		log.Printf("level=warn component=api endpoint=p2p_transfer outcome=reject reason=invalid_json err=%v", err)
 		http.Error(w, fmt.Sprintf("Invalid request body: %v", err), http.StatusBadRequest)
+		return
+	}
+	if !h.authorizeTransactionPIN(r, w, senderID, req.TransactionPIN) {
 		return
 	}
 
@@ -148,6 +175,9 @@ func (h *TransactionHandlers) SelfTransferHandler(w http.ResponseWriter, r *http
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		log.Printf("level=warn component=api endpoint=self_transfer outcome=reject reason=invalid_json err=%v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if !h.authorizeTransactionPIN(r, w, senderID, req.TransactionPIN) {
 		return
 	}
 

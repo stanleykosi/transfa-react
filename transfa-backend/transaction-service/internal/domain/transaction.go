@@ -48,13 +48,15 @@ type P2PTransferRequest struct {
 	RecipientUsername string `json:"recipient_username"`
 	Amount            int64  `json:"amount"` // in kobo
 	Description       string `json:"description"`
+	TransactionPIN    string `json:"transaction_pin"`
 }
 
 // SelfTransferRequest is the DTO for incoming self-transfer (withdrawal) API requests.
 type SelfTransferRequest struct {
-	BeneficiaryID uuid.UUID `json:"beneficiary_id"`
-	Amount        int64     `json:"amount"` // in kobo
-	Description   string    `json:"description"`
+	BeneficiaryID  uuid.UUID `json:"beneficiary_id"`
+	Amount         int64     `json:"amount"` // in kobo
+	Description    string    `json:"description"`
+	TransactionPIN string    `json:"transaction_pin"`
 }
 
 // User represents a simplified view of a user, containing only the data
@@ -135,16 +137,16 @@ type CreatePaymentRequestPayload struct {
 
 // MoneyDrop represents the state of a money drop in the database.
 type MoneyDrop struct {
-	ID                   uuid.UUID `json:"id" db:"id"`
-	CreatorID            uuid.UUID `json:"creator_id" db:"creator_id"`
-	Status               string    `json:"status" db:"status"`
-	AmountPerClaim       int64     `json:"amount_per_claim" db:"amount_per_claim"`
-	TotalClaimsAllowed   int       `json:"total_claims_allowed" db:"total_claims_allowed"`
-	ClaimsMadeCount      int       `json:"claims_made_count" db:"claims_made_count"`
-	ExpiryTimestamp      time.Time `json:"expiry_timestamp" db:"expiry_timestamp"`
+	ID                     uuid.UUID `json:"id" db:"id"`
+	CreatorID              uuid.UUID `json:"creator_id" db:"creator_id"`
+	Status                 string    `json:"status" db:"status"`
+	AmountPerClaim         int64     `json:"amount_per_claim" db:"amount_per_claim"`
+	TotalClaimsAllowed     int       `json:"total_claims_allowed" db:"total_claims_allowed"`
+	ClaimsMadeCount        int       `json:"claims_made_count" db:"claims_made_count"`
+	ExpiryTimestamp        time.Time `json:"expiry_timestamp" db:"expiry_timestamp"`
 	FundingSourceAccountID uuid.UUID `json:"funding_source_account_id" db:"funding_source_account_id"`
-	MoneyDropAccountID   uuid.UUID `json:"money_drop_account_id" db:"money_drop_account_id"`
-	CreatedAt            time.Time `json:"created_at" db:"created_at"`
+	MoneyDropAccountID     uuid.UUID `json:"money_drop_account_id" db:"money_drop_account_id"`
+	CreatedAt              time.Time `json:"created_at" db:"created_at"`
 }
 
 // MoneyDropClaim represents a single claim made against a money drop.
@@ -157,21 +159,30 @@ type MoneyDropClaim struct {
 
 // CreateMoneyDropRequest defines the payload for creating a new money drop.
 type CreateMoneyDropRequest struct {
-	AmountPerClaim   int64 `json:"amount_per_claim" binding:"required,gt=0"`
-	NumberOfPeople   int   `json:"number_of_people" binding:"required,gt=0"`
-	ExpiryInMinutes  int   `json:"expiry_in_minutes" binding:"required,gt=0"`
+	AmountPerClaim  int64  `json:"amount_per_claim" binding:"required,gt=0"`
+	NumberOfPeople  int    `json:"number_of_people" binding:"required,gt=0"`
+	ExpiryInMinutes int    `json:"expiry_in_minutes" binding:"required,gt=0"`
+	TransactionPIN  string `json:"transaction_pin"`
+}
+
+// UserSecurityCredential stores server-owned transaction PIN security metadata.
+type UserSecurityCredential struct {
+	UserID             uuid.UUID  `json:"user_id"`
+	TransactionPINHash string     `json:"-"`
+	FailedAttempts     int        `json:"failed_attempts"`
+	LockedUntil        *time.Time `json:"locked_until,omitempty"`
 }
 
 // CreateMoneyDropResponse is the successful response after creating a money drop.
 type CreateMoneyDropResponse struct {
-	MoneyDropID      string    `json:"money_drop_id"`
-	QRCodeContent    string    `json:"qr_code_content"`
-	ShareableLink    string    `json:"shareable_link"`
-	TotalAmount      int64     `json:"total_amount"`
-	AmountPerClaim   int64     `json:"amount_per_claim"`
-	NumberOfPeople   int       `json:"number_of_people"`
-	Fee               int64     `json:"fee"` // Fee charged for creating the money drop
-	ExpiryTimestamp  time.Time `json:"expiry_timestamp"`
+	MoneyDropID     string    `json:"money_drop_id"`
+	QRCodeContent   string    `json:"qr_code_content"`
+	ShareableLink   string    `json:"shareable_link"`
+	TotalAmount     int64     `json:"total_amount"`
+	AmountPerClaim  int64     `json:"amount_per_claim"`
+	NumberOfPeople  int       `json:"number_of_people"`
+	Fee             int64     `json:"fee"` // Fee charged for creating the money drop
+	ExpiryTimestamp time.Time `json:"expiry_timestamp"`
 }
 
 // ClaimMoneyDropResponse is the successful response after claiming a money drop.

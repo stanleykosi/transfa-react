@@ -7,18 +7,17 @@
 
 // Defines the shape of the data sent to the POST /onboarding endpoint.
 export interface OnboardingPayload {
-  username: string;
   userType: 'personal' | 'merchant';
-  email: string | undefined;
   phoneNumber: string | undefined;
   kycData: {
     userType: 'personal' | 'merchant';
-    // Tier 0 (personal) - structured name fields
+    // Tier 1 profile (personal) - structured name/address fields
     firstName?: string;
     lastName?: string;
     middleName?: string;
     maidenName?: string;
     addressLine1?: string;
+    addressLine2?: string;
     city?: string;
     state?: string;
     postalCode?: string;
@@ -43,7 +42,10 @@ export interface OnboardingResponse {
 export interface AuthSessionOnboarding {
   status: string;
   reason?: string;
-  next_step: 'app_tabs' | 'onboarding_form' | 'create_account';
+  next_step: 'app_tabs' | 'onboarding_form' | 'create_account' | 'create_username' | 'create_pin';
+  resume_step?: 1 | 2 | 3;
+  user_type?: 'personal' | 'merchant';
+  draft?: Record<string, unknown>;
 }
 
 export interface AuthSessionResponse {
@@ -52,7 +54,7 @@ export interface AuthSessionResponse {
   user?: {
     id: string;
     clerk_user_id: string;
-    username: string;
+    username?: string | null;
     email?: string;
     phone_number?: string;
     full_name?: string;
@@ -72,6 +74,84 @@ export interface AccountTypeOption {
 
 export interface AccountTypeOptionsResponse {
   options: AccountTypeOption[];
+}
+
+export interface UserDiscoveryResult {
+  id: string;
+  username: string;
+  full_name?: string | null;
+}
+
+export interface UserDiscoveryResponse {
+  users: UserDiscoveryResult[];
+}
+
+export interface OnboardingStatusResponse {
+  status: string;
+  reason?: string;
+  next_step: 'app_tabs' | 'onboarding_form' | 'create_account' | 'create_username' | 'create_pin';
+  resume_step?: 1 | 2 | 3;
+  user_type?: 'personal' | 'merchant';
+  draft?: Record<string, unknown>;
+}
+
+export interface SetUsernamePayload {
+  username: string;
+}
+
+export interface SetUsernameResponse {
+  status: string;
+  username: string;
+}
+
+export interface SetTransactionPinPayload {
+  pin: string;
+}
+
+export interface SetTransactionPinResponse {
+  status: string;
+}
+
+export interface SecurityStatusResponse {
+  transaction_pin_set: boolean;
+}
+
+export interface Tier2VerificationPayload {
+  dob: string;
+  gender: 'male' | 'female';
+  bvn: string;
+}
+
+export interface Tier2VerificationResponse {
+  status: string;
+}
+
+export interface Tier1ProfileUpdatePayload {
+  userType: 'personal';
+  phoneNumber: string | undefined;
+  kycData: {
+    userType: 'personal';
+    firstName: string;
+    lastName: string;
+    middleName?: string;
+    maidenName?: string;
+    addressLine1: string;
+    addressLine2?: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    country: string;
+  };
+}
+
+export interface Tier1ProfileUpdateResponse {
+  status: string;
+}
+
+export interface OnboardingProgressPayload {
+  userType: 'personal' | 'merchant';
+  currentStep: 1 | 2 | 3;
+  payload?: Record<string, unknown>;
 }
 
 // Represents a single beneficiary (external bank account).
@@ -115,6 +195,7 @@ export interface P2PTransferPayload {
   recipient_username: string;
   amount: number; // in kobo
   description: string; // Required for Anchor API compliance
+  transaction_pin: string;
 }
 
 // Payload for POST /transactions/self-transfer
@@ -122,6 +203,7 @@ export interface SelfTransferPayload {
   beneficiary_id: string;
   amount: number; // in kobo
   description: string; // Required for Anchor API compliance
+  transaction_pin: string;
 }
 
 // Generic response for a transaction initiation
@@ -255,6 +337,7 @@ export interface CreateMoneyDropPayload {
   amount_per_claim: number; // in kobo
   number_of_people: number;
   expiry_in_minutes: number;
+  transaction_pin: string;
 }
 
 export interface MoneyDropResponse {

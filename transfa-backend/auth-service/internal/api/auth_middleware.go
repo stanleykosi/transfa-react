@@ -19,6 +19,7 @@ import (
 type contextKey string
 
 const clerkUserIDContextKey contextKey = "clerkUserID"
+const clerkEmailContextKey contextKey = "clerkEmail"
 
 // AuthMiddlewareConfig controls how incoming requests are authenticated.
 type AuthMiddlewareConfig struct {
@@ -62,7 +63,7 @@ func ClerkAuthMiddleware(cfg AuthMiddlewareConfig) func(http.Handler) http.Handl
 					return
 				}
 
-				userID, err := verifier.validateToken(
+				userID, tokenEmail, err := verifier.validateToken(
 					r.Context(),
 					tokenString,
 					strings.TrimSpace(cfg.ExpectedAudience),
@@ -73,7 +74,21 @@ func ClerkAuthMiddleware(cfg AuthMiddlewareConfig) func(http.Handler) http.Handl
 					return
 				}
 
+				headerEmail := strings.ToLower(strings.TrimSpace(r.Header.Get("X-User-Email")))
+				if tokenEmail != "" && headerEmail != "" && tokenEmail != headerEmail {
+					http.Error(w, "Invalid user email context", http.StatusUnauthorized)
+					return
+				}
+
+				email := tokenEmail
+				if email == "" {
+					email = headerEmail
+				}
+
 				ctx := context.WithValue(r.Context(), clerkUserIDContextKey, userID)
+				if email != "" {
+					ctx = context.WithValue(ctx, clerkEmailContextKey, email)
+				}
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -81,6 +96,9 @@ func ClerkAuthMiddleware(cfg AuthMiddlewareConfig) func(http.Handler) http.Handl
 			if cfg.AllowHeaderFallback {
 				if userID := strings.TrimSpace(r.Header.Get("X-Clerk-User-Id")); userID != "" {
 					ctx := context.WithValue(r.Context(), clerkUserIDContextKey, userID)
+					if email := strings.ToLower(strings.TrimSpace(r.Header.Get("X-User-Email"))); email != "" {
+						ctx = context.WithValue(ctx, clerkEmailContextKey, email)
+					}
 					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				}
@@ -95,6 +113,12 @@ func ClerkAuthMiddleware(cfg AuthMiddlewareConfig) func(http.Handler) http.Handl
 func GetClerkUserID(ctx context.Context) (string, bool) {
 	userID, ok := ctx.Value(clerkUserIDContextKey).(string)
 	return userID, ok
+}
+
+// GetClerkUserEmail returns the authenticated email from request context when available.
+func GetClerkUserEmail(ctx context.Context) (string, bool) {
+	email, ok := ctx.Value(clerkEmailContextKey).(string)
+	return email, ok
 }
 
 func bearerToken(authHeader string) (string, bool) {
@@ -115,7 +139,7 @@ func (v *jwksVerifier) validateToken(
 	tokenString string,
 	expectedAudience string,
 	expectedIssuer string,
-) (string, error) {
+) (string, string, error) {
 	parser := jwt.NewParser(jwt.WithValidMethods([]string{"RS256"}), jwt.WithLeeway(30*time.Second))
 	claims := jwt.MapClaims{}
 
@@ -127,28 +151,28 @@ func (v *jwksVerifier) validateToken(
 		return v.getPublicKey(ctx, kid)
 	})
 	if err != nil || !token.Valid {
-		return "", errors.New("token validation failed")
+		return "", "", errors.New("token validation failed")
 	}
 
 	if expectedIssuer != "" {
 		issuer, ok := claims["iss"].(string)
 		if !ok || issuer != expectedIssuer {
-			return "", errors.New("issuer mismatch")
+			return "", "", errors.New("issuer mismatch")
 		}
 	}
 
 	if expectedAudience != "" {
 		if !verifyAudienceClaim(claims["aud"], expectedAudience) {
-			return "", errors.New("audience mismatch")
+			return "", "", errors.New("audience mismatch")
 		}
 	}
 
 	sub, ok := claims["sub"].(string)
 	if !ok || strings.TrimSpace(sub) == "" {
-		return "", errors.New("subject claim missing")
+		return "", "", errors.New("subject claim missing")
 	}
 
-	return sub, nil
+	return sub, extractEmailClaim(claims), nil
 }
 
 func verifyAudienceClaim(audClaim any, expected string) bool {
@@ -274,4 +298,29 @@ func parseRSAPublicKey(n, e string) (*rsa.PublicKey, error) {
 		N: new(big.Int).SetBytes(nb),
 		E: int(exp),
 	}, nil
+}
+
+func extractEmailClaim(claims jwt.MapClaims) string {
+	candidates := []string{"email", "email_address", "primary_email_address"}
+	for _, key := range candidates {
+		if value, ok := claims[key].(string); ok {
+			trimmed := strings.ToLower(strings.TrimSpace(value))
+			if trimmed != "" {
+				return trimmed
+			}
+		}
+	}
+
+	if nested, ok := claims["https://clerk.dev/claims"].(map[string]any); ok {
+		for _, key := range candidates {
+			if value, ok := nested[key].(string); ok {
+				trimmed := strings.ToLower(strings.TrimSpace(value))
+				if trimmed != "" {
+					return trimmed
+				}
+			}
+		}
+	}
+
+	return ""
 }

@@ -64,6 +64,10 @@ const PayUserScreen = () => {
       });
     },
     onError: (error) => {
+      if (error.message.toLowerCase().includes('pin is not set')) {
+        navigation.navigate('CreatePin');
+        return;
+      }
       navigation.navigate('TransferStatus', {
         transactionId: '',
         amount: nairaToKobo(parseFloat(amount)),
@@ -122,11 +126,12 @@ const PayUserScreen = () => {
       return;
     }
 
-    const action = () => {
+    const action = (transactionPin: string) => {
       sendPayment({
         recipient_username: username.trim(),
         amount: amountInKobo,
         description: description.trim(),
+        transaction_pin: transactionPin,
       });
     };
 

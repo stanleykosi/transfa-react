@@ -53,6 +53,7 @@ type CustomerVerifiedEvent struct {
 
 type CustomerTierStatusEvent struct {
 	AnchorCustomerID string  `json:"anchor_customer_id"`
+	Stage            string  `json:"stage,omitempty"`
 	Status           string  `json:"status"`
 	Reason           *string `json:"reason,omitempty"`
 }

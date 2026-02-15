@@ -49,6 +49,9 @@ func (h *TransactionHandlers) CreateMoneyDropHandler(w http.ResponseWriter, r *h
 		h.writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	if !h.authorizeTransactionPIN(r, w, userID, req.TransactionPIN) {
+		return
+	}
 
 	// Validate request
 	if req.AmountPerClaim <= 0 {

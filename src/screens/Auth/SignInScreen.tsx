@@ -102,19 +102,47 @@ const SignInScreen = () => {
         password,
       });
 
-      if (completeSignIn.status !== 'complete' || !completeSignIn.createdSessionId) {
-        Alert.alert('Sign in incomplete', 'Additional verification is required to continue.');
+      if (completeSignIn.status === 'complete' && completeSignIn.createdSessionId) {
+        await setActive({ session: completeSignIn.createdSessionId });
+        await persistRememberedIdentifier(identifier, rememberMe);
+
+        try {
+          await fetchAuthSession();
+        } catch (bootstrapError) {
+          console.warn('Auth bootstrap check failed after sign-in', bootstrapError);
+        }
         return;
       }
 
-      await setActive({ session: completeSignIn.createdSessionId });
-      await persistRememberedIdentifier(identifier, rememberMe);
+      if (completeSignIn.status === 'needs_second_factor') {
+        const emailFactor = Array.isArray((completeSignIn as any)?.supportedSecondFactors)
+          ? (completeSignIn as any).supportedSecondFactors.find(
+              (factor: any) =>
+                factor?.strategy === 'email_code' && typeof factor?.emailAddressId === 'string'
+            )
+          : null;
 
-      try {
-        await fetchAuthSession();
-      } catch (bootstrapError) {
-        console.warn('Auth bootstrap check failed after sign-in', bootstrapError);
+        if (!emailFactor?.emailAddressId) {
+          Alert.alert(
+            'Verification required',
+            'This account needs a second verification step that is not yet configured in this app.'
+          );
+          return;
+        }
+
+        await signIn.prepareSecondFactor({
+          strategy: 'email_code',
+          emailAddressId: emailFactor.emailAddressId,
+        });
+        await persistRememberedIdentifier(identifier, rememberMe);
+
+        navigation.navigate('VerifyCode', {
+          emailAddressId: emailFactor.emailAddressId,
+        });
+        return;
       }
+
+      Alert.alert('Sign in incomplete', 'Additional verification is required to continue.');
     } catch (err: any) {
       Alert.alert(
         'Login failed',

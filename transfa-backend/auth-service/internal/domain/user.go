@@ -15,7 +15,7 @@ type User struct {
 	ID                string    `json:"id"`
 	ClerkUserID       string    `json:"clerk_user_id"`
 	AnchorCustomerID  *string   `json:"anchor_customer_id,omitempty"` // Pointer to handle null
-	Username          string    `json:"username"`
+	Username          *string   `json:"username,omitempty"`
 	Email             *string   `json:"email,omitempty"`
 	PhoneNumber       *string   `json:"phone_number,omitempty"`
 	FullName          *string   `json:"full_name,omitempty"`
@@ -28,7 +28,6 @@ type User struct {
 
 // OnboardingRequest represents the data received from the client during the onboarding process.
 type OnboardingRequest struct {
-	Username    string                 `json:"username"`
 	UserType    UserType               `json:"user_type"`
 	KYCData     map[string]interface{} `json:"kyc_data"`
 	Email       string                 `json:"email"`

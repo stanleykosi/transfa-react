@@ -21,6 +21,7 @@ import {
   useQueryClient,
   type UseMutationOptions,
 } from '@tanstack/react-query';
+import axios from 'axios';
 import apiClient from './apiClient';
 import {
   P2PTransferPayload,
@@ -55,6 +56,19 @@ const PAYMENT_REQUESTS_QUERY_KEY = 'paymentRequests';
 const USER_PROFILE_QUERY_KEY = 'user-profile';
 const MONEY_DROP_QUERY_KEY = 'moneyDrop';
 
+const toReadableError = (error: unknown): Error => {
+  if (axios.isAxiosError(error)) {
+    const apiError = (error.response?.data as { error?: unknown } | undefined)?.error;
+    if (typeof apiError === 'string' && apiError.trim().length > 0) {
+      return new Error(apiError);
+    }
+  }
+  if (error instanceof Error) {
+    return error;
+  }
+  return new Error('Request failed');
+};
+
 /**
  * Custom hook to perform a Peer-to-Peer (P2P) transfer to another Transfa user.
  * @param options Optional mutation options (e.g., onSuccess, onError callbacks).
@@ -66,10 +80,14 @@ export const useP2PTransfer = (
   const queryClient = useQueryClient();
 
   const p2pTransferMutation = async (payload: P2PTransferPayload): Promise<TransactionResponse> => {
-    const { data } = await apiClient.post<TransactionResponse>('/transactions/p2p', payload, {
-      baseURL: TRANSACTION_SERVICE_URL,
-    });
-    return data;
+    try {
+      const { data } = await apiClient.post<TransactionResponse>('/transactions/p2p', payload, {
+        baseURL: TRANSACTION_SERVICE_URL,
+      });
+      return data;
+    } catch (error) {
+      throw toReadableError(error);
+    }
   };
 
   return useMutation<TransactionResponse, Error, P2PTransferPayload>({
@@ -97,14 +115,18 @@ export const useSelfTransfer = (
   const selfTransferMutation = async (
     payload: SelfTransferPayload
   ): Promise<TransactionResponse> => {
-    const { data } = await apiClient.post<TransactionResponse>(
-      '/transactions/self-transfer',
-      payload,
-      {
-        baseURL: TRANSACTION_SERVICE_URL,
-      }
-    );
-    return data;
+    try {
+      const { data } = await apiClient.post<TransactionResponse>(
+        '/transactions/self-transfer',
+        payload,
+        {
+          baseURL: TRANSACTION_SERVICE_URL,
+        }
+      );
+      return data;
+    } catch (error) {
+      throw toReadableError(error);
+    }
   };
 
   return useMutation<TransactionResponse, Error, SelfTransferPayload>({
@@ -382,7 +404,7 @@ export const useGetPaymentRequest = (requestId: string) => {
 export interface UserProfile {
   id: string; // UUID from backend database
   clerk_user_id: string; // Clerk ID for reference
-  username: string; // Actual username from database
+  username?: string | null; // Username may be missing until post-onboarding setup
   email?: string | null;
   phone_number?: string | null;
   full_name?: string | null;
@@ -431,10 +453,18 @@ export const useCreateMoneyDrop = (
   const createMoneyDropMutation = async (
     payload: CreateMoneyDropPayload
   ): Promise<MoneyDropResponse> => {
-    const { data } = await apiClient.post<MoneyDropResponse>('/transactions/money-drops', payload, {
-      baseURL: TRANSACTION_SERVICE_URL,
-    });
-    return data;
+    try {
+      const { data } = await apiClient.post<MoneyDropResponse>(
+        '/transactions/money-drops',
+        payload,
+        {
+          baseURL: TRANSACTION_SERVICE_URL,
+        }
+      );
+      return data;
+    } catch (error) {
+      throw toReadableError(error);
+    }
   };
 
   return useMutation<MoneyDropResponse, Error, CreateMoneyDropPayload>({

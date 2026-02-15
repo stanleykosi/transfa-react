@@ -84,20 +84,32 @@ const CreateAccountScreen = () => {
         } else if (data?.status === 'tier2_processing') {
           setStatus('tier2_processing');
           return;
+        } else if (data?.status === 'tier2_approved') {
+          setStatus('tier2_processing');
+          return;
         } else if (data?.status === 'tier2_manual_review') {
           setStatus('tier2_manual_review');
           return;
-        } else if (data?.status === 'tier2_error' || data?.status === 'tier2_failed') {
+        } else if (
+          data?.status === 'tier2_error' ||
+          data?.status === 'tier2_failed' ||
+          data?.status === 'tier2_rejected'
+        ) {
           setStatus('tier2_failed');
           Alert.alert(
             'Verification Issue',
             data?.status === 'tier2_error'
               ? 'There was an error completing your verification. Our team has been notified. Please try again later or contact support.'
-              : 'Your Tier 2 verification was rejected. Please contact support to continue.'
+              : data?.status === 'tier2_rejected'
+                ? 'Your Tier 2 verification was rejected. Please contact support to continue.'
+                : 'Your Tier 2 verification was rejected. Please contact support to continue.'
           );
           return;
-        } else if (data?.status === 'tier2_pending' || data?.status === 'tier1_created') {
-          setStatus('tier1_created');
+        } else if (data?.status === 'tier2_pending' || data?.status === 'tier2_processing') {
+          setStatus('tier2_processing');
+          return;
+        } else if (data?.status === 'tier1_created') {
+          navigation.navigate('OnboardingForm' as never);
           return;
         } else if (data?.status === 'tier1_processing' || data?.status === 'tier1_pending') {
           Alert.alert(

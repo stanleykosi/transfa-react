@@ -26,6 +26,7 @@ import { theme } from '@/constants/theme';
 import { useSecurityStore } from '@/store/useSecurityStore';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { submitTransactionPinSetup } from '@/api/authApi';
 
 const SecuritySettingsScreen = () => {
   const navigation = useNavigation();
@@ -47,7 +48,12 @@ const SecuritySettingsScreen = () => {
 
     setIsLoading(true);
     try {
-      await setPin(pin);
+      await submitTransactionPinSetup({ pin });
+      try {
+        await setPin(pin);
+      } catch (localError) {
+        console.warn('Failed to persist local PIN cache after backend setup', localError);
+      }
       Alert.alert('Success', 'Your new transaction PIN has been set successfully.');
       setPinValue('');
       setConfirmPin('');

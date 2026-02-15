@@ -48,7 +48,7 @@ CREATE TABLE public.users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     clerk_user_id VARCHAR(255) UNIQUE NOT NULL,
     anchor_customer_id VARCHAR(255) UNIQUE,
-    username VARCHAR(50) UNIQUE NOT NULL,
+    username VARCHAR(50) UNIQUE,
     email VARCHAR(255) UNIQUE,
     phone_number VARCHAR(50) UNIQUE,
     full_name VARCHAR(255),
@@ -69,6 +69,28 @@ COMMENT ON COLUMN public.users.allow_sending IS 'Flag to control sending capabil
 
 CREATE TRIGGER set_users_updated_at
 BEFORE UPDATE ON public.users
+FOR EACH ROW
+EXECUTE FUNCTION public.trigger_set_timestamp();
+
+CREATE TABLE public.user_security_credentials (
+    user_id UUID PRIMARY KEY REFERENCES public.users(id) ON DELETE CASCADE,
+    transaction_pin_hash TEXT NOT NULL,
+    pin_set_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    failed_attempts INTEGER NOT NULL DEFAULT 0 CHECK (failed_attempts >= 0),
+    last_failed_at TIMESTAMPTZ,
+    locked_until TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE public.user_security_credentials IS 'Backend-managed security credentials for users (e.g., transaction PIN hash).';
+COMMENT ON COLUMN public.user_security_credentials.transaction_pin_hash IS 'bcrypt hash of the user transaction PIN.';
+COMMENT ON COLUMN public.user_security_credentials.pin_set_at IS 'Timestamp when the user last set/rotated their transaction PIN.';
+COMMENT ON COLUMN public.user_security_credentials.failed_attempts IS 'Server-side failed PIN verification counter for lockout enforcement.';
+COMMENT ON COLUMN public.user_security_credentials.locked_until IS 'If set in the future, PIN verification should be blocked until this time.';
+
+CREATE TRIGGER set_user_security_credentials_updated_at
+BEFORE UPDATE ON public.user_security_credentials
 FOR EACH ROW
 EXECUTE FUNCTION public.trigger_set_timestamp();
 
@@ -120,6 +142,51 @@ COMMENT ON TABLE public.onboarding_status IS 'Tracks onboarding stage status tra
 COMMENT ON COLUMN public.onboarding_status.stage IS 'Onboarding stage key (e.g., tier1, tier2).';
 COMMENT ON COLUMN public.onboarding_status.status IS 'Current stage status (e.g., pending, created, completed, failed).';
 COMMENT ON COLUMN public.onboarding_status.reason IS 'Optional failure or review reason for the current status.';
+
+CREATE TABLE public.onboarding_progress (
+    clerk_user_id TEXT PRIMARY KEY,
+    user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+    user_type TEXT NOT NULL DEFAULT 'personal',
+    current_step SMALLINT NOT NULL DEFAULT 1 CHECK (current_step BETWEEN 1 AND 3),
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_onboarding_progress_updated_at
+ON public.onboarding_progress(updated_at);
+CREATE UNIQUE INDEX idx_onboarding_progress_user_id
+ON public.onboarding_progress(user_id)
+WHERE user_id IS NOT NULL;
+
+COMMENT ON TABLE public.onboarding_progress IS 'Stores draft onboarding progress for resume-after-login behavior.';
+COMMENT ON COLUMN public.onboarding_progress.current_step IS 'Latest onboarding step reached (1-3).';
+COMMENT ON COLUMN public.onboarding_progress.payload IS 'Partial onboarding form payload for draft resume.';
+
+CREATE TABLE public.event_outbox (
+    id BIGSERIAL PRIMARY KEY,
+    exchange TEXT NOT NULL,
+    routing_key TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processing_started_at TIMESTAMPTZ,
+    published_at TIMESTAMPTZ,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CHECK (status IN ('pending', 'processing', 'published'))
+);
+
+CREATE INDEX idx_event_outbox_dispatch
+ON public.event_outbox(status, next_attempt_at, created_at);
+
+CREATE INDEX idx_event_outbox_processing_started_at
+ON public.event_outbox(processing_started_at)
+WHERE status = 'processing';
+
+COMMENT ON TABLE public.event_outbox IS 'Transactional outbox for reliable async event publishing.';
+COMMENT ON COLUMN public.event_outbox.status IS 'Dispatch state: pending, processing, published.';
+COMMENT ON COLUMN public.event_outbox.next_attempt_at IS 'Time when the dispatcher should retry publishing.';
 
 -- Cached banks
 CREATE TABLE public.cached_banks (
@@ -391,6 +458,7 @@ EXECUTE FUNCTION public.trigger_set_timestamp();
 
 -- RLS
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_security_credentials ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.beneficiaries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_settings ENABLE ROW LEVEL SECURITY;

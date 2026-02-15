@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -14,12 +15,22 @@ import (
 // UserRepository defines the interface for user data storage.
 type UserRepository interface {
 	CreateUser(ctx context.Context, user *domain.User) (string, error)
+	CreateUserAndEnqueueUserCreatedEvent(ctx context.Context, user *domain.User, kycData map[string]interface{}, exchange, routingKey string) (string, error)
 	FindByClerkUserID(ctx context.Context, clerkUserID string) (*domain.User, error)
 	FindByEmail(ctx context.Context, email string) (*domain.User, error)
 	UpdateClerkUserID(ctx context.Context, userID, clerkUserID string) error
 	UpdateContactInfo(ctx context.Context, userID string, email *string, phone *string) error
 	UpdateAnchorCustomerInfo(ctx context.Context, userID string, anchorCustomerID string, fullName *string) error
+	UpdateUserProfileAndEnqueueUserCreatedEvent(ctx context.Context, userID string, email, phone, fullName *string, kycData map[string]interface{}, exchange, routingKey string) error
 	UpsertOnboardingStatus(ctx context.Context, userID, stage, status string, reason *string) error
+	UpsertOnboardingStatusAndEnqueueEvent(ctx context.Context, userID, stage, status string, reason *string, exchange, routingKey string, payload interface{}) error
+	UpdateTier1ProfileAndEnqueueEvent(ctx context.Context, userID string, email, phone, fullName *string, stage, status string, reason *string, exchange, routingKey string, payload interface{}) error
+	UpsertOnboardingProgress(ctx context.Context, clerkUserID string, userID *string, userType string, currentStep int, payload map[string]interface{}) error
+	GetOnboardingProgressByClerkUserID(ctx context.Context, clerkUserID string) (*OnboardingProgress, error)
+	ClearOnboardingProgress(ctx context.Context, clerkUserID string) error
+	ClaimOutboxMessages(ctx context.Context, limit int, staleAfterSeconds int) ([]OutboxMessage, error)
+	MarkOutboxPublished(ctx context.Context, id int64) error
+	MarkOutboxFailed(ctx context.Context, id int64, retryAfterSeconds int, reason string) error
 }
 
 // PostgresUserRepository is the PostgreSQL implementation of the UserRepository.
@@ -43,7 +54,7 @@ func (r *PostgresUserRepository) CreateUser(ctx context.Context, user *domain.Us
 	var userID string
 	err := r.db.QueryRow(ctx, query,
 		user.ClerkUserID,
-		user.Username,
+		nullableUsername(user.Username),
 		user.Email,
 		user.PhoneNumber,
 		user.FullName,
@@ -73,12 +84,13 @@ func (r *PostgresUserRepository) FindByClerkUserID(ctx context.Context, clerkUse
 	`
 	var u domain.User
 	var anchorID *string
+	var username *string
 	row := r.db.QueryRow(ctx, query, clerkUserID)
 	err := row.Scan(
 		&u.ID,
 		&u.ClerkUserID,
 		&anchorID,
-		&u.Username,
+		&username,
 		&u.Email,
 		&u.PhoneNumber,
 		&u.FullName,
@@ -97,6 +109,7 @@ func (r *PostgresUserRepository) FindByClerkUserID(ctx context.Context, clerkUse
 	if anchorID != nil {
 		u.AnchorCustomerID = anchorID
 	}
+	u.Username = username
 	return &u, nil
 }
 
@@ -108,12 +121,13 @@ func (r *PostgresUserRepository) FindByEmail(ctx context.Context, email string) 
 	`
 	var u domain.User
 	var anchorID *string
+	var username *string
 	row := r.db.QueryRow(ctx, query, email)
 	err := row.Scan(
 		&u.ID,
 		&u.ClerkUserID,
 		&anchorID,
-		&u.Username,
+		&username,
 		&u.Email,
 		&u.PhoneNumber,
 		&u.FullName,
@@ -132,6 +146,7 @@ func (r *PostgresUserRepository) FindByEmail(ctx context.Context, email string) 
 	if anchorID != nil {
 		u.AnchorCustomerID = anchorID
 	}
+	u.Username = username
 	return &u, nil
 }
 
@@ -150,7 +165,7 @@ func (r *PostgresUserRepository) UpdateClerkUserID(ctx context.Context, userID, 
 	return nil
 }
 
-// UpdateContactInfo updates Tier 0 contact fields for a user.
+// UpdateContactInfo updates tier 1 profile contact fields for a user.
 func (r *PostgresUserRepository) UpdateContactInfo(ctx context.Context, userID string, email *string, phone *string) error {
 	query := `
 		UPDATE users
@@ -208,4 +223,15 @@ func (r *PostgresUserRepository) UpsertOnboardingStatus(ctx context.Context, use
 		return err
 	}
 	return nil
+}
+
+func nullableUsername(username *string) interface{} {
+	if username == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*username)
+	if trimmed == "" {
+		return nil
+	}
+	return trimmed
 }

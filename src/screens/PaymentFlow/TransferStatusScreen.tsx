@@ -162,7 +162,7 @@ const TransferStatusScreen = () => {
               title="Done"
               onPress={() => {
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                navigation.navigate('AppTabs', { screen: 'Payments' });
+                navigation.navigate('AppTabs', { screen: 'Home' });
               }}
             />
           )}

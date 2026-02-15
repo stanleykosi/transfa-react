@@ -18,10 +18,92 @@ import apiClient from './apiClient';
 import {
   AccountTypeOptionsResponse,
   AuthSessionResponse,
+  OnboardingStatusResponse,
   OnboardingPayload,
+  OnboardingProgressPayload,
   OnboardingResponse,
+  SecurityStatusResponse,
+  SetTransactionPinPayload,
+  SetTransactionPinResponse,
+  SetUsernamePayload,
+  SetUsernameResponse,
+  Tier1ProfileUpdatePayload,
+  Tier1ProfileUpdateResponse,
+  Tier2VerificationPayload,
+  Tier2VerificationResponse,
+  UserDiscoveryResponse,
 } from '@/types/api';
 import { useAuth, useUser } from '@clerk/clerk-expo';
+
+export const submitOnboarding = async (payload: OnboardingPayload): Promise<OnboardingResponse> => {
+  const body = {
+    user_type: payload.userType,
+    phone_number: payload.phoneNumber,
+    kyc_data: payload.kycData,
+  } as const;
+
+  const { data } = await apiClient.post<OnboardingResponse>('/onboarding', body);
+  return data;
+};
+
+export const fetchOnboardingStatus = async (): Promise<OnboardingStatusResponse> => {
+  const { data } = await apiClient.get<OnboardingStatusResponse>('/onboarding/status');
+  return data;
+};
+
+export const submitTier2Verification = async (
+  payload: Tier2VerificationPayload
+): Promise<Tier2VerificationResponse> => {
+  const { data } = await apiClient.post<Tier2VerificationResponse>('/onboarding/tier2', payload);
+  return data;
+};
+
+export const submitTier1ProfileUpdate = async (
+  payload: Tier1ProfileUpdatePayload
+): Promise<Tier1ProfileUpdateResponse> => {
+  const body = {
+    user_type: payload.userType,
+    phone_number: payload.phoneNumber,
+    kyc_data: payload.kycData,
+  } as const;
+
+  const { data } = await apiClient.post<Tier1ProfileUpdateResponse>(
+    '/onboarding/tier1/update',
+    body
+  );
+  return data;
+};
+
+export const saveOnboardingProgress = async (payload: OnboardingProgressPayload): Promise<void> => {
+  await apiClient.post('/onboarding/progress', {
+    user_type: payload.userType,
+    current_step: payload.currentStep,
+    payload: payload.payload || {},
+  });
+};
+
+export const clearOnboardingProgress = async (): Promise<void> => {
+  await apiClient.post('/onboarding/progress/clear');
+};
+
+export const submitUsernameSetup = async (
+  payload: SetUsernamePayload
+): Promise<SetUsernameResponse> => {
+  const { data } = await apiClient.post<SetUsernameResponse>('/me/username', payload);
+  return data;
+};
+
+export const submitTransactionPinSetup = async (
+  payload: SetTransactionPinPayload
+): Promise<SetTransactionPinResponse> => {
+  const { data } = await apiClient.post<SetTransactionPinResponse>('/me/transaction-pin', payload);
+  return data;
+};
+
+export const fetchSecurityStatus = async (): Promise<SecurityStatusResponse> => {
+  const { data } = await apiClient.get<SecurityStatusResponse>('/me/security-status');
+  return data;
+};
 
 /**
  * A custom hook that provides a mutation function for submitting the user's
@@ -40,21 +122,20 @@ export const useOnboardingMutation = (
   const onboardingMutation = async (payload: OnboardingPayload): Promise<OnboardingResponse> => {
     const token = await getToken().catch(() => undefined);
 
-    // Transform to backend's expected shape (snake_case)
-    const body = {
-      username: payload.username,
-      user_type: payload.userType,
-      email: payload.email,
-      phone_number: payload.phoneNumber,
-      kyc_data: payload.kycData,
-    } as const;
-
-    const { data } = await apiClient.post<OnboardingResponse>('/onboarding', body, {
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(user?.id ? { 'X-Clerk-User-Id': user.id } : {}),
+    const { data } = await apiClient.post<OnboardingResponse>(
+      '/onboarding',
+      {
+        user_type: payload.userType,
+        phone_number: payload.phoneNumber,
+        kyc_data: payload.kycData,
       },
-    });
+      {
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          ...(user?.id ? { 'X-Clerk-User-Id': user.id } : {}),
+        },
+      }
+    );
     return data;
   };
 
@@ -75,5 +156,19 @@ export const fetchAuthSession = async (): Promise<AuthSessionResponse> => {
 
 export const fetchAccountTypeOptions = async (): Promise<AccountTypeOptionsResponse> => {
   const { data } = await apiClient.get<AccountTypeOptionsResponse>('/onboarding/account-types');
+  return data;
+};
+
+export const searchUsers = async (query: string, limit = 10): Promise<UserDiscoveryResponse> => {
+  const { data } = await apiClient.get<UserDiscoveryResponse>('/users/search', {
+    params: { q: query, limit },
+  });
+  return data;
+};
+
+export const fetchFrequentUsers = async (limit = 6): Promise<UserDiscoveryResponse> => {
+  const { data } = await apiClient.get<UserDiscoveryResponse>('/users/frequent', {
+    params: { limit },
+  });
   return data;
 };

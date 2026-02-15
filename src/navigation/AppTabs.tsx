@@ -1,93 +1,87 @@
-/**
- * @description
- * This file defines the main application navigation for authenticated users,
- * structured as a bottom tab navigator. It provides access to the core sections
- * of the app: Home, Payments, Analytics, and Profile.
- *
- * @dependencies
- * - @react-navigation/bottom-tabs: For creating the tab-based navigator.
- * - @expo/vector-icons: Provides the icon set (Ionicons) used in the tab bar.
- * - Screens: Imports the main screens for the application.
- * - @/constants/theme: For consistent styling of the tab bar.
- *
- * @notes
- * - This component is intended to be nested within a stack navigator (`AppStack`)
- *   to allow for modal screens to be displayed over the tabs.
- */
-
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import HomeScreen from '@/screens/Home/HomeScreen';
-import PaymentsScreen from '@/screens/Payments/PaymentsScreen';
-import AnalyticsScreen from '@/screens/Analytics/AnalyticsScreen';
-import { theme } from '@/constants/theme';
-import ProfileStack, { ProfileStackParamList } from './ProfileStack';
 import { NavigatorScreenParams } from '@react-navigation/native';
 
-// Define the parameter list for the AppTabs routes for type safety.
+import HomeScreen from '@/screens/Home/HomeScreen';
+import ProfileStack, { ProfileStackParamList } from './ProfileStack';
+import MoneyDropTabScreen from '@/screens/MoneyDrop/MoneyDropTabScreen';
+import SupportScreen from '@/screens/Support/SupportScreen';
+
 export type AppTabsParamList = {
   Home: undefined;
-  Payments: undefined;
-  Analytics: undefined;
-  Profile: NavigatorScreenParams<ProfileStackParamList>;
+  Settings: NavigatorScreenParams<ProfileStackParamList>;
+  MoneyDrop: undefined;
+  Support: undefined;
 };
 
 const Tab = createBottomTabNavigator<AppTabsParamList>();
 
-type IconName = React.ComponentProps<typeof Ionicons>['name'];
+type TabIconName = React.ComponentProps<typeof Ionicons>['name'];
 
-// Helper function to get icon name based on route and focus state
-const getIconName = (routeName: string, focused: boolean): IconName => {
+const resolveIconName = (routeName: keyof AppTabsParamList, focused: boolean): TabIconName => {
   switch (routeName) {
     case 'Home':
       return focused ? 'home' : 'home-outline';
-    case 'Payments':
-      return focused ? 'swap-horizontal' : 'swap-horizontal-outline';
-    case 'Analytics':
-      return focused ? 'stats-chart' : 'stats-chart-outline';
-    case 'Profile':
-      return focused ? 'person' : 'person-outline';
+    case 'Settings':
+      return focused ? 'settings' : 'settings-outline';
+    case 'MoneyDrop':
+      return focused ? 'gift' : 'gift-outline';
+    case 'Support':
+      return focused ? 'headset' : 'headset-outline';
     default:
-      return 'ellipse'; // Default fallback icon
+      return 'ellipse';
   }
 };
-
-interface TabBarIconProps {
-  route: { name: string };
-  focused: boolean;
-  color: string;
-  size: number;
-}
-
-// Define the tab bar icon component outside of the AppTabs component for performance
-const TabBarIcon: React.FC<TabBarIconProps> = React.memo(({ route, focused, color, size }) => (
-  <Ionicons name={getIconName(route.name, focused)} size={size} color={color} />
-));
-
-// Define the tab bar icon function outside of render to avoid recreation
-const createTabBarIcon =
-  (route: { name: string }) =>
-  ({ focused, color, size }: { focused: boolean; color: string; size: number }) => (
-    <TabBarIcon route={route} focused={focused} color={color} size={size} />
-  );
 
 const AppTabs = () => {
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
-        tabBarIcon: createTabBarIcon(route),
-        tabBarActiveTintColor: theme.colors.primary,
-        tabBarInactiveTintColor: theme.colors.textSecondary,
-        headerShown: false, // Hiding default headers to use custom ones per screen
+        headerShown: false,
+        tabBarShowLabel: false,
+        tabBarHideOnKeyboard: true,
+        tabBarActiveTintColor: '#FFD300',
+        tabBarInactiveTintColor: '#A0A1A4',
+        tabBarStyle: styles.tabBar,
+        tabBarIconStyle: styles.tabBarIcon,
+        tabBarIcon: ({ focused, color, size }) => (
+          <Ionicons
+            name={resolveIconName(route.name as keyof AppTabsParamList, focused)}
+            size={size}
+            color={color}
+          />
+        ),
       })}
     >
       <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Payments" component={PaymentsScreen} />
-      <Tab.Screen name="Analytics" component={AnalyticsScreen} />
-      <Tab.Screen name="Profile" component={ProfileStack} />
+      <Tab.Screen name="Settings" component={ProfileStack} />
+      <Tab.Screen name="MoneyDrop" component={MoneyDropTabScreen} />
+      <Tab.Screen name="Support" component={SupportScreen} />
     </Tab.Navigator>
   );
 };
+
+const styles = StyleSheet.create({
+  tabBar: {
+    position: 'absolute',
+    left: 52,
+    right: 52,
+    bottom: 24,
+    height: 56,
+    borderTopWidth: 0,
+    elevation: 0,
+    backgroundColor: '#080A0D',
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: '#1A1D22',
+    paddingBottom: 2,
+    paddingTop: 2,
+  },
+  tabBarIcon: {
+    marginTop: 2,
+  },
+});
 
 export default AppTabs;

@@ -26,6 +26,12 @@ import { useUser } from '@clerk/clerk-expo';
 import AppTabs, { AppTabsParamList } from './AppTabs';
 import OnboardingFormScreen from '@/screens/Onboarding/OnboardingFormScreen';
 import SelectAccountTypeScreen from '@/screens/Onboarding/SelectAccountTypeScreen';
+import OnboardingProcessingScreen from '@/screens/Onboarding/OnboardingProcessingScreen';
+import OnboardingResultScreen from '@/screens/Onboarding/OnboardingResultScreen';
+import CreateUsernameScreen from '@/screens/Onboarding/CreateUsernameScreen';
+import CreatePinScreen from '@/screens/Onboarding/CreatePinScreen';
+import ConfirmPinScreen from '@/screens/Onboarding/ConfirmPinScreen';
+import UserSearchScreen from '@/screens/Home/UserSearchScreen';
 import PayUserScreen from '@/screens/PaymentFlow/PayUserScreen';
 import SelfTransferScreen from '@/screens/PaymentFlow/SelfTransferScreen';
 import TransferStatusScreen from '@/screens/PaymentFlow/TransferStatusScreen';
@@ -43,8 +49,21 @@ import { theme } from '@/constants/theme';
 export type AppStackParamList = {
   AppTabs: NavigatorScreenParams<AppTabsParamList>; // Nested navigator
   SelectAccountType: undefined;
-  OnboardingForm: { userType?: 'personal' | 'merchant' };
+  OnboardingForm: {
+    userType?: 'personal' | 'merchant';
+    startStep?: 1 | 2 | 3;
+    forceTier1Update?: boolean;
+  };
   CreateAccount: undefined;
+  CreateUsername: undefined;
+  CreatePin: undefined;
+  ConfirmPin: { pin: string };
+  OnboardingResult: {
+    outcome: 'success' | 'failure' | 'manual_review';
+    status: string;
+    reason?: string;
+  };
+  UserSearch: undefined;
   PayUser: undefined;
   SelfTransfer: undefined;
   TransferStatus: {
@@ -72,7 +91,12 @@ const AppStack = () => {
   const { user } = useUser();
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
   const [initialRoute, setInitialRoute] = useState<
-    'AppTabs' | 'SelectAccountType' | 'OnboardingForm' | 'CreateAccount'
+    | 'AppTabs'
+    | 'SelectAccountType'
+    | 'OnboardingForm'
+    | 'CreateAccount'
+    | 'CreateUsername'
+    | 'CreatePin'
   >('AppTabs');
 
   useEffect(() => {
@@ -90,8 +114,14 @@ const AppStack = () => {
           case 'create_account':
             setInitialRoute('CreateAccount');
             break;
+          case 'create_username':
+            setInitialRoute('CreateUsername');
+            break;
+          case 'create_pin':
+            setInitialRoute('CreatePin');
+            break;
           case 'onboarding_form':
-            if (session?.onboarding?.status === 'new') {
+            if (session?.onboarding?.status === 'new' && !session?.onboarding?.resume_step) {
               setInitialRoute('SelectAccountType');
               break;
             }
@@ -151,12 +181,37 @@ const AppStack = () => {
       />
       <Stack.Screen
         name="CreateAccount"
-        component={require('@/screens/Onboarding/CreateAccountScreen').default}
+        component={OnboardingProcessingScreen}
         options={{
-          title: 'Create Account',
+          headerShown: false,
           headerBackVisible: false,
           gestureEnabled: false,
         }}
+      />
+      <Stack.Screen
+        name="CreateUsername"
+        component={CreateUsernameScreen}
+        options={{ headerShown: false, gestureEnabled: false }}
+      />
+      <Stack.Screen
+        name="CreatePin"
+        component={CreatePinScreen}
+        options={{ headerShown: false, gestureEnabled: false }}
+      />
+      <Stack.Screen
+        name="ConfirmPin"
+        component={ConfirmPinScreen}
+        options={{ headerShown: false, gestureEnabled: false }}
+      />
+      <Stack.Screen
+        name="OnboardingResult"
+        component={OnboardingResultScreen}
+        options={{ headerShown: false, gestureEnabled: false }}
+      />
+      <Stack.Screen
+        name="UserSearch"
+        component={UserSearchScreen}
+        options={{ headerShown: false }}
       />
       <Stack.Screen name="PayUser" component={PayUserScreen} options={{ headerShown: false }} />
       <Stack.Screen

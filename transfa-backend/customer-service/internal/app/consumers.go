@@ -47,6 +47,7 @@ type EventPublisher interface {
 type TierStatusEvent struct {
 	UserID           string  `json:"user_id"`
 	AnchorCustomerID string  `json:"anchor_customer_id"`
+	Stage            string  `json:"stage"`
 	Status           string  `json:"status"`
 	Reason           *string `json:"reason"`
 }
@@ -200,6 +201,136 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 	return true
 }
 
+// HandleTier1ProfileUpdateRequestedEvent updates an existing Anchor customer profile
+// so users can fix mismatched KYC details before retrying Tier2.
+func (h *UserEventHandler) HandleTier1ProfileUpdateRequestedEvent(body []byte) bool {
+	var event domain.Tier1ProfileUpdateRequestedEvent
+	if err := json.Unmarshal(body, &event); err != nil {
+		log.Printf("Error unmarshaling user.tier1.update.requested event: %v", err)
+		return true
+	}
+
+	if strings.TrimSpace(event.UserID) == "" || strings.TrimSpace(event.AnchorCustomerID) == "" {
+		log.Printf("Invalid user.tier1.update.requested event: missing user_id or anchor_customer_id")
+		return true
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "processing", nil); err != nil {
+		log.Printf("Failed to mark tier1 processing for user %s: %v", event.UserID, err)
+	}
+
+	firstName, err := requireKYCString(event.KYCData, "firstName")
+	if err != nil {
+		reason := err.Error()
+		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", &reason)
+		return true
+	}
+	lastName, err := requireKYCString(event.KYCData, "lastName")
+	if err != nil {
+		reason := err.Error()
+		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", &reason)
+		return true
+	}
+	email, err := requireKYCString(event.KYCData, "email")
+	if err != nil {
+		reason := err.Error()
+		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", &reason)
+		return true
+	}
+	phoneNumber, err := requireKYCString(event.KYCData, "phoneNumber")
+	if err != nil {
+		reason := err.Error()
+		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", &reason)
+		return true
+	}
+	addressLine1, err := requireKYCString(event.KYCData, "addressLine1")
+	if err != nil {
+		reason := err.Error()
+		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", &reason)
+		return true
+	}
+	city, err := requireKYCString(event.KYCData, "city")
+	if err != nil {
+		reason := err.Error()
+		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", &reason)
+		return true
+	}
+	state, err := requireKYCString(event.KYCData, "state")
+	if err != nil {
+		reason := err.Error()
+		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", &reason)
+		return true
+	}
+	postalCode, err := requireKYCString(event.KYCData, "postalCode")
+	if err != nil {
+		reason := err.Error()
+		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", &reason)
+		return true
+	}
+	country, err := requireKYCString(event.KYCData, "country")
+	if err != nil {
+		reason := err.Error()
+		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", &reason)
+		return true
+	}
+
+	middleName, _ := optionalKYCString(event.KYCData, "middleName")
+	maidenName, _ := optionalKYCString(event.KYCData, "maidenName")
+	addressLine2, _ := optionalKYCString(event.KYCData, "addressLine2")
+
+	req := domain.AnchorCreateIndividualCustomerRequest{
+		Data: domain.RequestData{
+			Type: "IndividualCustomer",
+			Attributes: domain.IndividualCustomerAttributes{
+				FullName: domain.FullName{
+					FirstName:  firstName,
+					LastName:   lastName,
+					MiddleName: middleName,
+					MaidenName: maidenName,
+				},
+				Email:       email,
+				PhoneNumber: phoneNumber,
+				Address: domain.Address{
+					AddressLine1: addressLine1,
+					AddressLine2: addressLine2,
+					City:         city,
+					State:        state,
+					PostalCode:   postalCode,
+					Country:      strings.ToUpper(country),
+				},
+			},
+		},
+	}
+
+	if err := h.anchorClient.UpdateIndividualCustomer(ctx, event.AnchorCustomerID, req); err != nil {
+		reason := fmt.Sprintf("Failed to update Anchor customer profile: %v", err)
+		log.Printf("ERROR: %s (user_id=%s, anchor_customer_id=%s)", reason, event.UserID, event.AnchorCustomerID)
+		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", &reason)
+		return true
+	}
+
+	fullNameParts := []string{firstName}
+	if middleName != "" {
+		fullNameParts = append(fullNameParts, middleName)
+	}
+	fullNameParts = append(fullNameParts, lastName)
+	if maidenName != "" {
+		fullNameParts = append(fullNameParts, "("+maidenName+")")
+	}
+	updatedFullName := strings.Join(fullNameParts, " ")
+	_ = h.repo.UpdateAnchorCustomerInfo(ctx, event.UserID, "", &updatedFullName)
+
+	if err := h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "created", nil); err != nil {
+		log.Printf("Failed to mark tier1 created after update for user %s: %v", event.UserID, err)
+	}
+
+	log.Printf("Successfully updated Anchor customer profile for user %s", event.UserID)
+	return true
+}
+
 func (h *UserEventHandler) HandleTier2VerificationRequestedEvent(body []byte) bool {
 	var event domain.Tier2VerificationRequestedEvent
 	if err := json.Unmarshal(body, &event); err != nil {
@@ -327,17 +458,49 @@ func (h *UserEventHandler) HandleTierStatusEvent(body []byte) bool {
 		return true
 	}
 
+	stage := normalizeTierStage(event.Stage, event.Status)
+	normalizedStatus := normalizeTierStatus(event.Status)
+	if normalizedStatus == "" {
+		log.Printf("customer.tier.status invalid status for user %s: %q", event.UserID, event.Status)
+		return true
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	stage := "tier2"
-	if err := h.repo.UpsertOnboardingStatus(ctx, event.UserID, stage, event.Status, event.Reason); err != nil {
-		log.Printf("Failed to persist tier status %s for user %s: %v", event.Status, event.UserID, err)
+	if err := h.repo.UpsertOnboardingStatus(ctx, event.UserID, stage, normalizedStatus, event.Reason); err != nil {
+		log.Printf("Failed to persist tier status %s/%s for user %s: %v", stage, normalizedStatus, event.UserID, err)
 		return false
 	}
 
-	log.Printf("Updated onboarding status for user %s -> %s", event.UserID, event.Status)
+	log.Printf("Updated onboarding status for user %s -> %s/%s", event.UserID, stage, normalizedStatus)
 	return true
+}
+
+func normalizeTierStage(stage, status string) string {
+	normalizedStage := strings.ToLower(strings.TrimSpace(stage))
+	switch normalizedStage {
+	case "tier1", "tier2":
+		return normalizedStage
+	}
+
+	normalizedStatus := strings.ToLower(strings.TrimSpace(status))
+	if strings.HasPrefix(normalizedStatus, "tier1_") {
+		return "tier1"
+	}
+	return "tier2"
+}
+
+func normalizeTierStatus(status string) string {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	normalized = strings.TrimPrefix(normalized, "tier1_")
+	normalized = strings.TrimPrefix(normalized, "tier2_")
+	switch normalized {
+	case "created", "pending", "processing", "completed", "failed", "error", "manual_review", "rejected", "rate_limited", "system_error", "approved", "awaiting_document", "reenter_information":
+		return normalized
+	default:
+		return ""
+	}
 }
 
 // createPersonalCustomer handles the logic for creating an IndividualCustomer on Anchor.
@@ -358,6 +521,27 @@ func (h *UserEventHandler) createPersonalCustomer(ctx context.Context, event dom
 		firstName = strings.Join(parts[:len(parts)-1], " ")
 		lastName = parts[len(parts)-1]
 	}
+	addressLine1, err := requireKYCString(event.KYCData, "addressLine1")
+	if err != nil {
+		return "", err
+	}
+	city, err := requireKYCString(event.KYCData, "city")
+	if err != nil {
+		return "", err
+	}
+	state, err := requireKYCString(event.KYCData, "state")
+	if err != nil {
+		return "", err
+	}
+	postalCode, err := requireKYCString(event.KYCData, "postalCode")
+	if err != nil {
+		return "", err
+	}
+	country, err := requireKYCString(event.KYCData, "country")
+	if err != nil {
+		return "", err
+	}
+	addressLine2, _ := optionalKYCString(event.KYCData, "addressLine2")
 
 	req := domain.AnchorCreateIndividualCustomerRequest{
 		Data: domain.RequestData{
@@ -367,11 +551,12 @@ func (h *UserEventHandler) createPersonalCustomer(ctx context.Context, event dom
 				Email:       email,
 				PhoneNumber: phoneNumber,
 				Address: domain.Address{
-					AddressLine1: getString(event.KYCData, "addressLine1", "123 Main Street"),
-					City:         getString(event.KYCData, "city", "Ikeja"),
-					State:        getString(event.KYCData, "state", "Lagos"),
-					PostalCode:   getString(event.KYCData, "postalCode", "100001"),
-					Country:      getString(event.KYCData, "country", "NG"),
+					AddressLine1: addressLine1,
+					AddressLine2: addressLine2,
+					City:         city,
+					State:        state,
+					PostalCode:   postalCode,
+					Country:      strings.ToUpper(country),
 				},
 			},
 		},
@@ -397,6 +582,27 @@ func (h *UserEventHandler) createPersonalCustomerWithIdempotency(ctx context.Con
 	if firstName == "" || lastName == "" || email == "" || phoneNumber == "" {
 		return "", fmt.Errorf("missing required fields (firstName, lastName, email, phoneNumber) in KYCData")
 	}
+	addressLine1, err := requireKYCString(event.KYCData, "addressLine1")
+	if err != nil {
+		return "", err
+	}
+	city, err := requireKYCString(event.KYCData, "city")
+	if err != nil {
+		return "", err
+	}
+	state, err := requireKYCString(event.KYCData, "state")
+	if err != nil {
+		return "", err
+	}
+	postalCode, err := requireKYCString(event.KYCData, "postalCode")
+	if err != nil {
+		return "", err
+	}
+	country, err := requireKYCString(event.KYCData, "country")
+	if err != nil {
+		return "", err
+	}
+	addressLine2, _ := optionalKYCString(event.KYCData, "addressLine2")
 
 	req := domain.AnchorCreateIndividualCustomerRequest{
 		Data: domain.RequestData{
@@ -411,11 +617,12 @@ func (h *UserEventHandler) createPersonalCustomerWithIdempotency(ctx context.Con
 				Email:       email,
 				PhoneNumber: phoneNumber,
 				Address: domain.Address{
-					AddressLine1: getString(event.KYCData, "addressLine1", "123 Main Street"),
-					City:         getString(event.KYCData, "city", "Ikeja"),
-					State:        getString(event.KYCData, "state", "Lagos"),
-					PostalCode:   getString(event.KYCData, "postalCode", "100001"),
-					Country:      getString(event.KYCData, "country", "NG"),
+					AddressLine1: addressLine1,
+					AddressLine2: addressLine2,
+					City:         city,
+					State:        state,
+					PostalCode:   postalCode,
+					Country:      strings.ToUpper(country),
 				},
 			},
 		},
@@ -428,11 +635,24 @@ func (h *UserEventHandler) createPersonalCustomerWithIdempotency(ctx context.Con
 	return resp.Data.ID, nil
 }
 
-func getString(m map[string]interface{}, key, def string) string {
-	if v, ok := m[key].(string); ok && v != "" {
-		return v
+func requireKYCString(values map[string]interface{}, key string) (string, error) {
+	value, ok := values[key].(string)
+	if !ok || strings.TrimSpace(value) == "" {
+		return "", fmt.Errorf("missing required field (%s) in KYCData", key)
 	}
-	return def
+	return strings.TrimSpace(value), nil
+}
+
+func optionalKYCString(values map[string]interface{}, key string) (string, bool) {
+	value, ok := values[key].(string)
+	if !ok {
+		return "", false
+	}
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", false
+	}
+	return trimmed, true
 }
 
 func ptr(s string) *string { return &s }

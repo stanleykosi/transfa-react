@@ -32,10 +32,18 @@ import (
 	"github.com/transfa/transaction-service/pkg/accountclient"
 	"github.com/transfa/transaction-service/pkg/anchorclient"
 	rmrabbit "github.com/transfa/transaction-service/pkg/rabbitmq"
+	"golang.org/x/crypto/bcrypt"
 )
 
 const (
 	defaultTransactionFee = 500
+	pinMaxAttempts        = 5
+	pinLockoutSeconds     = 900
+)
+
+var (
+	ErrInvalidTransactionPIN = errors.New("invalid transaction pin")
+	ErrTransactionPINLocked  = errors.New("transaction pin temporarily locked")
 )
 
 // Service provides the core business logic for transactions.
@@ -94,6 +102,47 @@ func (s *Service) GetMoneyDropFee() int64 {
 // from validated JWTs while our repositories continue to operate on UUIDs.
 func (s *Service) ResolveInternalUserID(ctx context.Context, clerkUserID string) (string, error) {
 	return s.repo.FindUserIDByClerkUserID(ctx, clerkUserID)
+}
+
+// VerifyTransactionPIN validates the user-provided PIN against server-side hash and lockout state.
+func (s *Service) VerifyTransactionPIN(ctx context.Context, userID uuid.UUID, pin string) error {
+	if len(pin) != 4 {
+		return ErrInvalidTransactionPIN
+	}
+	for _, c := range pin {
+		if c < '0' || c > '9' {
+			return ErrInvalidTransactionPIN
+		}
+	}
+
+	credential, err := s.repo.GetUserSecurityCredentialByUserID(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	if credential.LockedUntil != nil && credential.LockedUntil.After(now) {
+		return ErrTransactionPINLocked
+	}
+
+	if bcrypt.CompareHashAndPassword([]byte(credential.TransactionPINHash), []byte(pin)) != nil {
+		updatedCredential, recordErr := s.repo.RecordFailedTransactionPINAttempt(ctx, userID, pinMaxAttempts, pinLockoutSeconds)
+		if recordErr != nil {
+			return recordErr
+		}
+		if updatedCredential.LockedUntil != nil && updatedCredential.LockedUntil.After(now) {
+			return ErrTransactionPINLocked
+		}
+		return ErrInvalidTransactionPIN
+	}
+
+	if credential.FailedAttempts > 0 || credential.LockedUntil != nil {
+		if err := s.repo.ResetTransactionPINFailureState(ctx, userID); err != nil {
+			log.Printf("level=warn component=service flow=pin_verify msg=\"failed to reset pin failure state\" user_id=%s err=%v", userID, err)
+		}
+	}
+
+	return nil
 }
 
 // ProcessP2PTransfer handles the logic for a peer-to-peer transfer.

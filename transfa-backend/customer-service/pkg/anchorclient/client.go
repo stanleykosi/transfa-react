@@ -112,6 +112,35 @@ func (c *Client) TriggerIndividualKYC(ctx context.Context, customerID string, re
 	return nil
 }
 
+// UpdateIndividualCustomer updates an existing individual customer profile on Anchor.
+// Anchor expects the same payload structure as create customer.
+func (c *Client) UpdateIndividualCustomer(ctx context.Context, customerID string, req domain.AnchorCreateIndividualCustomerRequest) error {
+	url := fmt.Sprintf("%s/api/v1/customers/update/%s", c.BaseURL, customerID)
+	body, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal update request body: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewBuffer(body))
+	if err != nil {
+		return fmt.Errorf("failed to create update http request: %w", err)
+	}
+
+	c.setHeaders(httpReq)
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("failed to send update request to Anchor: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return c.handleErrorResponse(resp)
+	}
+
+	return nil
+}
+
 // setHeaders adds the necessary authentication and content-type headers to the request.
 func (c *Client) setHeaders(req *http.Request) {
 	req.Header.Set("Content-Type", "application/json")
@@ -185,7 +214,7 @@ func (c *Client) CreateIndividualCustomerWithIdempotency(ctx context.Context, re
 func extractCustomerIDFromError(errorBody string) string {
 	// Look for patterns that might contain customer IDs
 	// This is a heuristic approach - in practice, you might need to adjust based on actual error responses
-	
+
 	// Look for patterns like "17587033450610-anc_ind_cst" in the error message
 	// Anchor customer IDs typically follow this pattern: number-anc_ind_cst
 	lines := strings.Split(errorBody, "\n")
@@ -205,7 +234,7 @@ func extractCustomerIDFromError(errorBody string) string {
 			}
 		}
 	}
-	
+
 	// If no customer ID found, return empty string
 	return ""
 }

@@ -24,7 +24,7 @@
  *
  * @example
  * const { triggerSecureAction } = useSecureAction();
- * const handlePayment = () => {
+ * const handlePayment = (pin: string) => {
  *   // ... payment logic
  * };
  *
@@ -34,7 +34,6 @@
  * />
  */
 import { useState, useCallback } from 'react';
-import { Alert } from 'react-native';
 import ReactNativeBiometrics from 'react-native-biometrics';
 import { useSecurityStore } from '@/store/useSecurityStore';
 
@@ -47,26 +46,24 @@ const isDevModeEnabled = () => {
 };
 
 export const useSecureAction = () => {
-  const { isPinSet, biometricsEnabled, verifyPin } = useSecurityStore();
+  const { biometricsEnabled, getPin } = useSecurityStore();
   const [isModalVisible, setModalVisible] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [actionToExecute, setActionToExecute] = useState<(() => void) | null>(null);
+  const [actionToExecute, setActionToExecute] = useState<((pin: string) => void) | null>(null);
 
-  const executeAction = useCallback(() => {
-    if (actionToExecute) {
-      actionToExecute();
-    }
-    setModalVisible(false);
-    setActionToExecute(null);
-  }, [actionToExecute]);
+  const executeAction = useCallback(
+    (pin: string) => {
+      if (actionToExecute) {
+        actionToExecute(pin);
+      }
+      setModalVisible(false);
+      setActionToExecute(null);
+    },
+    [actionToExecute]
+  );
 
   const handlePinSuccess = async (pin: string) => {
-    const isValid = await verifyPin(pin);
-    if (isValid) {
-      executeAction();
-    } else {
-      setError('Incorrect PIN. Please try again.');
-    }
+    executeAction(pin);
   };
 
   const clearError = useCallback(() => {
@@ -74,21 +71,15 @@ export const useSecureAction = () => {
   }, []);
 
   const triggerSecureAction = useCallback(
-    async (action: () => void) => {
-      // Development mode: skip PIN/biometric check entirely
+    async (action: (pin: string) => void) => {
+      const storedPin = await getPin();
+
+      // Development mode: skip biometric/PIN prompt and use stored pin when available.
       if (isDevModeEnabled()) {
         console.warn(
-          '⚠️  DEVELOPMENT MODE: Skipping PIN/biometric check (EXPO_PUBLIC_SKIP_PIN_CHECK=true)'
+          '⚠️  DEVELOPMENT MODE: Skipping PIN/biometric prompt (EXPO_PUBLIC_SKIP_PIN_CHECK=true)'
         );
-        action();
-        return;
-      }
-
-      if (!isPinSet) {
-        Alert.alert(
-          'PIN Not Set',
-          'Please set up a transaction PIN in your security settings before proceeding.'
-        );
+        action(storedPin ?? '0000');
         return;
       }
 
@@ -106,7 +97,11 @@ export const useSecureAction = () => {
             });
 
             if (success) {
-              executeAction();
+              if (storedPin) {
+                executeAction(storedPin);
+              } else {
+                setModalVisible(true);
+              }
             } else {
               // User cancelled or biometric failed, fall back to PIN
               setModalVisible(true);
@@ -125,7 +120,7 @@ export const useSecureAction = () => {
         setModalVisible(true);
       }
     },
-    [isPinSet, biometricsEnabled, executeAction]
+    [biometricsEnabled, executeAction, getPin]
   );
 
   return {

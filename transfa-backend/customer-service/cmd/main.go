@@ -111,6 +111,16 @@ func main() {
 		}
 	}()
 
+	go func() {
+		updateQueueName := "customer_service_tier1_update_requested"
+		updateRoutingKey := "user.tier1.update.requested"
+		log.Printf("Starting consumer for queue '%s'...", updateQueueName)
+		err := consumer.Consume(exchangeName, updateQueueName, updateRoutingKey, eventHandler.HandleTier1ProfileUpdateRequestedEvent)
+		if err != nil {
+			log.Fatalf("Tier1 update consumer error: %v", err)
+		}
+	}()
+
 	// Consume tier status events and tier2 verification requests on dedicated queues
 	go func() {
 		tier2Queue := "customer_service_tier2_requested"

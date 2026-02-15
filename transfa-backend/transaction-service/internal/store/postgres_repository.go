@@ -32,6 +32,7 @@ var (
 	ErrInsufficientFunds     = errors.New("insufficient funds")
 	ErrPlatformFeeDelinquent = errors.New("platform fee delinquent")
 	ErrTransactionNotFound   = errors.New("transaction not found")
+	ErrTransactionPINNotSet  = errors.New("transaction pin not set")
 )
 
 // PostgresRepository is a concrete implementation of the Repository interface for PostgreSQL.
@@ -85,6 +86,91 @@ func (r *PostgresRepository) FindUserByID(ctx context.Context, userID uuid.UUID)
 		return nil, err
 	}
 	return &user, nil
+}
+
+// GetUserSecurityCredentialByUserID returns transaction PIN security metadata for a user.
+func (r *PostgresRepository) GetUserSecurityCredentialByUserID(ctx context.Context, userID uuid.UUID) (*domain.UserSecurityCredential, error) {
+	var credential domain.UserSecurityCredential
+	query := `
+		SELECT user_id, transaction_pin_hash, failed_attempts, locked_until
+		FROM user_security_credentials
+		WHERE user_id = $1
+	`
+	err := r.db.QueryRow(ctx, query, userID).Scan(
+		&credential.UserID,
+		&credential.TransactionPINHash,
+		&credential.FailedAttempts,
+		&credential.LockedUntil,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrTransactionPINNotSet
+		}
+		return nil, err
+	}
+	if credential.TransactionPINHash == "" {
+		return nil, ErrTransactionPINNotSet
+	}
+
+	return &credential, nil
+}
+
+// RecordFailedTransactionPINAttempt atomically increments failed attempts and applies lockout.
+func (r *PostgresRepository) RecordFailedTransactionPINAttempt(ctx context.Context, userID uuid.UUID, maxAttempts int, lockoutDurationSeconds int) (*domain.UserSecurityCredential, error) {
+	var credential domain.UserSecurityCredential
+	query := `
+		UPDATE user_security_credentials
+		SET
+			failed_attempts = CASE
+				WHEN (locked_until IS NOT NULL AND locked_until <= NOW())
+					OR (locked_until IS NULL AND failed_attempts >= $2) THEN 1
+				ELSE failed_attempts + 1
+			END,
+			last_failed_at = NOW(),
+			locked_until = CASE
+				WHEN (
+					CASE
+						WHEN (locked_until IS NOT NULL AND locked_until <= NOW())
+							OR (locked_until IS NULL AND failed_attempts >= $2) THEN 1
+						ELSE failed_attempts + 1
+					END
+				) >= $2 THEN NOW() + ($3 * INTERVAL '1 second')
+				ELSE NULL
+			END
+		WHERE user_id = $1
+		RETURNING user_id, transaction_pin_hash, failed_attempts, locked_until
+	`
+	err := r.db.QueryRow(ctx, query, userID, maxAttempts, lockoutDurationSeconds).Scan(
+		&credential.UserID,
+		&credential.TransactionPINHash,
+		&credential.FailedAttempts,
+		&credential.LockedUntil,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrTransactionPINNotSet
+		}
+		return nil, err
+	}
+
+	return &credential, nil
+}
+
+// ResetTransactionPINFailureState clears failed-attempt counters after a successful PIN verification.
+func (r *PostgresRepository) ResetTransactionPINFailureState(ctx context.Context, userID uuid.UUID) error {
+	query := `
+		UPDATE user_security_credentials
+		SET failed_attempts = 0, last_failed_at = NULL, locked_until = NULL
+		WHERE user_id = $1
+	`
+	result, err := r.db.Exec(ctx, query, userID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return ErrTransactionPINNotSet
+	}
+	return nil
 }
 
 // FindAccountByUserID retrieves a user's primary account from the database.

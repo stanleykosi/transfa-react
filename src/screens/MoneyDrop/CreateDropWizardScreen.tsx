@@ -59,6 +59,12 @@ const CreateDropWizardScreen = () => {
       navigation.replace('MoneyDropSuccess', { dropDetails: data });
     },
     onError: (error) => {
+      if (error.message.toLowerCase().includes('pin is not set')) {
+        Alert.alert('Transaction PIN Required', 'Please create your transaction PIN to continue.', [
+          { text: 'Set PIN', onPress: () => navigation.navigate('CreatePin') },
+        ]);
+        return;
+      }
       Alert.alert('Error Creating Drop', error.message || 'An unexpected error occurred.');
     },
   });
@@ -105,14 +111,15 @@ const CreateDropWizardScreen = () => {
       return;
     }
 
-    const payload = {
-      amount_per_claim: amountKobo,
-      number_of_people: people,
-      expiry_in_minutes: expiry,
-    };
-
     // Use the secure action hook to get authorization before creating the drop
-    triggerSecureAction(() => createMoneyDrop(payload));
+    triggerSecureAction((transactionPin: string) =>
+      createMoneyDrop({
+        amount_per_claim: amountKobo,
+        number_of_people: people,
+        expiry_in_minutes: expiry,
+        transaction_pin: transactionPin,
+      })
+    );
   };
 
   return (

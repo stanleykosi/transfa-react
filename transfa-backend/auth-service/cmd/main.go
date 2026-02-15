@@ -9,6 +9,8 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -17,19 +19,24 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 	"github.com/transfa/auth-service/internal/api"
+	authapp "github.com/transfa/auth-service/internal/app"
 	"github.com/transfa/auth-service/internal/config"
 	"github.com/transfa/auth-service/internal/domain"
 	"github.com/transfa/auth-service/internal/store"
-	"github.com/transfa/auth-service/pkg/rabbitmq"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type onboardingState struct {
-	Status   string  `json:"status"`
-	Reason   *string `json:"reason,omitempty"`
-	NextStep string  `json:"next_step"`
+	Status     string                 `json:"status"`
+	Reason     *string                `json:"reason,omitempty"`
+	NextStep   string                 `json:"next_step"`
+	ResumeStep *int                   `json:"resume_step,omitempty"`
+	UserType   *string                `json:"user_type,omitempty"`
+	Draft      map[string]interface{} `json:"draft,omitempty"`
 }
 
 type accountTypeOption struct {
@@ -44,6 +51,17 @@ type authSessionResponse struct {
 	User          *domain.User    `json:"user,omitempty"`
 	Onboarding    onboardingState `json:"onboarding"`
 }
+
+type userDiscoveryResult struct {
+	ID       string  `json:"id"`
+	Username string  `json:"username"`
+	FullName *string `json:"full_name,omitempty"`
+}
+
+var (
+	usernamePattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._]{1,18}[a-z0-9])?$`)
+	pinPattern      = regexp.MustCompile(`^[0-9]{4}$`)
+)
 
 func maskAMQPURLForLog(raw string) string {
 	trimmed := strings.TrimSpace(raw)
@@ -96,20 +114,21 @@ func main() {
 	log.Println("Database connection established")
 
 	log.Printf("RABBITMQ_URL (masked)=%s", maskAMQPURLForLog(cfg.RabbitMQURL))
-	var producer *rabbitmq.EventProducer
-	if p, err := rabbitmq.NewEventProducer(cfg.RabbitMQURL); err != nil {
-		log.Printf("WARNING: Failed to connect to RabbitMQ at startup: %v. Continuing without MQ.", err)
-		producer = nil
-	} else {
-		producer = p
-		defer producer.Close()
-		log.Println("RabbitMQ producer connected")
-	}
 
 	userRepo := store.NewPostgresUserRepository(dbpool)
 
 	if err := verifyRequiredSchema(context.Background(), dbpool); err != nil {
 		log.Fatalf("database schema validation failed: %v", err)
+	}
+
+	if strings.TrimSpace(cfg.RabbitMQURL) == "" {
+		log.Println("WARNING: RABBITMQ_URL is empty, outbox dispatcher is disabled.")
+	} else {
+		outboxCtx, cancelOutbox := context.WithCancel(context.Background())
+		defer cancelOutbox()
+		dispatcher := authapp.NewOutboxDispatcher(userRepo, cfg.RabbitMQURL)
+		go dispatcher.Run(outboxCtx)
+		log.Println("Outbox dispatcher started")
 	}
 
 	r := chi.NewRouter()
@@ -135,7 +154,7 @@ func main() {
 		MaxAge:           300,
 	}))
 
-	onboardingHandler := api.NewOnboardingHandler(userRepo, producer)
+	onboardingHandler := api.NewOnboardingHandler(userRepo)
 	authMiddleware := api.ClerkAuthMiddleware(api.AuthMiddlewareConfig{
 		JWKSURL:             cfg.ClerkJWKSURL,
 		ExpectedAudience:    cfg.ClerkAudience,
@@ -166,22 +185,45 @@ func main() {
 		})
 
 		r.Post("/onboarding", onboardingHandler.ServeHTTP)
+		r.Post("/onboarding/tier1/update", onboardingHandler.HandleTier1Update)
 		r.Post("/onboarding/tier2", onboardingHandler.HandleTier2)
+		r.Post("/onboarding/progress", onboardingHandler.HandleSaveProgress)
+		r.Post("/onboarding/progress/clear", onboardingHandler.HandleClearProgress)
 
 		r.Get("/onboarding/status", func(w http.ResponseWriter, r *http.Request) {
 			existing, statusCode, err := resolveAuthenticatedUser(r, userRepo)
 			if err != nil || existing == nil {
+				if statusCode == http.StatusNotFound {
+					if clerkUserID, ok := api.GetClerkUserID(r.Context()); ok {
+						progress, progressErr := userRepo.GetOnboardingProgressByClerkUserID(r.Context(), clerkUserID)
+						if progressErr != nil {
+							writeError(w, http.StatusInternalServerError, progressErr)
+							return
+						}
+						if progress != nil {
+							writeJSON(w, http.StatusOK, buildOnboardingState("new", nil, progress, false, true, false))
+							return
+						}
+					}
+				}
 				writeError(w, statusCode, err)
 				return
 			}
 
-			status, reason, err := deriveOnboardingStatus(r.Context(), dbpool, existing.ID)
+			status, reason, hasAccount, hasTransactionPIN, err := deriveOnboardingStatus(r.Context(), dbpool, existing.ID)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err)
 				return
 			}
 
-			writeJSON(w, http.StatusOK, onboardingState{Status: status, Reason: reason, NextStep: mapNextStep(status)})
+			progress, err := userRepo.GetOnboardingProgressByClerkUserID(r.Context(), existing.ClerkUserID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			usernameMissing := existing.Username == nil || strings.TrimSpace(*existing.Username) == ""
+			writeJSON(w, http.StatusOK, buildOnboardingState(status, reason, progress, hasAccount, usernameMissing, hasTransactionPIN))
 		})
 
 		r.Get("/me/profile", func(w http.ResponseWriter, r *http.Request) {
@@ -191,6 +233,183 @@ func main() {
 				return
 			}
 			writeJSON(w, http.StatusOK, existing)
+		})
+
+		r.Get("/me/security-status", func(w http.ResponseWriter, r *http.Request) {
+			existing, statusCode, err := resolveAuthenticatedUser(r, userRepo)
+			if err != nil || existing == nil {
+				writeError(w, statusCode, err)
+				return
+			}
+
+			hasTransactionPIN, err := userHasTransactionPIN(r.Context(), dbpool, existing.ID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]bool{
+				"transaction_pin_set": hasTransactionPIN,
+			})
+		})
+
+		r.Get("/users/search", func(w http.ResponseWriter, r *http.Request) {
+			existing, statusCode, err := resolveAuthenticatedUser(r, userRepo)
+			if err != nil || existing == nil {
+				writeError(w, statusCode, err)
+				return
+			}
+
+			query := strings.TrimSpace(r.URL.Query().Get("q"))
+			if query == "" {
+				writeJSON(w, http.StatusOK, map[string]any{"users": []userDiscoveryResult{}})
+				return
+			}
+			if len(query) > 64 {
+				writeError(w, http.StatusBadRequest, errors.New("query must be 64 characters or less"))
+				return
+			}
+
+			limit := parsePositiveBoundedInt(r.URL.Query().Get("limit"), 10, 20)
+			users, err := searchUsersByQuery(r.Context(), dbpool, existing.ID, query, limit)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{"users": users})
+		})
+
+		r.Get("/users/frequent", func(w http.ResponseWriter, r *http.Request) {
+			existing, statusCode, err := resolveAuthenticatedUser(r, userRepo)
+			if err != nil || existing == nil {
+				writeError(w, statusCode, err)
+				return
+			}
+
+			limit := parsePositiveBoundedInt(r.URL.Query().Get("limit"), 6, 12)
+			users, err := listFrequentUsers(r.Context(), dbpool, existing.ID, limit)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{"users": users})
+		})
+
+		r.Post("/me/username", func(w http.ResponseWriter, r *http.Request) {
+			existing, statusCode, err := resolveAuthenticatedUser(r, userRepo)
+			if err != nil || existing == nil {
+				writeError(w, statusCode, err)
+				return
+			}
+
+			var body struct {
+				Username string `json:"username"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				writeError(w, http.StatusBadRequest, errors.New("invalid request body"))
+				return
+			}
+
+			username, err := normalizeAndValidateUsername(body.Username)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+
+			hasAccount, err := userHasAccount(r.Context(), dbpool, existing.ID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			if !hasAccount {
+				writeError(w, http.StatusPreconditionFailed, errors.New("account provisioning is still in progress"))
+				return
+			}
+
+			_, err = dbpool.Exec(
+				r.Context(),
+				`UPDATE users SET username = $1, updated_at = NOW() WHERE id = $2`,
+				username,
+				existing.ID,
+			)
+			if err != nil {
+				var pgErr *pgconn.PgError
+				if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+					writeError(w, http.StatusConflict, errors.New("username is not available"))
+					return
+				}
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status":   "username_set",
+				"username": username,
+			})
+		})
+
+		r.Post("/me/transaction-pin", func(w http.ResponseWriter, r *http.Request) {
+			existing, statusCode, err := resolveAuthenticatedUser(r, userRepo)
+			if err != nil || existing == nil {
+				writeError(w, statusCode, err)
+				return
+			}
+
+			var body struct {
+				Pin string `json:"pin"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				writeError(w, http.StatusBadRequest, errors.New("invalid request body"))
+				return
+			}
+
+			pin := strings.TrimSpace(body.Pin)
+			if err := validateTransactionPIN(pin); err != nil {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+
+			hasAccount, err := userHasAccount(r.Context(), dbpool, existing.ID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			if !hasAccount {
+				writeError(w, http.StatusPreconditionFailed, errors.New("account provisioning is still in progress"))
+				return
+			}
+
+			if existing.Username == nil || strings.TrimSpace(*existing.Username) == "" {
+				writeError(w, http.StatusPreconditionFailed, errors.New("username must be set before transaction pin"))
+				return
+			}
+
+			hash, err := bcrypt.GenerateFromPassword([]byte(pin), bcrypt.DefaultCost)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			_, err = dbpool.Exec(
+				r.Context(),
+				`INSERT INTO user_security_credentials (user_id, transaction_pin_hash, pin_set_at)
+				 VALUES ($1, $2, NOW())
+				 ON CONFLICT (user_id)
+				 DO UPDATE SET
+				   transaction_pin_hash = EXCLUDED.transaction_pin_hash,
+				   pin_set_at = NOW(),
+				   updated_at = NOW()`,
+				existing.ID,
+				string(hash),
+			)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]string{"status": "transaction_pin_set"})
 		})
 
 		r.Get("/me/primary-account", func(w http.ResponseWriter, r *http.Request) {
@@ -221,26 +440,47 @@ func main() {
 		r.Get("/auth/session", func(w http.ResponseWriter, r *http.Request) {
 			existing, statusCode, err := resolveAuthenticatedUser(r, userRepo)
 			if err != nil || existing == nil {
+				if statusCode == http.StatusNotFound {
+					clerkUserID, ok := api.GetClerkUserID(r.Context())
+					if ok {
+						progress, progressErr := userRepo.GetOnboardingProgressByClerkUserID(r.Context(), clerkUserID)
+						if progressErr != nil {
+							writeError(w, http.StatusInternalServerError, progressErr)
+							return
+						}
+						if progress != nil {
+							writeJSON(w, http.StatusOK, authSessionResponse{
+								Authenticated: true,
+								ClerkUserID:   clerkUserID,
+								Onboarding:    buildOnboardingState("new", nil, progress, false, true, false),
+							})
+							return
+						}
+					}
+				}
 				writeError(w, statusCode, err)
 				return
 			}
 
-			status, reason, err := deriveOnboardingStatus(r.Context(), dbpool, existing.ID)
+			status, reason, hasAccount, hasTransactionPIN, err := deriveOnboardingStatus(r.Context(), dbpool, existing.ID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			progress, err := userRepo.GetOnboardingProgressByClerkUserID(r.Context(), existing.ClerkUserID)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, err)
 				return
 			}
 
 			clerkUserID, _ := api.GetClerkUserID(r.Context())
+			usernameMissing := existing.Username == nil || strings.TrimSpace(*existing.Username) == ""
 			writeJSON(w, http.StatusOK, authSessionResponse{
 				Authenticated: true,
 				ClerkUserID:   clerkUserID,
 				User:          existing,
-				Onboarding: onboardingState{
-					Status:   status,
-					Reason:   reason,
-					NextStep: mapNextStep(status),
-				},
+				Onboarding:    buildOnboardingState(status, reason, progress, hasAccount, usernameMissing, hasTransactionPIN),
 			})
 		})
 	})
@@ -321,7 +561,13 @@ func resolveAuthenticatedUser(r *http.Request, userRepo store.UserRepository) (*
 		return nil, http.StatusInternalServerError, err
 	}
 
-	email := strings.TrimSpace(r.Header.Get("X-User-Email"))
+	email := ""
+	if contextEmail, ok := api.GetClerkUserEmail(r.Context()); ok {
+		email = strings.TrimSpace(contextEmail)
+	}
+	if email == "" {
+		email = strings.TrimSpace(r.Header.Get("X-User-Email"))
+	}
 	if email == "" {
 		return nil, http.StatusNotFound, errors.New("user not found")
 	}
@@ -345,76 +591,360 @@ func resolveAuthenticatedUser(r *http.Request, userRepo store.UserRepository) (*
 	return byEmail, http.StatusOK, nil
 }
 
+func parsePositiveBoundedInt(raw string, fallback int, max int) int {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	if parsed > max {
+		return max
+	}
+	return parsed
+}
+
+func searchUsersByQuery(ctx context.Context, dbpool *pgxpool.Pool, requesterID string, query string, limit int) ([]userDiscoveryResult, error) {
+	rows, err := dbpool.Query(
+		ctx,
+		`SELECT id, username, full_name
+		   FROM users
+		  WHERE id <> $1
+		    AND username IS NOT NULL
+		    AND btrim(username) <> ''
+		    AND (
+		      username ILIKE '%' || $2 || '%'
+		      OR COALESCE(full_name, '') ILIKE '%' || $2 || '%'
+		    )
+		  ORDER BY
+		    CASE
+		      WHEN lower(username) = lower($2) THEN 0
+		      WHEN lower(username) LIKE lower($2) || '%' THEN 1
+		      WHEN lower(COALESCE(full_name, '')) LIKE lower($2) || '%' THEN 2
+		      ELSE 3
+		    END,
+		    username ASC
+		  LIMIT $3`,
+		requesterID,
+		query,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make([]userDiscoveryResult, 0, limit)
+	for rows.Next() {
+		var item userDiscoveryResult
+		if err := rows.Scan(&item.ID, &item.Username, &item.FullName); err != nil {
+			return nil, err
+		}
+		results = append(results, item)
+	}
+
+	return results, rows.Err()
+}
+
+func listFrequentUsers(ctx context.Context, dbpool *pgxpool.Pool, requesterID string, limit int) ([]userDiscoveryResult, error) {
+	rows, err := dbpool.Query(
+		ctx,
+		`SELECT u.id, u.username, u.full_name
+		   FROM transactions t
+		   JOIN users u ON u.id = t.recipient_id
+		  WHERE t.sender_id = $1
+		    AND t.type = 'p2p'
+		    AND t.status = 'completed'
+		    AND u.username IS NOT NULL
+		    AND btrim(u.username) <> ''
+		  GROUP BY u.id, u.username, u.full_name
+		  ORDER BY COUNT(*) DESC, MAX(t.created_at) DESC
+		  LIMIT $2`,
+		requesterID,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make([]userDiscoveryResult, 0, limit)
+	seen := make(map[string]struct{}, limit)
+	for rows.Next() {
+		var item userDiscoveryResult
+		if err := rows.Scan(&item.ID, &item.Username, &item.FullName); err != nil {
+			return nil, err
+		}
+		seen[item.ID] = struct{}{}
+		results = append(results, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(results) >= limit {
+		return results, nil
+	}
+
+	remaining := limit - len(results)
+	fallbackRows, err := dbpool.Query(
+		ctx,
+		`SELECT id, username, full_name
+		   FROM users
+		  WHERE id <> $1
+		    AND username IS NOT NULL
+		    AND btrim(username) <> ''
+		  ORDER BY updated_at DESC
+		  LIMIT $2`,
+		requesterID,
+		remaining*2,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer fallbackRows.Close()
+
+	for fallbackRows.Next() {
+		if len(results) >= limit {
+			break
+		}
+
+		var item userDiscoveryResult
+		if err := fallbackRows.Scan(&item.ID, &item.Username, &item.FullName); err != nil {
+			return nil, err
+		}
+		if _, exists := seen[item.ID]; exists {
+			continue
+		}
+		seen[item.ID] = struct{}{}
+		results = append(results, item)
+	}
+
+	return results, fallbackRows.Err()
+}
+
 func deriveOnboardingStatus(
 	ctx context.Context,
 	dbpool *pgxpool.Pool,
 	userID string,
-) (string, *string, error) {
-	var accountCount int
-	if err := dbpool.QueryRow(ctx, `SELECT COUNT(1) FROM accounts WHERE user_id = $1`, userID).Scan(&accountCount); err != nil {
-		return "", nil, err
-	}
-	if accountCount > 0 {
-		return "completed", nil, nil
+) (string, *string, bool, bool, error) {
+	hasAccount, err := userHasAccount(ctx, dbpool, userID)
+	if err != nil {
+		return "", nil, false, false, err
 	}
 
-	var reason *string
-	var tier2Status string
+	hasTransactionPIN, err := userHasTransactionPIN(ctx, dbpool, userID)
+	if err != nil {
+		return "", nil, hasAccount, false, err
+	}
+
+	if hasAccount {
+		return "completed", nil, hasAccount, hasTransactionPIN, nil
+	}
+
+	var (
+		tier1Status    string
+		tier1Reason    *string
+		tier1UpdatedAt time.Time
+		hasTier1       bool
+	)
 	if err := dbpool.QueryRow(
 		ctx,
-		`SELECT status, reason FROM onboarding_status WHERE user_id = $1 AND stage = 'tier2'`,
+		`SELECT status, reason, updated_at FROM onboarding_status WHERE user_id = $1 AND stage = 'tier1'`,
 		userID,
-	).Scan(&tier2Status, &reason); err == nil {
-		t2 := strings.ToLower(strings.TrimSpace(tier2Status))
-		if t2 == "failed" || t2 == "error" {
-			return "tier2_failed", reason, nil
-		}
-		if t2 == "completed" {
-			return "tier2_completed", reason, nil
-		}
-		if t2 != "" {
-			return "tier2_" + t2, reason, nil
-		}
+	).Scan(&tier1Status, &tier1Reason, &tier1UpdatedAt); err == nil {
+		hasTier1 = true
 	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return "", nil, err
+		return "", nil, hasAccount, hasTransactionPIN, err
 	}
 
-	var tier1Status string
-	reason = nil
+	var (
+		tier2Status    string
+		tier2Reason    *string
+		tier2UpdatedAt time.Time
+		hasTier2       bool
+	)
 	if err := dbpool.QueryRow(
 		ctx,
-		`SELECT status, reason FROM onboarding_status WHERE user_id = $1 AND stage = 'tier1'`,
+		`SELECT status, reason, updated_at FROM onboarding_status WHERE user_id = $1 AND stage = 'tier2'`,
 		userID,
-	).Scan(&tier1Status, &reason); err == nil {
+	).Scan(&tier2Status, &tier2Reason, &tier2UpdatedAt); err == nil {
+		hasTier2 = true
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, hasAccount, hasTransactionPIN, err
+	}
+
+	// Tier1 "in-progress/failure" states take precedence to support correction flows,
+	// even when a stale Tier2 failure row exists.
+	if hasTier1 {
 		t1 := strings.ToLower(strings.TrimSpace(tier1Status))
 		switch t1 {
-		case "created":
-			return "tier1_created", reason, nil
 		case "pending", "processing":
-			return "tier1_pending", reason, nil
+			return "tier1_pending", tier1Reason, hasAccount, hasTransactionPIN, nil
 		case "failed":
-			return "tier1_failed", reason, nil
-		default:
-			if t1 != "" {
-				return "tier1_" + t1, reason, nil
-			}
+			return "tier1_failed", tier1Reason, hasAccount, hasTransactionPIN, nil
+		case "rate_limited", "system_error":
+			return "tier1_" + t1, tier1Reason, hasAccount, hasTransactionPIN, nil
 		}
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return "", nil, err
 	}
 
-	return "new", nil, nil
+	// If tier1 was re-created after an earlier tier2 attempt, treat older tier2
+	// statuses as stale and let the client continue from tier1_created.
+	if hasTier1 {
+		t1 := strings.ToLower(strings.TrimSpace(tier1Status))
+		if t1 == "created" && (!hasTier2 || tier1UpdatedAt.After(tier2UpdatedAt)) {
+			return "tier1_created", tier1Reason, hasAccount, hasTransactionPIN, nil
+		}
+	}
+
+	if hasTier2 {
+		t2 := strings.ToLower(strings.TrimSpace(tier2Status))
+		if t2 == "failed" || t2 == "error" {
+			return "tier2_failed", tier2Reason, hasAccount, hasTransactionPIN, nil
+		}
+		if t2 == "completed" {
+			return "tier2_completed", tier2Reason, hasAccount, hasTransactionPIN, nil
+		}
+		if t2 != "" {
+			return "tier2_" + t2, tier2Reason, hasAccount, hasTransactionPIN, nil
+		}
+	}
+
+	if hasTier1 {
+		t1 := strings.ToLower(strings.TrimSpace(tier1Status))
+		if t1 == "created" {
+			return "tier1_created", tier1Reason, hasAccount, hasTransactionPIN, nil
+		}
+		if t1 != "" {
+			return "tier1_" + t1, tier1Reason, hasAccount, hasTransactionPIN, nil
+		}
+	}
+
+	return "new", nil, hasAccount, hasTransactionPIN, nil
 }
 
-func mapNextStep(status string) string {
+func mapNextStep(status string, hasAccount bool, usernameMissing bool, hasTransactionPIN bool) string {
+	if hasAccount {
+		if usernameMissing {
+			return "create_username"
+		}
+		if !hasTransactionPIN {
+			return "create_pin"
+		}
+		return "app_tabs"
+	}
+
 	switch status {
 	case "completed":
 		return "app_tabs"
-	case "tier2_processing", "tier2_pending", "tier2_manual_review", "tier2_error", "tier2_failed", "tier2_completed", "tier1_created":
-		return "create_account"
 	default:
+		if strings.HasPrefix(status, "tier2_") {
+			return "create_account"
+		}
 		return "onboarding_form"
 	}
+}
+
+func buildOnboardingState(
+	status string,
+	reason *string,
+	progress *store.OnboardingProgress,
+	hasAccount bool,
+	usernameMissing bool,
+	hasTransactionPIN bool,
+) onboardingState {
+	state := onboardingState{
+		Status:   status,
+		Reason:   reason,
+		NextStep: mapNextStep(status, hasAccount, usernameMissing, hasTransactionPIN),
+	}
+
+	if progress != nil {
+		if progress.CurrentStep >= 1 && progress.CurrentStep <= 3 {
+			step := progress.CurrentStep
+			state.ResumeStep = &step
+		}
+		if strings.TrimSpace(progress.UserType) != "" {
+			userType := strings.ToLower(strings.TrimSpace(progress.UserType))
+			state.UserType = &userType
+		}
+		if len(progress.Payload) > 0 {
+			state.Draft = progress.Payload
+		}
+		return state
+	}
+
+	// Fallback inference when no draft exists but onboarding is already in-flight.
+	switch {
+	case strings.HasPrefix(status, "tier1_"), strings.HasPrefix(status, "tier2_"):
+		step := 3
+		state.ResumeStep = &step
+	}
+
+	return state
+}
+
+func userHasAccount(ctx context.Context, dbpool *pgxpool.Pool, userID string) (bool, error) {
+	var accountCount int
+	if err := dbpool.QueryRow(ctx, `SELECT COUNT(1) FROM accounts WHERE user_id = $1`, userID).Scan(&accountCount); err != nil {
+		return false, err
+	}
+	return accountCount > 0, nil
+}
+
+func userHasTransactionPIN(ctx context.Context, dbpool *pgxpool.Pool, userID string) (bool, error) {
+	var exists bool
+	if err := dbpool.QueryRow(
+		ctx,
+		`SELECT EXISTS(
+			SELECT 1
+			FROM user_security_credentials
+			WHERE user_id = $1
+			  AND transaction_pin_hash IS NOT NULL
+			  AND transaction_pin_hash <> ''
+		)`,
+		userID,
+	).Scan(&exists); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	return exists, nil
+}
+
+func normalizeAndValidateUsername(raw string) (string, error) {
+	username := strings.ToLower(strings.TrimSpace(raw))
+	if username == "" {
+		return "", errors.New("username is required")
+	}
+	if !usernamePattern.MatchString(username) {
+		return "", errors.New("username must be 3-20 characters and contain only lowercase letters, numbers, dot, or underscore")
+	}
+	switch username {
+	case "admin", "support", "root", "transfa":
+		return "", errors.New("username is not available")
+	}
+	return username, nil
+}
+
+func validateTransactionPIN(pin string) error {
+	if !pinPattern.MatchString(pin) {
+		return errors.New("transaction pin must be exactly 4 digits")
+	}
+
+	blocked := map[string]struct{}{
+		"0000": {}, "1111": {}, "2222": {}, "3333": {}, "4444": {},
+		"5555": {}, "6666": {}, "7777": {}, "8888": {}, "9999": {},
+		"1234": {}, "4321": {}, "1212": {}, "1122": {}, "1000": {},
+	}
+	if _, found := blocked[pin]; found {
+		return errors.New("choose a less predictable transaction pin")
+	}
+	return nil
 }
 
 func getPrimaryAccount(ctx context.Context, dbpool *pgxpool.Pool, userID string) (*string, *string, error) {
@@ -449,6 +979,8 @@ func writeError(w http.ResponseWriter, statusCode int, err error) {
 		message = "User not found"
 	case http.StatusBadRequest:
 		message = "Bad request"
+	case http.StatusPreconditionFailed:
+		message = "Precondition failed"
 	case http.StatusConflict:
 		message = "Conflict"
 	}
@@ -457,14 +989,21 @@ func writeError(w http.ResponseWriter, statusCode int, err error) {
 		log.Printf("Request failed with %d: %v", statusCode, err)
 	}
 
-	writeJSON(w, statusCode, map[string]string{"error": message})
+	payload := map[string]string{"error": message}
+	if statusCode < 500 && err != nil {
+		payload["detail"] = err.Error()
+	}
+	writeJSON(w, statusCode, payload)
 }
 
 func verifyRequiredSchema(ctx context.Context, dbpool *pgxpool.Pool) error {
 	requiredTables := []string{
 		"users",
 		"accounts",
+		"user_security_credentials",
 		"onboarding_status",
+		"onboarding_progress",
+		"event_outbox",
 	}
 
 	for _, tableName := range requiredTables {
@@ -478,9 +1017,24 @@ func verifyRequiredSchema(ctx context.Context, dbpool *pgxpool.Pool) error {
 	}
 
 	requiredColumnsByTable := map[string][]string{
-		"users":             {"id", "clerk_user_id", "email"},
-		"accounts":          {"user_id", "virtual_nuban", "bank_name"},
-		"onboarding_status": {"user_id", "stage", "status", "reason", "updated_at"},
+		"users":                     {"id", "clerk_user_id", "email"},
+		"accounts":                  {"user_id", "virtual_nuban", "bank_name"},
+		"user_security_credentials": {"user_id", "transaction_pin_hash", "pin_set_at", "updated_at"},
+		"onboarding_status":         {"user_id", "stage", "status", "reason", "updated_at"},
+		"onboarding_progress":       {"clerk_user_id", "user_id", "user_type", "current_step", "payload", "updated_at"},
+		"event_outbox": {
+			"id",
+			"exchange",
+			"routing_key",
+			"payload",
+			"status",
+			"attempts",
+			"next_attempt_at",
+			"processing_started_at",
+			"published_at",
+			"last_error",
+			"created_at",
+		},
 	}
 
 	for tableName, columns := range requiredColumnsByTable {

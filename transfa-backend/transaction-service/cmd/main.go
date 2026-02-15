@@ -117,8 +117,10 @@ func main() {
 	defer rabbitConsumer.Close()
 
 	transferBindings := map[string]func([]byte) bool{
+		"transfer.status.nip.processing":  transferConsumer.HandleMessage,
 		"transfer.status.nip.successful":  transferConsumer.HandleMessage,
 		"transfer.status.nip.failed":      transferConsumer.HandleMessage,
+		"transfer.status.book.processing": transferConsumer.HandleMessage,
 		"transfer.status.book.successful": transferConsumer.HandleMessage,
 		"transfer.status.book.failed":     transferConsumer.HandleMessage,
 	}

@@ -120,9 +120,9 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	signatureBodies := buildSignatureBodies(body, r.Header.Get("Content-Encoding"))
 	authMethod := "signature"
 	if !h.isValidSignature(signatureHeader, signatureBodies...) {
-		eventType, eventID := previewWebhookEvent(body)
+		fallbackBody, eventType, eventID := previewWebhookEventCandidates(signatureBodies)
 		bodyHash := sha1.Sum(body)
-		if h.verifyAnchorEventFallback(r.Context(), body, eventType, eventID) {
+		if h.verifyAnchorEventFallback(r.Context(), fallbackBody, eventType, eventID) {
 			authMethod = "anchor_fallback"
 			log.Printf("level=info component=webhook request_id=%s outcome=fallback_auth event=%s event_id=%s body_sha1=%x", requestID, safeSegment(eventType, "unknown"), safeSegment(eventID, "unknown"), bodyHash)
 		} else {
@@ -334,6 +334,22 @@ func previewWebhookEvent(body []byte) (eventType string, eventID string) {
 	return eventType, eventID
 }
 
+func previewWebhookEventCandidates(bodies [][]byte) ([]byte, string, string) {
+	for _, candidate := range bodies {
+		eventType, eventID := previewWebhookEvent(candidate)
+		if strings.TrimSpace(eventType) != "" && strings.TrimSpace(eventID) != "" {
+			return candidate, eventType, eventID
+		}
+	}
+
+	if len(bodies) == 0 {
+		return nil, "", ""
+	}
+
+	eventType, eventID := previewWebhookEvent(bodies[0])
+	return bodies[0], eventType, eventID
+}
+
 // isValidSignature validates the webhook signature using Anchor's documented scheme.
 func (h *WebhookHandler) isValidSignature(signatureHeader string, bodies ...[]byte) bool {
 	if len(h.secrets) == 0 {
@@ -412,17 +428,28 @@ type anchorEventLookupResponse struct {
 // verifyAnchorEventFallback validates webhook authenticity by cross-checking event identity
 // with Anchor's Events API when signature verification fails.
 func (h *WebhookHandler) verifyAnchorEventFallback(ctx context.Context, body []byte, eventType string, eventID string) bool {
+	if len(body) == 0 {
+		return false
+	}
+
+	localEvent, err := decodeAnchorWebhook(body)
+	if err != nil {
+		return false
+	}
+
+	if strings.TrimSpace(eventType) == "" {
+		eventType = localEvent.Event
+	}
+	if strings.TrimSpace(eventID) == "" {
+		eventID = localEvent.Data.ID
+	}
+
 	eventType = strings.TrimSpace(eventType)
 	eventID = strings.TrimSpace(eventID)
 	if eventType == "" || eventID == "" {
 		return false
 	}
 	if h.anchorAPIKey == "" {
-		return false
-	}
-
-	localEvent, err := decodeAnchorWebhook(body)
-	if err != nil {
 		return false
 	}
 
@@ -653,13 +680,16 @@ func (h *WebhookHandler) routeEvent(ctx context.Context, event domain.AnchorWebh
 
 func (h *WebhookHandler) buildCustomerEvent(event domain.AnchorWebhookEvent, anchorCustomerID string) (string, any, bool) {
 	eventRouting := map[string]string{
-		"customer.identification.approved":     "customer.verified",
-		"customer.identification.rejected":     "customer.tier.status",
-		"customer.identification.manualReview": "customer.tier.status",
-		"customer.identification.error":        "customer.tier.status",
-		"customer.created":                     "customer.lifecycle",
-		"account.initiated":                    "account.lifecycle",
-		"account.opened":                       "account.lifecycle",
+		"customer.identification.approved":            "customer.verified",
+		"customer.identification.rejected":            "customer.tier.status",
+		"customer.identification.manualReview":        "customer.tier.status",
+		"customer.identification.awaitingDocument":    "customer.tier.status",
+		"customer.identification.reenter_information": "customer.tier.status",
+		"customer.identification.pending":             "customer.tier.status",
+		"customer.identification.error":               "customer.tier.status",
+		"customer.created":                            "customer.tier.status",
+		"account.initiated":                           "account.lifecycle",
+		"account.opened":                              "account.lifecycle",
 	}
 
 	routingKey, ok := eventRouting[event.Event]
@@ -673,14 +703,22 @@ func (h *WebhookHandler) buildCustomerEvent(event domain.AnchorWebhookEvent, anc
 		message = domain.CustomerVerifiedEvent{AnchorCustomerID: anchorCustomerID}
 	case "customer.identification.rejected":
 		reason := extractReason(event.Data.Attributes)
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_rejected", Reason: nullableString(reason)}
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: "tier2", Status: "rejected", Reason: nullableString(reason)}
 	case "customer.identification.manualReview":
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_manual_review"}
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: "tier2", Status: "manual_review"}
+	case "customer.identification.awaitingDocument":
+		reason := extractReason(event.Data.Attributes)
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: "tier2", Status: "awaiting_document", Reason: nullableString(reason)}
+	case "customer.identification.reenter_information":
+		reason := extractReason(event.Data.Attributes)
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: "tier2", Status: "reenter_information", Reason: nullableString(reason)}
+	case "customer.identification.pending":
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: "tier2", Status: "pending"}
 	case "customer.identification.error":
 		reason := extractReason(event.Data.Attributes)
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_error", Reason: nullableString(reason)}
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: "tier2", Status: "error", Reason: nullableString(reason)}
 	case "customer.created":
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Status: "tier2_customer_created"}
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: "tier1", Status: "created"}
 	case "account.initiated":
 		message = domain.AccountLifecycleEvent{AnchorCustomerID: anchorCustomerID, EventType: "account_initiated", ResourceID: event.Data.ID}
 	case "account.opened":

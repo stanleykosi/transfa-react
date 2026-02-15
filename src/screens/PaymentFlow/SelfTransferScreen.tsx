@@ -77,6 +77,10 @@ const SelfTransferScreen = () => {
       });
     },
     onError: (error) => {
+      if (error.message.toLowerCase().includes('pin is not set')) {
+        navigation.navigate('CreatePin');
+        return;
+      }
       navigation.navigate('TransferStatus', {
         transactionId: '',
         amount: nairaToKobo(parseFloat(amount)),
@@ -144,11 +148,12 @@ const SelfTransferScreen = () => {
       return;
     }
 
-    const action = () => {
+    const action = (transactionPin: string) => {
       sendWithdrawal({
         beneficiary_id: selectedBeneficiary.id,
         amount: amountInKobo,
         description: description.trim(),
+        transaction_pin: transactionPin,
       });
     };
 
