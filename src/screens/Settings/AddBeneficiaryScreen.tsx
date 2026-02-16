@@ -29,6 +29,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import ScreenWrapper from '@/components/ScreenWrapper';
 import FormInput from '@/components/FormInput';
 import PrimaryButton from '@/components/PrimaryButton';
@@ -37,11 +38,18 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAddBeneficiary, useListBanks } from '@/api/accountApi';
 import BankDropdown from '@/components/BankDropdown';
 import { Bank } from '@/types/api';
+import { ProfileStackParamList } from '@/navigation/ProfileStack';
+
+type AddBeneficiaryScreenNavigationProp = NativeStackNavigationProp<
+  ProfileStackParamList,
+  'AddBeneficiary'
+>;
 
 const AddBeneficiaryScreen = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<AddBeneficiaryScreenNavigationProp>();
   const [selectedBank, setSelectedBank] = useState<Bank | null>(null);
   const [accountNumber, setAccountNumber] = useState('');
+  const [transactionPin, setTransactionPin] = useState('');
 
   const { data: banksData, isLoading: isLoadingBanks, error: banksError } = useListBanks();
   const { mutate: addBeneficiary, isPending: isAdding } = useAddBeneficiary({
@@ -52,6 +60,7 @@ const AddBeneficiaryScreen = () => {
     onError: (error: any) => {
       // Extract the actual error message from the response
       let errorMessage = 'Failed to add beneficiary.';
+      const statusCode = error?.response?.status;
 
       if (error.response?.data) {
         // If response.data is a string, use it directly
@@ -63,6 +72,29 @@ const AddBeneficiaryScreen = () => {
         }
       } else if (error.message) {
         errorMessage = error.message;
+      }
+
+      if (statusCode === 412) {
+        Alert.alert(
+          'Transaction PIN Required',
+          'Set your transaction PIN in Security Settings before linking an account.',
+          [
+            {
+              text: 'Go to Security',
+              onPress: () => navigation.navigate('SecuritySettings'),
+            },
+            { text: 'Cancel', style: 'cancel' },
+          ]
+        );
+        return;
+      }
+
+      if (statusCode === 423) {
+        Alert.alert(
+          'PIN Temporarily Locked',
+          'Too many incorrect PIN attempts. Please wait and try again.'
+        );
+        return;
       }
 
       Alert.alert('Error', errorMessage);
@@ -78,10 +110,15 @@ const AddBeneficiaryScreen = () => {
       Alert.alert('Invalid Input', 'Please enter a valid 10-digit account number.');
       return;
     }
+    if (!/^\d{4}$/.test(transactionPin.trim())) {
+      Alert.alert('Invalid PIN', 'Enter your 4-digit transaction PIN to link this account.');
+      return;
+    }
 
     addBeneficiary({
       bank_code: selectedBank.attributes.nipCode,
       account_number: accountNumber.trim(),
+      transaction_pin: transactionPin.trim(),
     });
   };
 
@@ -101,8 +138,7 @@ const AddBeneficiaryScreen = () => {
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <Text style={styles.sectionTitle}>Account Details</Text>
           <Text style={styles.sectionSubtitle}>
-            Select your bank and enter the account number. We'll verify the account details
-            automatically.
+            Select your bank, enter the account number, and confirm with your transaction PIN.
           </Text>
 
           <BankDropdown
@@ -122,12 +158,22 @@ const AddBeneficiaryScreen = () => {
             maxLength={10}
             editable={!isAdding}
           />
+          <FormInput
+            label="Transaction PIN"
+            value={transactionPin}
+            onChangeText={(value) => setTransactionPin(value.replace(/[^0-9]/g, ''))}
+            placeholder="Enter 4-digit PIN"
+            keyboardType="number-pad"
+            secureTextEntry
+            maxLength={4}
+            editable={!isAdding}
+          />
 
           <PrimaryButton
             title="Add Beneficiary"
             onPress={handleAdd}
             isLoading={isAdding}
-            disabled={isAdding || !selectedBank}
+            disabled={isAdding || !selectedBank || transactionPin.length !== 4}
           />
         </ScrollView>
       </KeyboardAvoidingView>

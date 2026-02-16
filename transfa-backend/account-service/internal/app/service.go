@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,9 +23,20 @@ import (
 	"github.com/transfa/account-service/internal/domain"
 	"github.com/transfa/account-service/internal/store"
 	"github.com/transfa/account-service/pkg/anchorclient"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var ErrUserNotFound = errors.New("user not found")
+
+const (
+	pinMaxAttempts    = 5
+	pinLockoutSeconds = 900
+)
+
+var (
+	ErrInvalidTransactionPIN = errors.New("invalid transaction pin")
+	ErrTransactionPINLocked  = errors.New("transaction pin temporarily locked")
+)
 
 // AccountService provides methods for managing accounts and beneficiaries.
 type AccountService struct {
@@ -47,13 +59,72 @@ func NewAccountService(accountRepo store.AccountRepository, beneficiaryRepo stor
 
 // CreateBeneficiaryInput defines the required input for creating a beneficiary.
 type CreateBeneficiaryInput struct {
-	UserID        string
-	AccountNumber string
-	BankCode      string
+	UserID         string
+	AccountNumber  string
+	BankCode       string
+	TransactionPIN string
+}
+
+// VerifyTransactionPIN validates user-provided PIN against server-side hash and lockout state.
+func (s *AccountService) VerifyTransactionPIN(ctx context.Context, userID string, pin string) error {
+	if len(pin) != 4 {
+		return ErrInvalidTransactionPIN
+	}
+	for _, c := range pin {
+		if c < '0' || c > '9' {
+			return ErrInvalidTransactionPIN
+		}
+	}
+
+	credential, err := s.accountRepo.GetUserSecurityCredentialByUserID(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	if credential.LockedUntil != nil && credential.LockedUntil.After(now) {
+		return ErrTransactionPINLocked
+	}
+
+	if bcrypt.CompareHashAndPassword([]byte(credential.TransactionPINHash), []byte(pin)) != nil {
+		updatedCredential, recordErr := s.accountRepo.RecordFailedTransactionPINAttempt(
+			ctx,
+			userID,
+			pinMaxAttempts,
+			pinLockoutSeconds,
+		)
+		if recordErr != nil {
+			return recordErr
+		}
+		if updatedCredential.LockedUntil != nil && updatedCredential.LockedUntil.After(now) {
+			return ErrTransactionPINLocked
+		}
+		return ErrInvalidTransactionPIN
+	}
+
+	if credential.FailedAttempts > 0 || credential.LockedUntil != nil {
+		if err := s.accountRepo.ResetTransactionPINFailureState(ctx, userID); err != nil {
+			log.Printf(
+				"level=warn component=account_service flow=pin_verify msg=\"failed to reset pin failure state\" user_id=%s err=%v",
+				userID,
+				err,
+			)
+		}
+	}
+
+	return nil
 }
 
 // CreateBeneficiary orchestrates the process of adding a new beneficiary.
 func (s *AccountService) CreateBeneficiary(ctx context.Context, input CreateBeneficiaryInput) (*domain.Beneficiary, error) {
+	input.AccountNumber = strings.TrimSpace(input.AccountNumber)
+	input.BankCode = strings.TrimSpace(input.BankCode)
+	input.TransactionPIN = strings.TrimSpace(input.TransactionPIN)
+
+	if input.AccountNumber == "" || input.BankCode == "" {
+		return nil, errors.New("account number and bank code are required")
+	}
+
 	// 1. Resolve Clerk User ID to internal UUID
 	internalUserID, err := s.accountRepo.FindUserIDByClerkUserID(ctx, input.UserID)
 	if err != nil {
@@ -61,6 +132,11 @@ func (s *AccountService) CreateBeneficiary(ctx context.Context, input CreateBene
 			return nil, ErrUserNotFound
 		}
 		return nil, fmt.Errorf("failed to resolve user: %w", err)
+	}
+
+	// 2. Verify transaction PIN before linking destination account.
+	if err := s.VerifyTransactionPIN(ctx, internalUserID, input.TransactionPIN); err != nil {
+		return nil, err
 	}
 
 	// 2. Verify account details with Anchor.

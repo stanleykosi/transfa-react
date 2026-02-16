@@ -15,7 +15,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 
-import { useAccountBalance, useTransactionHistory, useUserProfile } from '@/api/transactionApi';
+import {
+  useAccountBalance,
+  usePrimaryAccountDetails,
+  useTransactionHistory,
+  useUserProfile,
+} from '@/api/transactionApi';
+import TopUpAccountModal from '@/components/TopUpAccountModal';
 import { useFrequentUsers } from '@/api/userDiscoveryApi';
 import { formatCurrency } from '@/utils/formatCurrency';
 import type { TransactionHistoryItem, UserDiscoveryResult } from '@/types/api';
@@ -37,6 +43,7 @@ const HomeScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [isBalanceHidden, setIsBalanceHidden] = useState(false);
   const [isExpandedHistory, setIsExpandedHistory] = useState(false);
+  const [isTopUpModalVisible, setIsTopUpModalVisible] = useState(false);
 
   const historySheetPanResponder = useMemo(
     () =>
@@ -70,6 +77,11 @@ const HomeScreen = () => {
     isLoading: isLoadingTransactions,
     refetch: refetchTransactions,
   } = useTransactionHistory();
+  const {
+    data: primaryAccount,
+    isLoading: isLoadingPrimaryAccount,
+    refetch: refetchPrimaryAccount,
+  } = usePrimaryAccountDetails();
   const { data: frequentUsersData, isLoading: isLoadingFrequent } = useFrequentUsers(8);
 
   const balanceValue = useMemo(() => {
@@ -86,7 +98,12 @@ const HomeScreen = () => {
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      await Promise.all([refetchBalance(), refetchTransactions(), refetchProfile()]);
+      await Promise.all([
+        refetchBalance(),
+        refetchTransactions(),
+        refetchProfile(),
+        refetchPrimaryAccount(),
+      ]);
     } finally {
       setRefreshing(false);
     }
@@ -138,7 +155,14 @@ const HomeScreen = () => {
             </View>
 
             <View style={styles.headerActions}>
-              <TouchableOpacity style={styles.headerIconButton} activeOpacity={0.8}>
+              <TouchableOpacity
+                style={styles.headerIconButton}
+                activeOpacity={0.8}
+                onPress={() => {
+                  refetchPrimaryAccount();
+                  setIsTopUpModalVisible(true);
+                }}
+              >
                 <Ionicons name="wallet-outline" size={18} color="#F2F2F2" />
               </TouchableOpacity>
               <TouchableOpacity style={styles.headerIconButton} activeOpacity={0.8}>
@@ -278,6 +302,14 @@ const HomeScreen = () => {
           </ScrollView>
         )}
       </View>
+
+      <TopUpAccountModal
+        visible={isTopUpModalVisible}
+        onClose={() => setIsTopUpModalVisible(false)}
+        accountNumber={primaryAccount?.accountNumber}
+        bankName={primaryAccount?.bankName}
+        isLoading={isLoadingPrimaryAccount}
+      />
     </View>
   );
 };

@@ -23,6 +23,9 @@ type AccountRepository interface {
 	UpdateAccount(ctx context.Context, accountID string, anchorAccountID, virtualNUBAN, bankName string) error
 	FindUserIDByAnchorCustomerID(ctx context.Context, anchorID string) (string, error)
 	FindUserIDByClerkUserID(ctx context.Context, clerkUserID string) (string, error)
+	GetUserSecurityCredentialByUserID(ctx context.Context, userID string) (*domain.UserSecurityCredential, error)
+	RecordFailedTransactionPINAttempt(ctx context.Context, userID string, maxAttempts int, lockoutDurationSeconds int) (*domain.UserSecurityCredential, error)
+	ResetTransactionPINFailureState(ctx context.Context, userID string) error
 	FindAccountByUserID(ctx context.Context, userID string) (*domain.Account, error)
 	UpdateTierStatus(ctx context.Context, userID, stage, status string, reason *string) error
 	FindAnchorCustomerIDByUserID(ctx context.Context, userID string) (string, error)
@@ -39,9 +42,9 @@ type BeneficiaryRepository interface {
 
 // BankRepository defines the contract for caching bank information.
 type BankRepository interface {
-    CacheBanks(ctx context.Context, banks []domain.Bank) error
-    GetCachedBanks(ctx context.Context) ([]domain.Bank, error)
-    ClearExpiredBanks(ctx context.Context) error
-    GetCacheExpiryTime(ctx context.Context) (time.Time, error)
-    IsCacheExpiringSoon(ctx context.Context, duration time.Duration) (bool, error)
+	CacheBanks(ctx context.Context, banks []domain.Bank) error
+	GetCachedBanks(ctx context.Context) ([]domain.Bank, error)
+	ClearExpiredBanks(ctx context.Context) error
+	GetCacheExpiryTime(ctx context.Context) (time.Time, error)
+	IsCacheExpiringSoon(ctx context.Context, duration time.Duration) (bool, error)
 }

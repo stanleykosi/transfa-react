@@ -24,6 +24,7 @@ import (
 	"github.com/transfa/account-service/internal/domain"
 )
 
+var ErrTransactionPINNotSet = errors.New("transaction pin not set")
 
 // PostgresAccountRepository is the PostgreSQL implementation of the AccountRepository.
 type PostgresAccountRepository struct {
@@ -69,6 +70,91 @@ func (r *PostgresAccountRepository) FindUserIDByClerkUserID(ctx context.Context,
 	return userID, nil
 }
 
+// GetUserSecurityCredentialByUserID retrieves transaction PIN security metadata for a user.
+func (r *PostgresAccountRepository) GetUserSecurityCredentialByUserID(ctx context.Context, userID string) (*domain.UserSecurityCredential, error) {
+	var credential domain.UserSecurityCredential
+	query := `
+		SELECT user_id, transaction_pin_hash, failed_attempts, locked_until
+		FROM user_security_credentials
+		WHERE user_id = $1
+	`
+	err := r.db.QueryRow(ctx, query, userID).Scan(
+		&credential.UserID,
+		&credential.TransactionPINHash,
+		&credential.FailedAttempts,
+		&credential.LockedUntil,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrTransactionPINNotSet
+		}
+		return nil, err
+	}
+	if credential.TransactionPINHash == "" {
+		return nil, ErrTransactionPINNotSet
+	}
+
+	return &credential, nil
+}
+
+// RecordFailedTransactionPINAttempt atomically increments failed attempts and applies lockout.
+func (r *PostgresAccountRepository) RecordFailedTransactionPINAttempt(ctx context.Context, userID string, maxAttempts int, lockoutDurationSeconds int) (*domain.UserSecurityCredential, error) {
+	var credential domain.UserSecurityCredential
+	query := `
+		UPDATE user_security_credentials
+		SET
+			failed_attempts = CASE
+				WHEN (locked_until IS NOT NULL AND locked_until <= NOW())
+					OR (locked_until IS NULL AND failed_attempts >= $2) THEN 1
+				ELSE failed_attempts + 1
+			END,
+			last_failed_at = NOW(),
+			locked_until = CASE
+				WHEN (
+					CASE
+						WHEN (locked_until IS NOT NULL AND locked_until <= NOW())
+							OR (locked_until IS NULL AND failed_attempts >= $2) THEN 1
+						ELSE failed_attempts + 1
+					END
+				) >= $2 THEN NOW() + ($3 * INTERVAL '1 second')
+				ELSE NULL
+			END
+		WHERE user_id = $1
+		RETURNING user_id, transaction_pin_hash, failed_attempts, locked_until
+	`
+	err := r.db.QueryRow(ctx, query, userID, maxAttempts, lockoutDurationSeconds).Scan(
+		&credential.UserID,
+		&credential.TransactionPINHash,
+		&credential.FailedAttempts,
+		&credential.LockedUntil,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrTransactionPINNotSet
+		}
+		return nil, err
+	}
+
+	return &credential, nil
+}
+
+// ResetTransactionPINFailureState clears failed-attempt counters after successful PIN verification.
+func (r *PostgresAccountRepository) ResetTransactionPINFailureState(ctx context.Context, userID string) error {
+	query := `
+		UPDATE user_security_credentials
+		SET failed_attempts = 0, last_failed_at = NULL, locked_until = NULL
+		WHERE user_id = $1
+	`
+	result, err := r.db.Exec(ctx, query, userID)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return ErrTransactionPINNotSet
+	}
+	return nil
+}
+
 // FindAccountByUserID retrieves an account by user ID.
 func (r *PostgresAccountRepository) FindAccountByUserID(ctx context.Context, userID string) (*domain.Account, error) {
 	query := `
@@ -78,7 +164,7 @@ func (r *PostgresAccountRepository) FindAccountByUserID(ctx context.Context, use
 		ORDER BY created_at DESC 
 		LIMIT 1
 	`
-	
+
 	var account domain.Account
 	err := r.db.QueryRow(ctx, query, userID).Scan(
 		&account.ID,
@@ -92,11 +178,11 @@ func (r *PostgresAccountRepository) FindAccountByUserID(ctx context.Context, use
 		&account.CreatedAt,
 		&account.UpdatedAt,
 	)
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &account, nil
 }
 
@@ -185,7 +271,7 @@ func (r *PostgresAccountRepository) FindMoneyDropAccountByUserID(ctx context.Con
 		WHERE user_id = $1 AND account_type = 'money_drop'
 		LIMIT 1
 	`
-	
+
 	var account domain.Account
 	err := r.db.QueryRow(ctx, query, userID).Scan(
 		&account.ID,
@@ -199,14 +285,13 @@ func (r *PostgresAccountRepository) FindMoneyDropAccountByUserID(ctx context.Con
 		&account.CreatedAt,
 		&account.UpdatedAt,
 	)
-	
+
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil // No account found, not an error
 		}
 		return nil, err
 	}
-	
+
 	return &account, nil
 }
-

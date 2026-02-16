@@ -86,6 +86,11 @@ export interface UserDiscoveryResponse {
   users: UserDiscoveryResult[];
 }
 
+export interface PrimaryAccountDetails {
+  accountNumber?: string;
+  bankName?: string;
+}
+
 export interface OnboardingStatusResponse {
   status: string;
   reason?: string;
@@ -173,6 +178,7 @@ export interface Beneficiary {
 export interface AddBeneficiaryPayload {
   account_number: string;
   bank_code: string;
+  transaction_pin: string;
 }
 
 // Represents a single bank from the banks list.

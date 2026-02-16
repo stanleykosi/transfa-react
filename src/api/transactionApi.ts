@@ -37,6 +37,7 @@ import {
   SetDefaultBeneficiaryPayload,
   AccountBalance,
   PaymentRequest,
+  PrimaryAccountDetails,
   CreatePaymentRequestPayload,
   CreateMoneyDropPayload,
   MoneyDropResponse,
@@ -56,6 +57,7 @@ const DEFAULT_BENEFICIARY_QUERY_KEY = 'default-beneficiary';
 const ACCOUNT_BALANCE_QUERY_KEY = 'account-balance';
 const PAYMENT_REQUESTS_QUERY_KEY = 'paymentRequests';
 const USER_PROFILE_QUERY_KEY = 'user-profile';
+const PRIMARY_ACCOUNT_QUERY_KEY = 'primary-account';
 const MONEY_DROP_QUERY_KEY = 'moneyDrop';
 
 const toReadableError = (error: unknown): Error => {
@@ -464,6 +466,25 @@ export const useUserProfile = () => {
     queryFn: fetchUserProfile,
     staleTime: 1000 * 60 * 5, // User profile is fresh for 5 minutes
     gcTime: 1000 * 60 * 30, // Keep in cache for 30 minutes
+    retry: 2,
+  });
+};
+
+/**
+ * Fetches authenticated user's primary funding account details used for top-up.
+ * Response comes from auth-service via API Gateway.
+ */
+export const usePrimaryAccountDetails = () => {
+  const fetchPrimaryAccountDetails = async (): Promise<PrimaryAccountDetails> => {
+    const { data } = await apiClient.get<PrimaryAccountDetails>('/me/primary-account');
+    return data ?? {};
+  };
+
+  return useQuery<PrimaryAccountDetails, Error>({
+    queryKey: [PRIMARY_ACCOUNT_QUERY_KEY],
+    queryFn: fetchPrimaryAccountDetails,
+    staleTime: 1000 * 60 * 2,
+    gcTime: 1000 * 60 * 10,
     retry: 2,
   });
 };

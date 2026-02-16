@@ -18,6 +18,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/transfa/account-service/internal/app"
+	"github.com/transfa/account-service/internal/store"
 	"github.com/transfa/account-service/pkg/middleware"
 )
 
@@ -43,8 +44,9 @@ func NewBankHandler(service *app.AccountService) *BankHandler {
 
 // CreateBeneficiaryRequest defines the expected JSON body for creating a beneficiary.
 type CreateBeneficiaryRequest struct {
-	AccountNumber string `json:"account_number"`
-	BankCode      string `json:"bank_code"`
+	AccountNumber  string `json:"account_number"`
+	BankCode       string `json:"bank_code"`
+	TransactionPIN string `json:"transaction_pin"`
 }
 
 // CreateBeneficiary handles the creation of a new beneficiary.
@@ -62,15 +64,28 @@ func (h *BeneficiaryHandler) CreateBeneficiary(w http.ResponseWriter, r *http.Re
 	}
 
 	input := app.CreateBeneficiaryInput{
-		UserID:        userID,
-		AccountNumber: req.AccountNumber,
-		BankCode:      req.BankCode,
+		UserID:         userID,
+		AccountNumber:  req.AccountNumber,
+		BankCode:       req.BankCode,
+		TransactionPIN: req.TransactionPIN,
 	}
 
 	beneficiary, err := h.service.CreateBeneficiary(r.Context(), input)
 	if err != nil {
 		if errors.Is(err, app.ErrUserNotFound) {
 			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, store.ErrTransactionPINNotSet) {
+			http.Error(w, "Transaction PIN is not set. Please create your PIN first.", http.StatusPreconditionFailed)
+			return
+		}
+		if errors.Is(err, app.ErrTransactionPINLocked) {
+			http.Error(w, "Too many incorrect PIN attempts. Please wait and try again.", http.StatusLocked)
+			return
+		}
+		if errors.Is(err, app.ErrInvalidTransactionPIN) {
+			http.Error(w, "Invalid transaction PIN.", http.StatusUnauthorized)
 			return
 		}
 		http.Error(w, err.Error(), http.StatusInternalServerError)
