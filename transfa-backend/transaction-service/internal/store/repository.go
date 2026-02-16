@@ -61,8 +61,9 @@ type Repository interface {
 
 	// Payment Request methods
 	CreatePaymentRequest(ctx context.Context, req *domain.PaymentRequest) (*domain.PaymentRequest, error)
-	ListPaymentRequestsByCreator(ctx context.Context, creatorID uuid.UUID) ([]domain.PaymentRequest, error)
-	GetPaymentRequestByID(ctx context.Context, requestID uuid.UUID) (*domain.PaymentRequest, error)
+	ListPaymentRequestsByCreator(ctx context.Context, creatorID uuid.UUID, opts domain.PaymentRequestListOptions) ([]domain.PaymentRequest, error)
+	GetPaymentRequestByID(ctx context.Context, requestID uuid.UUID, creatorID uuid.UUID) (*domain.PaymentRequest, error)
+	DeletePaymentRequest(ctx context.Context, requestID uuid.UUID, creatorID uuid.UUID) (bool, error)
 
 	// Transaction history methods
 	FindTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]domain.Transaction, error)

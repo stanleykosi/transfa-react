@@ -39,6 +39,7 @@ import {
   PaymentRequest,
   PrimaryAccountDetails,
   CreatePaymentRequestPayload,
+  ListPaymentRequestsParams,
   CreateMoneyDropPayload,
   MoneyDropResponse,
   ClaimMoneyDropResponse,
@@ -71,6 +72,23 @@ const toReadableError = (error: unknown): Error => {
     return error;
   }
   return new Error('Request failed');
+};
+
+const normalizePaymentRequest = (request: PaymentRequest): PaymentRequest => {
+  if (request.display_status) {
+    return request;
+  }
+
+  const raw = (request.status || '').toLowerCase();
+  const displayStatus: PaymentRequest['display_status'] =
+    raw === 'fulfilled' || raw === 'paid' ? 'paid' : raw === 'declined' ? 'declined' : 'pending';
+
+  return {
+    ...request,
+    display_status: displayStatus,
+    request_type: request.request_type || 'general',
+    title: request.title || 'Payment request',
+  };
 };
 
 /**
@@ -364,17 +382,23 @@ export const getTransactionFeesQuery = () => feesQuery;
  * Custom hook to list all payment requests for the authenticated user.
  * @returns A TanStack Query object containing the list of payment requests.
  */
-export const useListPaymentRequests = () => {
+export const useListPaymentRequests = (params?: ListPaymentRequestsParams) => {
   const fetchPaymentRequests = async (): Promise<PaymentRequest[]> => {
     const { data } = await apiClient.get<PaymentRequest[]>('/transactions/payment-requests', {
       baseURL: TRANSACTION_SERVICE_URL,
+      params,
     });
-    return data;
+    return data.map(normalizePaymentRequest);
   };
 
   return useQuery<PaymentRequest[], Error>({
-    queryKey: [PAYMENT_REQUESTS_QUERY_KEY],
-    queryFn: fetchPaymentRequests,
+    queryKey: [
+      PAYMENT_REQUESTS_QUERY_KEY,
+      params?.limit ?? null,
+      params?.offset ?? null,
+      params?.q ?? '',
+    ],
+    queryFn: () => fetchPaymentRequests(),
   });
 };
 
@@ -398,7 +422,7 @@ export const useCreatePaymentRequest = (
         baseURL: TRANSACTION_SERVICE_URL,
       }
     );
-    return data;
+    return normalizePaymentRequest(data);
   };
 
   return useMutation<PaymentRequest, Error, CreatePaymentRequestPayload>({
@@ -424,13 +448,40 @@ export const useGetPaymentRequest = (requestId: string) => {
         baseURL: TRANSACTION_SERVICE_URL,
       }
     );
-    return data;
+    return normalizePaymentRequest(data);
   };
 
   return useQuery<PaymentRequest, Error>({
     queryKey: [PAYMENT_REQUESTS_QUERY_KEY, requestId],
     queryFn: fetchPaymentRequest,
     enabled: !!requestId, // Only run the query if requestId is available.
+  });
+};
+
+/**
+ * Custom hook to delete (soft-delete) a payment request owned by the authenticated user.
+ */
+export const useDeletePaymentRequest = (
+  options?: UseMutationOptions<void, Error, { requestId: string }>
+) => {
+  const queryClient = useQueryClient();
+
+  const deletePaymentRequestMutation = async ({
+    requestId,
+  }: {
+    requestId: string;
+  }): Promise<void> => {
+    await apiClient.delete(`/transactions/payment-requests/${requestId}`, {
+      baseURL: TRANSACTION_SERVICE_URL,
+    });
+  };
+
+  return useMutation<void, Error, { requestId: string }>({
+    mutationFn: deletePaymentRequestMutation,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [PAYMENT_REQUESTS_QUERY_KEY] });
+    },
+    ...options,
   });
 };
 

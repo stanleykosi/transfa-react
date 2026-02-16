@@ -121,6 +121,7 @@ type SelfTransferRequest struct {
 type User struct {
 	ID               uuid.UUID `json:"id"`
 	Username         string    `json:"username"`
+	FullName         *string   `json:"full_name,omitempty"`
 	AllowSending     bool      `json:"allow_sending"`
 	AnchorCustomerID string    `json:"anchor_customer_id"`
 }
@@ -175,21 +176,40 @@ type AccountBalance struct {
 // PaymentRequest represents a payment request record in the database.
 // It aligns with the `payment_requests` table schema.
 type PaymentRequest struct {
-	ID          uuid.UUID `json:"id" db:"id"`
-	CreatorID   uuid.UUID `json:"creator_id" db:"creator_id"`
-	Status      string    `json:"status" db:"status"`
-	Amount      int64     `json:"amount" db:"amount"`
-	Description *string   `json:"description,omitempty" db:"description"`
-	ImageURL    *string   `json:"image_url,omitempty" db:"image_url"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+	ID                uuid.UUID  `json:"id" db:"id"`
+	CreatorID         uuid.UUID  `json:"creator_id" db:"creator_id"`
+	Status            string     `json:"status" db:"status"`
+	DisplayStatus     string     `json:"display_status,omitempty"`
+	RequestType       string     `json:"request_type" db:"request_type"`
+	Title             string     `json:"title" db:"title"`
+	RecipientUserID   *uuid.UUID `json:"recipient_user_id,omitempty" db:"recipient_user_id"`
+	RecipientUsername *string    `json:"recipient_username,omitempty" db:"recipient_username"`
+	RecipientFullName *string    `json:"recipient_full_name,omitempty" db:"recipient_full_name"`
+	Amount            int64      `json:"amount" db:"amount"`
+	Description       *string    `json:"description,omitempty" db:"description"`
+	ImageURL          *string    `json:"image_url,omitempty" db:"image_url"`
+	ShareableLink     string     `json:"shareable_link,omitempty"`
+	QRCodeContent     string     `json:"qr_code_content,omitempty"`
+	DeletedAt         *time.Time `json:"-" db:"deleted_at"`
+	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // CreatePaymentRequestPayload defines the structure for creating a new payment request.
 type CreatePaymentRequestPayload struct {
-	Amount      int64   `json:"amount" validate:"required,gt=0"`
-	Description *string `json:"description,omitempty"`
-	ImageURL    *string `json:"image_url,omitempty"`
+	RequestType       string  `json:"request_type"`
+	Title             string  `json:"title"`
+	RecipientUsername *string `json:"recipient_username,omitempty"`
+	Amount            int64   `json:"amount" validate:"required,gt=0"`
+	Description       *string `json:"description,omitempty"`
+	ImageURL          *string `json:"image_url,omitempty"`
+}
+
+// PaymentRequestListOptions controls pagination and search for creator-owned requests.
+type PaymentRequestListOptions struct {
+	Limit  int
+	Offset int
+	Search string
 }
 
 // MoneyDrop represents the state of a money drop in the database.

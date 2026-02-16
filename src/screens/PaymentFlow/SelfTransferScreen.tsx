@@ -673,7 +673,11 @@ const SelfTransferScreen = () => {
             {resultState?.type === 'success' && resultState.transactionId ? (
               <TouchableOpacity
                 onPress={() => {
-                  if (!resultState || resultState.type !== 'success' || !resultState.transactionId) {
+                  if (
+                    !resultState ||
+                    resultState.type !== 'success' ||
+                    !resultState.transactionId
+                  ) {
                     return;
                   }
                   const txId = resultState.transactionId;

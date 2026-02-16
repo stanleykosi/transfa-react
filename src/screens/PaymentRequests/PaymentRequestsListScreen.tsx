@@ -1,349 +1,533 @@
-/**
- * @description
- * Enhanced Payment Requests List screen with modern fintech UI.
- * Displays a list of payment requests created by the user with improved visual hierarchy.
- * Includes a button at the bottom to navigate to create a new payment request.
- *
- * @dependencies
- * - react, react-native: For UI components and hooks
- * - @/components/*: Reusable UI components
- * - @/api/transactionApi: For the `useListPaymentRequests` hook
- * - @/utils/formatCurrency: For formatting amounts
- * - @expo/vector-icons: For icons
- * - @react-navigation/native: For navigation
- */
-import React, { useState } from 'react';
+import React from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { useListPaymentRequests } from '@/api/transactionApi';
-import { PaymentRequest } from '@/types/api';
-import { theme } from '@/constants/theme';
-import { formatCurrency } from '@/utils/formatCurrency';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import ActionButton from '@/components/ActionButton';
-import ScreenWrapper from '@/components/ScreenWrapper';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { LinearGradient } from 'expo-linear-gradient';
 
-const PaymentRequestItem = React.memo(({ item }: { item: PaymentRequest }) => {
-  const isFulfilled = item.status === 'fulfilled';
-  const isPending = item.status === 'pending';
+import { useAccountBalance, useListPaymentRequests, useUserProfile } from '@/api/transactionApi';
+import { AppStackParamList } from '@/navigation/AppStack';
+import type { PaymentRequest } from '@/types/api';
+import { formatCurrency } from '@/utils/formatCurrency';
 
-  const getStatusColor = () => {
-    if (isFulfilled) {
-      return theme.colors.success;
-    }
-    if (isPending) {
-      return theme.colors.warning;
-    }
-    return theme.colors.textSecondary;
-  };
+const BRAND_YELLOW = '#FFD300';
 
-  const getStatusBgColor = () => {
-    if (isFulfilled) {
-      return '#D1FAE5'; // Green 100
-    }
-    if (isPending) {
-      return '#FEF3C7'; // Amber 100
-    }
-    return '#F3F4F6'; // Gray 100
-  };
+type NavigationProp = NativeStackNavigationProp<AppStackParamList>;
 
-  const getStatusIcon = () => {
-    if (isFulfilled) {
-      return 'checkmark-circle';
-    }
-    if (isPending) {
-      return 'time';
-    }
-    return 'alert-circle';
-  };
+const stripUsernamePrefix = (value?: string | null) => (value || 'new_user').replace(/^_+/, '');
+
+const formatRequestDate = (isoDate: string) =>
+  new Date(isoDate).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+const RequestStatusPill = ({ status }: { status: PaymentRequest['display_status'] }) => {
+  const normalized = status === 'paid' || status === 'declined' ? status : 'pending';
+  const bgColor =
+    normalized === 'paid'
+      ? '#BFF2B6'
+      : normalized === 'declined'
+        ? '#FFCACA'
+        : 'rgba(255, 211, 0, 0.28)';
+  const textColor =
+    normalized === 'paid' ? '#25A641' : normalized === 'declined' ? '#F14D4D' : '#D8A700';
 
   return (
-    <TouchableOpacity activeOpacity={0.8}>
-      <View style={styles.itemContainer}>
-        <View style={[styles.itemIconContainer, { backgroundColor: theme.colors.primaryLight }]}>
-          <Ionicons name="receipt-outline" size={24} color={theme.colors.primary} />
+    <View style={[styles.statusPill, { backgroundColor: bgColor }]}>
+      <Ionicons
+        name={
+          normalized === 'paid'
+            ? 'checkmark-circle'
+            : normalized === 'declined'
+              ? 'close-circle'
+              : 'time'
+        }
+        size={10}
+        color={textColor}
+      />
+      <Text style={[styles.statusText, { color: textColor }]}>
+        {normalized === 'paid' ? 'Paid' : normalized === 'declined' ? 'Declined' : 'Pending'}
+      </Text>
+    </View>
+  );
+};
+
+const OutgoingRequestCard = ({ item, onPress }: { item: PaymentRequest; onPress: () => void }) => {
+  const isGeneral = item.request_type === 'general';
+  const username = stripUsernamePrefix(item.recipient_username);
+  const fullName = item.recipient_full_name?.trim() || item.title;
+
+  return (
+    <TouchableOpacity style={styles.requestCard} activeOpacity={0.86} onPress={onPress}>
+      <View style={styles.requestCardLeft}>
+        <View style={[styles.cardAvatar, isGeneral && styles.generalAvatar]}>
+          {isGeneral ? (
+            <Ionicons name="qr-code-outline" size={16} color="#222326" />
+          ) : (
+            <Text style={styles.cardAvatarInitial}>{username.slice(0, 1).toUpperCase()}</Text>
+          )}
         </View>
 
-        <View style={styles.itemContent}>
-          <View style={styles.itemHeader}>
-            <Text style={styles.itemAmount}>{formatCurrency(item.amount)}</Text>
-            <View style={[styles.statusBadge, { backgroundColor: getStatusBgColor() }]}>
-              <Ionicons name={getStatusIcon()} size={14} color={getStatusColor()} />
-              <Text style={[styles.statusText, { color: getStatusColor() }]}>{item.status}</Text>
+        <View style={styles.requestTextWrap}>
+          <View style={styles.requestTitleRow}>
+            <Text style={styles.requestTitle} numberOfLines={1}>
+              {isGeneral ? 'General Request' : username}
+            </Text>
+            {!isGeneral ? (
+              <View style={styles.lockBadge}>
+                <Ionicons name="lock-closed" size={8} color="#090909" />
+              </View>
+            ) : null}
+          </View>
+
+          <Text style={styles.requestAmount}>{formatCurrency(item.amount)}</Text>
+
+          <View style={styles.dateRow}>
+            <Ionicons name="calendar-outline" size={11} color="#7A7D84" />
+            <Text style={styles.requestDate}>{formatRequestDate(item.created_at)}</Text>
+          </View>
+
+          {!isGeneral ? (
+            <Text style={styles.requestSubName} numberOfLines={1}>
+              {fullName}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+
+      <RequestStatusPill status={item.display_status} />
+    </TouchableOpacity>
+  );
+};
+
+const PaymentRequestsListScreen = () => {
+  const navigation = useNavigation<NavigationProp>();
+
+  const { data: profile } = useUserProfile();
+  const { data: balanceData, isLoading: isLoadingBalance } = useAccountBalance();
+  const {
+    data: latestRequests,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isRefetching,
+  } = useListPaymentRequests({ limit: 3, offset: 0 });
+
+  const username = stripUsernamePrefix(profile?.username);
+  const requests = latestRequests ?? [];
+
+  return (
+    <View style={styles.root}>
+      <LinearGradient
+        colors={['#1A1B1E', '#0C0D0F', '#050607']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
+
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefetching}
+              onRefresh={refetch}
+              tintColor={BRAND_YELLOW}
+            />
+          }
+          showsVerticalScrollIndicator={false}
+        >
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={20} color="#F2F2F2" />
+          </TouchableOpacity>
+
+          <View style={styles.identityRow}>
+            <View style={styles.avatarWrap}>
+              <Text style={styles.avatarInitial}>{username.slice(0, 1).toUpperCase()}</Text>
+            </View>
+
+            <View style={styles.userTextWrap}>
+              <Text style={styles.userName}>{username}</Text>
+              <View style={styles.userLockBadge}>
+                <Ionicons name="lock-closed" size={8} color="#0A0A0A" />
+              </View>
+            </View>
+
+            <View style={styles.headerIcons}>
+              <Ionicons name="wallet-outline" size={18} color="#ECEDEE" />
+              <Ionicons name="notifications-outline" size={17} color="#ECEDEE" />
             </View>
           </View>
 
-          <Text style={styles.itemDescription} numberOfLines={2}>
-            {item.description || 'No description provided'}
-          </Text>
-
-          <View style={styles.itemFooter}>
-            <Ionicons name="calendar-outline" size={14} color={theme.colors.textSecondary} />
-            <Text style={styles.itemDate}>
-              {new Date(item.created_at).toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-              })}
-            </Text>
+          <View style={styles.balanceSection}>
+            <Text style={styles.balanceLabel}>AVAILABLE BALANCE</Text>
+            <View style={styles.balanceRow}>
+              {isLoadingBalance ? (
+                <ActivityIndicator size="small" color={BRAND_YELLOW} />
+              ) : (
+                <Text style={styles.balanceValue}>
+                  {formatCurrency(balanceData?.available_balance ?? 0)}
+                </Text>
+              )}
+              <Ionicons name="eye-off-outline" size={18} color="#C7C8CB" style={styles.eyeIcon} />
+            </View>
           </View>
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-});
 
-const ItemSeparator = () => <View style={styles.separator} />;
+          <View style={styles.topSegmentWrap}>
+            <TouchableOpacity
+              style={[styles.topSegmentButton, styles.topSegmentInactive]}
+              activeOpacity={0.9}
+            >
+              <Ionicons name="link-outline" size={14} color="#C3C4C7" />
+              <Text style={styles.topSegmentText}>My Link</Text>
+            </TouchableOpacity>
 
-const PaymentRequestsListScreen = () => {
-  const navigation = useNavigation();
-  const [refreshing, setRefreshing] = useState(false);
-  const { data: requests, isLoading, isError, error, refetch } = useListPaymentRequests();
+            <View style={[styles.topSegmentButton, styles.topSegmentActive]}>
+              <Ionicons name="receipt-outline" size={14} color="#E7E8EA" />
+              <Text style={styles.topSegmentText}>Request</Text>
+            </View>
+          </View>
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    try {
-      await refetch();
-    } catch (refreshError) {
-      console.error('Error refreshing payment requests:', refreshError);
-    } finally {
-      setRefreshing(false);
-    }
-  };
+          <View style={styles.divider} />
 
-  const renderEmptyState = () => (
-    <View style={styles.emptyContainer}>
-      <View style={styles.emptyIconContainer}>
-        <Ionicons name="document-text-outline" size={72} color={theme.colors.textSecondary} />
-      </View>
-      <Text style={styles.emptyTitle}>No Payment Requests</Text>
-      <Text style={styles.emptySubtitle}>
-        You haven't created any payment requests yet.{'\n'}
-        Create one from the Home screen to get started.
-      </Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Outgoing requests</Text>
+            <TouchableOpacity
+              onPress={() => navigation.navigate('PaymentRequestHistory')}
+              style={styles.historyPill}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.historyPillText}>Request History</Text>
+            </TouchableOpacity>
+          </View>
+
+          {isLoading ? (
+            <View style={styles.stateWrap}>
+              <ActivityIndicator size="small" color={BRAND_YELLOW} />
+            </View>
+          ) : isError && !latestRequests ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyText}>
+                {error?.message || 'Unable to load requests. Pull to refresh and try again.'}
+              </Text>
+            </View>
+          ) : requests.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyText}>No outgoing requests yet.</Text>
+            </View>
+          ) : (
+            <View style={styles.requestList}>
+              {requests.map((request) => (
+                <OutgoingRequestCard
+                  key={request.id}
+                  item={request}
+                  onPress={() =>
+                    navigation.navigate('PaymentRequestSuccess', { requestId: request.id })
+                  }
+                />
+              ))}
+            </View>
+          )}
+
+          <View style={[styles.divider, styles.bottomDivider]} />
+
+          <TouchableOpacity
+            style={styles.createRequestButton}
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate('CreatePaymentRequest')}
+          >
+            <Ionicons name="add" size={20} color="#D8D9DC" />
+            <Text style={styles.createRequestText}>Create Request</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
     </View>
-  );
-
-  const renderErrorState = () => (
-    <View style={styles.emptyContainer}>
-      <View style={styles.emptyIconContainer}>
-        <Ionicons name="alert-circle-outline" size={72} color={theme.colors.error} />
-      </View>
-      <Text style={styles.emptyTitle}>Failed to Load</Text>
-      <Text style={styles.emptySubtitle}>
-        {error?.message || 'Something went wrong while loading your payment requests.'}
-      </Text>
-    </View>
-  );
-
-  const renderContent = () => {
-    if (isLoading && !refreshing) {
-      return (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.colors.primary} />
-          <Text style={styles.loadingText}>Loading payment requests...</Text>
-        </View>
-      );
-    }
-
-    if (isError) {
-      return renderErrorState();
-    }
-
-    if (!requests || requests.length === 0) {
-      return renderEmptyState();
-    }
-
-    return (
-      <FlatList
-        data={requests}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <PaymentRequestItem item={item} />}
-        ItemSeparatorComponent={ItemSeparator}
-        contentContainerStyle={styles.listContainer}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={handleRefresh}
-            colors={[theme.colors.primary]}
-            tintColor={theme.colors.primary}
-          />
-        }
-      />
-    );
-  };
-
-  return (
-    <ScreenWrapper>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={theme.colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Payment Requests</Text>
-        <View style={{ width: 24 }} />
-      </View>
-
-      <View style={styles.contentWrapper}>
-        {renderContent()}
-
-        <View style={styles.inlineButtonContainer}>
-          <ActionButton
-            title="Create New Payment"
-            variant="primary"
-            size="medium"
-            onPress={() => navigation.navigate('CreatePaymentRequest' as never)}
-            style={styles.createButton}
-          />
-        </View>
-      </View>
-    </ScreenWrapper>
   );
 };
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: theme.spacing.s24,
+  root: {
+    flex: 1,
+    backgroundColor: '#050607',
+  },
+  safeArea: {
+    flex: 1,
+  },
+  content: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 24,
   },
   backButton: {
-    padding: theme.spacing.s4,
+    width: 28,
+    paddingVertical: 4,
   },
-  title: {
-    fontSize: theme.fontSizes['2xl'],
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.textPrimary,
-  },
-  contentWrapper: {
-    flex: 1,
-    paddingTop: theme.spacing.s16,
-    gap: theme.spacing.s16,
-  },
-  listContainer: {
-    paddingBottom: theme.spacing.s16,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: theme.spacing.s24,
-  },
-  loadingText: {
-    marginTop: theme.spacing.s16,
-    fontSize: theme.fontSizes.base,
-    color: theme.colors.textSecondary,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: theme.spacing.s32,
-  },
-  emptyIconContainer: {
-    marginBottom: theme.spacing.s20,
-    opacity: 0.5,
-  },
-  emptyTitle: {
-    fontSize: theme.fontSizes.xl,
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.s8,
-    textAlign: 'center',
-  },
-  emptySubtitle: {
-    fontSize: theme.fontSizes.base,
-    color: theme.colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-  // Item Styles
-  itemContainer: {
+  identityRow: {
+    marginTop: 10,
     flexDirection: 'row',
-    backgroundColor: theme.colors.surface,
-    padding: theme.spacing.s16,
-    borderRadius: theme.radii.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    alignItems: 'center',
   },
-  itemIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: theme.radii.full,
+  avatarWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: '#F4DDB5',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: theme.spacing.s12,
   },
-  itemContent: {
+  avatarInitial: {
+    color: '#151618',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  userTextWrap: {
+    marginLeft: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
     flex: 1,
   },
-  itemHeader: {
+  userName: {
+    color: '#EFEFF0',
+    fontSize: 21,
+    fontWeight: '700',
+  },
+  userLockBadge: {
+    marginLeft: 4,
+    width: 15,
+    height: 15,
+    borderRadius: 7.5,
+    backgroundColor: BRAND_YELLOW,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  balanceSection: {
+    marginTop: 14,
+  },
+  balanceLabel: {
+    color: '#B5B7BC',
+    fontSize: 13,
+    letterSpacing: 0.6,
+  },
+  balanceRow: {
+    marginTop: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  balanceValue: {
+    color: '#F5F5F6',
+    fontSize: 44,
+    fontWeight: '700',
+  },
+  eyeIcon: {
+    marginLeft: 8,
+    marginTop: 3,
+  },
+  topSegmentWrap: {
+    marginTop: 18,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  topSegmentButton: {
+    flex: 1,
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  topSegmentInactive: {
+    backgroundColor: 'rgba(255,255,255,0.07)',
+  },
+  topSegmentActive: {
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderColor: BRAND_YELLOW,
+  },
+  topSegmentText: {
+    color: '#D6D7DA',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  divider: {
+    marginTop: 18,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  bottomDivider: {
+    marginTop: 16,
+    marginBottom: 16,
+  },
+  sectionHeader: {
+    marginTop: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  sectionTitle: {
+    color: '#E9E9EB',
+    fontSize: 24,
+    fontWeight: '500',
+  },
+  historyPill: {
+    height: 34,
+    borderRadius: 17,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  historyPillText: {
+    color: '#C7C8CC',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  stateWrap: {
+    marginTop: 18,
+    alignItems: 'center',
+  },
+  emptyCard: {
+    marginTop: 14,
+    borderRadius: 12,
+    minHeight: 80,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  emptyText: {
+    color: '#A8AAB0',
+    fontSize: 13,
+  },
+  requestList: {
+    marginTop: 12,
+    gap: 10,
+  },
+  requestCard: {
+    minHeight: 88,
+    borderRadius: 10,
+    backgroundColor: '#F7F7F8',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  requestCardLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  cardAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    backgroundColor: '#ABABFD',
     alignItems: 'center',
-    marginBottom: theme.spacing.s8,
+    justifyContent: 'center',
   },
-  itemAmount: {
-    fontSize: theme.fontSizes.xl,
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.textPrimary,
+  generalAvatar: {
+    backgroundColor: '#EFEFF1',
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: '#7A7D84',
   },
-  statusBadge: {
+  cardAvatarInitial: {
+    color: '#111214',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  requestTextWrap: {
+    flex: 1,
+  },
+  requestTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: theme.spacing.s12,
-    paddingVertical: theme.spacing.s4,
-    borderRadius: theme.radii.full,
-    gap: theme.spacing.s4,
+    gap: 4,
+  },
+  requestTitle: {
+    color: '#111214',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  lockBadge: {
+    width: 15,
+    height: 15,
+    borderRadius: 7.5,
+    backgroundColor: BRAND_YELLOW,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  requestAmount: {
+    color: '#17181A',
+    fontSize: 16,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  dateRow: {
+    marginTop: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  requestDate: {
+    color: '#6D7077',
+    fontSize: 11,
+  },
+  requestSubName: {
+    color: '#54575D',
+    fontSize: 12,
+    marginTop: 1,
+  },
+  statusPill: {
+    marginTop: 2,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   statusText: {
-    fontSize: theme.fontSizes.xs,
-    fontWeight: theme.fontWeights.semibold,
-    textTransform: 'capitalize',
+    fontSize: 11,
+    fontWeight: '600',
   },
-  itemDescription: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.s8,
-    lineHeight: 18,
-  },
-  itemFooter: {
+  createRequestButton: {
+    height: 52,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+    backgroundColor: 'rgba(0,0,0,0.25)',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: theme.spacing.s4,
+    justifyContent: 'center',
+    gap: 8,
   },
-  itemDate: {
-    fontSize: theme.fontSizes.xs,
-    color: theme.colors.textSecondary,
-  },
-  separator: {
-    height: theme.spacing.s12,
-  },
-  inlineButtonContainer: {
-    paddingTop: theme.spacing.s16,
-    paddingBottom: theme.spacing.s24,
-  },
-  createButton: {
-    width: '100%',
+  createRequestText: {
+    color: '#D7D8DB',
+    fontSize: 18,
+    fontWeight: '500',
   },
 });
 

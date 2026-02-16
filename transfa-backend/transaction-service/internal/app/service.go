@@ -37,10 +37,12 @@ import (
 )
 
 const (
-	defaultTransactionFee = 500
-	pinMaxAttempts        = 5
-	pinLockoutSeconds     = 900
-	maxBulkP2PTransfers   = 10
+	defaultTransactionFee           = 500
+	pinMaxAttempts                  = 5
+	pinLockoutSeconds               = 900
+	maxBulkP2PTransfers             = 10
+	maxPaymentRequestTitleLen       = 80
+	maxPaymentRequestDescriptionLen = 500
 )
 
 type serviceContextKey string
@@ -48,15 +50,20 @@ type serviceContextKey string
 const skipAnchorBalanceCheckCtxKey serviceContextKey = "skip_anchor_balance_check"
 
 var (
-	ErrInvalidTransactionPIN  = errors.New("invalid transaction pin")
-	ErrTransactionPINLocked   = errors.New("transaction pin temporarily locked")
-	ErrInvalidTransferAmount  = errors.New("transfer amount must be greater than zero")
-	ErrInvalidDescription     = errors.New("description must be between 3 and 100 characters")
-	ErrInvalidRecipient       = errors.New("recipient username is required")
-	ErrSelfTransferNotAllowed = errors.New("self transfer is not allowed on p2p endpoint")
-	ErrBulkTransferEmpty      = errors.New("at least one transfer item is required")
-	ErrBulkTransferLimit      = errors.New("bulk transfer supports a maximum of 10 recipients")
-	ErrDuplicateRecipient     = errors.New("duplicate recipient in bulk transfer request")
+	ErrInvalidTransactionPIN            = errors.New("invalid transaction pin")
+	ErrTransactionPINLocked             = errors.New("transaction pin temporarily locked")
+	ErrInvalidTransferAmount            = errors.New("transfer amount must be greater than zero")
+	ErrInvalidDescription               = errors.New("description must be between 3 and 100 characters")
+	ErrInvalidRecipient                 = errors.New("recipient username is required")
+	ErrSelfTransferNotAllowed           = errors.New("self transfer is not allowed on p2p endpoint")
+	ErrBulkTransferEmpty                = errors.New("at least one transfer item is required")
+	ErrBulkTransferLimit                = errors.New("bulk transfer supports a maximum of 10 recipients")
+	ErrDuplicateRecipient               = errors.New("duplicate recipient in bulk transfer request")
+	ErrInvalidPaymentRequestType        = errors.New("request type must be general or individual")
+	ErrInvalidPaymentRequestTitle       = errors.New("request title must be between 3 and 80 characters")
+	ErrInvalidPaymentRequestDescription = errors.New("request description cannot exceed 500 characters")
+	ErrInvalidPaymentRequestRecipient   = errors.New("recipient username is required for individual request")
+	ErrSelfPaymentRequest               = errors.New("cannot create an individual request for yourself")
 )
 
 // Service provides the core business logic for transactions.
@@ -942,28 +949,134 @@ func (s *Service) ProcessPlatformFee(ctx context.Context, userID uuid.UUID, amou
 
 // CreatePaymentRequest handles the business logic for creating a new payment request.
 func (s *Service) CreatePaymentRequest(ctx context.Context, creatorID uuid.UUID, payload domain.CreatePaymentRequestPayload) (*domain.PaymentRequest, error) {
-	// Create the domain object for the new request.
+	requestType := strings.ToLower(strings.TrimSpace(payload.RequestType))
+	title := strings.TrimSpace(payload.Title)
+	description := normalizeOptionalString(payload.Description)
+	imageURL := normalizeOptionalString(payload.ImageURL)
+
+	if requestType != "general" && requestType != "individual" {
+		return nil, ErrInvalidPaymentRequestType
+	}
+	if len(title) < 3 || len(title) > maxPaymentRequestTitleLen {
+		return nil, ErrInvalidPaymentRequestTitle
+	}
+	if description != nil && len(*description) > maxPaymentRequestDescriptionLen {
+		return nil, ErrInvalidPaymentRequestDescription
+	}
+	if payload.Amount <= 0 {
+		return nil, ErrInvalidTransferAmount
+	}
+
+	var recipientUserID *uuid.UUID
+	var recipientUsername *string
+	var recipientFullName *string
+
+	if requestType == "individual" {
+		if payload.RecipientUsername == nil || strings.TrimSpace(*payload.RecipientUsername) == "" {
+			return nil, ErrInvalidPaymentRequestRecipient
+		}
+
+		recipientLookup := strings.ToLower(strings.TrimSpace(*payload.RecipientUsername))
+		recipient, err := s.repo.FindUserByUsername(ctx, recipientLookup)
+		if err != nil {
+			return nil, err
+		}
+		if recipient.ID == creatorID {
+			return nil, ErrSelfPaymentRequest
+		}
+
+		recipientUserID = &recipient.ID
+		username := recipient.Username
+		recipientUsername = &username
+		if recipient.FullName != nil {
+			fullName := strings.TrimSpace(*recipient.FullName)
+			if fullName != "" {
+				recipientFullName = &fullName
+			}
+		}
+	}
+
 	newRequest := &domain.PaymentRequest{
-		ID:          uuid.New(),
-		CreatorID:   creatorID,
-		Status:      "pending", // Initial status is always pending.
-		Amount:      payload.Amount,
-		Description: payload.Description,
-		ImageURL:    payload.ImageURL,
+		ID:                uuid.New(),
+		CreatorID:         creatorID,
+		Status:            "pending", // Initial status is always pending.
+		RequestType:       requestType,
+		Title:             title,
+		RecipientUserID:   recipientUserID,
+		RecipientUsername: recipientUsername,
+		RecipientFullName: recipientFullName,
+		Amount:            payload.Amount,
+		Description:       description,
+		ImageURL:          imageURL,
 	}
 
 	// Persist the new request to the database via the repository.
-	return s.repo.CreatePaymentRequest(ctx, newRequest)
+	created, err := s.repo.CreatePaymentRequest(ctx, newRequest)
+	if err != nil {
+		return nil, err
+	}
+	return s.decoratePaymentRequest(created), nil
 }
 
 // ListPaymentRequests retrieves all payment requests for a given user.
-func (s *Service) ListPaymentRequests(ctx context.Context, creatorID uuid.UUID) ([]domain.PaymentRequest, error) {
-	return s.repo.ListPaymentRequestsByCreator(ctx, creatorID)
+func (s *Service) ListPaymentRequests(ctx context.Context, creatorID uuid.UUID, opts domain.PaymentRequestListOptions) ([]domain.PaymentRequest, error) {
+	requests, err := s.repo.ListPaymentRequestsByCreator(ctx, creatorID, opts)
+	if err != nil {
+		return nil, err
+	}
+	for idx := range requests {
+		s.decoratePaymentRequest(&requests[idx])
+	}
+	return requests, nil
 }
 
 // GetPaymentRequestByID retrieves a single payment request by its ID.
-func (s *Service) GetPaymentRequestByID(ctx context.Context, requestID uuid.UUID) (*domain.PaymentRequest, error) {
-	return s.repo.GetPaymentRequestByID(ctx, requestID)
+func (s *Service) GetPaymentRequestByID(ctx context.Context, requestID uuid.UUID, creatorID uuid.UUID) (*domain.PaymentRequest, error) {
+	request, err := s.repo.GetPaymentRequestByID(ctx, requestID, creatorID)
+	if err != nil || request == nil {
+		return request, err
+	}
+	return s.decoratePaymentRequest(request), nil
+}
+
+// DeletePaymentRequest soft-deletes a payment request owned by creatorID.
+func (s *Service) DeletePaymentRequest(ctx context.Context, requestID uuid.UUID, creatorID uuid.UUID) (bool, error) {
+	return s.repo.DeletePaymentRequest(ctx, requestID, creatorID)
+}
+
+func (s *Service) decoratePaymentRequest(req *domain.PaymentRequest) *domain.PaymentRequest {
+	if req == nil {
+		return nil
+	}
+
+	switch strings.ToLower(req.Status) {
+	case "fulfilled", "paid":
+		req.DisplayStatus = "paid"
+	case "declined":
+		req.DisplayStatus = "declined"
+	default:
+		req.DisplayStatus = "pending"
+	}
+
+	if req.ShareableLink == "" {
+		req.ShareableLink = fmt.Sprintf("https://transfa.app/pay?request_id=%s", req.ID.String())
+	}
+	if req.QRCodeContent == "" {
+		req.QRCodeContent = req.ShareableLink
+	}
+
+	return req
+}
+
+func normalizeOptionalString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
 
 // collectTransactionFee transfers the transaction fee to the admin account.

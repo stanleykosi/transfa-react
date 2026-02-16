@@ -63,9 +63,10 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 
 		// Payment Request routes
 		r.Route("/payment-requests", func(r chi.Router) {
-			r.Post("/", h.CreatePaymentRequestHandler)     // Create a new payment request
-			r.Get("/", h.ListPaymentRequestsHandler)       // List all of user's payment requests
-			r.Get("/{id}", h.GetPaymentRequestByIDHandler) // Get a specific payment request
+			r.Post("/", h.CreatePaymentRequestHandler)       // Create a new payment request
+			r.Get("/", h.ListPaymentRequestsHandler)         // List creator-owned payment requests
+			r.Get("/{id}", h.GetPaymentRequestByIDHandler)   // Get a specific creator-owned payment request
+			r.Delete("/{id}", h.DeletePaymentRequestHandler) // Soft-delete a creator-owned payment request
 		})
 
 		// Money Drop routes

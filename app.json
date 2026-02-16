@@ -14,7 +14,16 @@
     "android": {
       "package": "com.transfaapp"
     },
-    "plugins": ["expo-secure-store"],
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow Transfa to save request QR codes to your photo library.",
+          "savePhotosPermission": "Allow Transfa to save request QR codes to your photo library."
+        }
+      ]
+    ],
     "extra": {
       "eas": {
         "projectId": "c7c4c27f-4418-47fd-b61c-c481a1f37af1"

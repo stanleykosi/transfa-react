@@ -204,7 +204,7 @@ const HomeScreen = () => {
             <ActionCard
               icon="arrow-down-outline"
               title="Receive"
-              onPress={() => navigation.navigate('CreatePaymentRequest')}
+              onPress={() => navigation.navigate('PaymentRequestsList')}
             />
           </View>
 

@@ -9,42 +9,54 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/transfa/transaction-service/internal/app"
 	"github.com/transfa/transaction-service/internal/domain"
+	"github.com/transfa/transaction-service/internal/store"
 )
 
-// CreatePaymentRequestHandler handles the creation of a new payment request.
-// @Summary Create a payment request
-// @Description Creates a new payment request for the authenticated user.
-// @Tags Payment Requests
-// @Accept json
-// @Produce json
-// @Param request body domain.CreatePaymentRequestPayload true "Payment Request Payload"
-// @Success 201 {object} domain.PaymentRequest
-// @Failure 400 {object} ErrorResponse "Invalid request payload"
-// @Failure 401 {object} ErrorResponse "Unauthorized"
-// @Failure 500 {object} ErrorResponse "Internal server error"
-// @Router /payment-requests [post]
-func (h *TransactionHandlers) CreatePaymentRequestHandler(w http.ResponseWriter, r *http.Request) {
-	// Retrieve the authenticated user's ID from the context.
+func (h *TransactionHandlers) resolveAuthenticatedInternalUserID(r *http.Request) (uuid.UUID, int, string) {
 	userIDStr, ok := GetClerkUserID(r.Context())
 	if !ok {
-		h.writeError(w, http.StatusUnauthorized, "Could not get user ID from context")
-		return
+		return uuid.Nil, http.StatusUnauthorized, "Could not get user ID from context"
 	}
 
 	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
 	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "User not found")
-		return
+		return uuid.Nil, http.StatusBadRequest, "User not found"
 	}
+
 	userID, err := uuid.Parse(internalIDStr)
 	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "Invalid user ID format")
+		return uuid.Nil, http.StatusBadRequest, "Invalid user ID format"
+	}
+
+	return userID, 0, ""
+}
+
+func parseOptionalInt(raw string, defaultValue int) (int, error) {
+	if strings.TrimSpace(raw) == "" {
+		return defaultValue, nil
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return 0, err
+	}
+	return value, nil
+}
+
+// CreatePaymentRequestHandler handles the creation of a new payment request.
+func (h *TransactionHandlers) CreatePaymentRequestHandler(w http.ResponseWriter, r *http.Request) {
+	userID, statusCode, message := h.resolveAuthenticatedInternalUserID(r)
+	if statusCode != 0 {
+		h.writeError(w, statusCode, message)
 		return
 	}
 
@@ -54,49 +66,54 @@ func (h *TransactionHandlers) CreatePaymentRequestHandler(w http.ResponseWriter,
 		return
 	}
 
-	// TODO: Add validation for the payload struct.
-
-	// Call the service to create the payment request.
 	request, err := h.service.CreatePaymentRequest(r.Context(), userID, payload)
 	if err != nil {
-		log.Printf("level=error component=api endpoint=create_payment_request outcome=failed user_id=%s err=%v", userID, err)
-		h.writeError(w, http.StatusInternalServerError, "Could not create payment request.")
+		switch {
+		case errors.Is(err, app.ErrInvalidTransferAmount),
+			errors.Is(err, app.ErrInvalidPaymentRequestType),
+			errors.Is(err, app.ErrInvalidPaymentRequestTitle),
+			errors.Is(err, app.ErrInvalidPaymentRequestDescription),
+			errors.Is(err, app.ErrInvalidPaymentRequestRecipient),
+			errors.Is(err, app.ErrSelfPaymentRequest):
+			h.writeError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, store.ErrUserNotFound):
+			h.writeError(w, http.StatusNotFound, "Recipient not found")
+		default:
+			log.Printf("level=error component=api endpoint=create_payment_request outcome=failed user_id=%s err=%v", userID, err)
+			h.writeError(w, http.StatusInternalServerError, "Could not create payment request.")
+		}
 		return
 	}
 
 	h.writeJSON(w, http.StatusCreated, request)
 }
 
-// ListPaymentRequestsHandler handles listing all payment requests for the authenticated user.
-// @Summary List payment requests
-// @Description Retrieves a list of all payment requests created by the authenticated user.
-// @Tags Payment Requests
-// @Produce json
-// @Success 200 {array} domain.PaymentRequest
-// @Failure 401 {object} ErrorResponse "Unauthorized"
-// @Failure 500 {object} ErrorResponse "Internal server error"
-// @Router /payment-requests [get]
+// ListPaymentRequestsHandler handles listing payment requests for the authenticated user.
 func (h *TransactionHandlers) ListPaymentRequestsHandler(w http.ResponseWriter, r *http.Request) {
-	// Retrieve the authenticated user's ID from the context.
-	userIDStr, ok := GetClerkUserID(r.Context())
-	if !ok {
-		h.writeError(w, http.StatusUnauthorized, "Could not get user ID from context")
+	userID, statusCode, message := h.resolveAuthenticatedInternalUserID(r)
+	if statusCode != 0 {
+		h.writeError(w, statusCode, message)
 		return
 	}
 
-	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
+	limit, err := parseOptionalInt(r.URL.Query().Get("limit"), 50)
 	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "User not found")
+		h.writeError(w, http.StatusBadRequest, "Invalid limit")
 		return
 	}
-	userID, err := uuid.Parse(internalIDStr)
+	offset, err := parseOptionalInt(r.URL.Query().Get("offset"), 0)
 	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "Invalid user ID format")
+		h.writeError(w, http.StatusBadRequest, "Invalid offset")
 		return
 	}
 
-	// Call the service to get the list of requests.
-	requests, err := h.service.ListPaymentRequests(r.Context(), userID)
+	opts := domain.PaymentRequestListOptions{
+		Limit:  limit,
+		Offset: offset,
+		Search: strings.TrimSpace(r.URL.Query().Get("q")),
+	}
+
+	requests, err := h.service.ListPaymentRequests(r.Context(), userID, opts)
 	if err != nil {
 		log.Printf("level=error component=api endpoint=list_payment_requests outcome=failed user_id=%s err=%v", userID, err)
 		h.writeError(w, http.StatusInternalServerError, "Could not retrieve payment requests.")
@@ -107,17 +124,13 @@ func (h *TransactionHandlers) ListPaymentRequestsHandler(w http.ResponseWriter, 
 }
 
 // GetPaymentRequestByIDHandler handles fetching a single payment request by its ID.
-// @Summary Get a payment request
-// @Description Retrieves the details of a specific payment request by its ID.
-// @Tags Payment Requests
-// @Produce json
-// @Param id path string true "Payment Request ID"
-// @Success 200 {object} domain.PaymentRequest
-// @Failure 400 {object} ErrorResponse "Invalid request ID"
-// @Failure 404 {object} ErrorResponse "Payment request not found"
-// @Failure 500 {object} ErrorResponse "Internal server error"
-// @Router /payment-requests/{id} [get]
 func (h *TransactionHandlers) GetPaymentRequestByIDHandler(w http.ResponseWriter, r *http.Request) {
+	userID, statusCode, message := h.resolveAuthenticatedInternalUserID(r)
+	if statusCode != 0 {
+		h.writeError(w, statusCode, message)
+		return
+	}
+
 	requestIDStr := chi.URLParam(r, "id")
 	requestID, err := uuid.Parse(requestIDStr)
 	if err != nil {
@@ -125,10 +138,9 @@ func (h *TransactionHandlers) GetPaymentRequestByIDHandler(w http.ResponseWriter
 		return
 	}
 
-	// Call the service to get the request.
-	request, err := h.service.GetPaymentRequestByID(r.Context(), requestID)
+	request, err := h.service.GetPaymentRequestByID(r.Context(), requestID, userID)
 	if err != nil {
-		log.Printf("level=error component=api endpoint=get_payment_request_by_id outcome=failed request_id=%s err=%v", requestID, err)
+		log.Printf("level=error component=api endpoint=get_payment_request_by_id outcome=failed request_id=%s user_id=%s err=%v", requestID, userID, err)
 		h.writeError(w, http.StatusInternalServerError, "Could not retrieve payment request.")
 		return
 	}
@@ -139,4 +151,33 @@ func (h *TransactionHandlers) GetPaymentRequestByIDHandler(w http.ResponseWriter
 	}
 
 	h.writeJSON(w, http.StatusOK, request)
+}
+
+// DeletePaymentRequestHandler soft-deletes a creator-owned payment request.
+func (h *TransactionHandlers) DeletePaymentRequestHandler(w http.ResponseWriter, r *http.Request) {
+	userID, statusCode, message := h.resolveAuthenticatedInternalUserID(r)
+	if statusCode != 0 {
+		h.writeError(w, statusCode, message)
+		return
+	}
+
+	requestIDStr := chi.URLParam(r, "id")
+	requestID, err := uuid.Parse(requestIDStr)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid payment request ID.")
+		return
+	}
+
+	deleted, err := h.service.DeletePaymentRequest(r.Context(), requestID, userID)
+	if err != nil {
+		log.Printf("level=error component=api endpoint=delete_payment_request outcome=failed request_id=%s user_id=%s err=%v", requestID, userID, err)
+		h.writeError(w, http.StatusInternalServerError, "Could not delete payment request.")
+		return
+	}
+	if !deleted {
+		h.writeError(w, http.StatusNotFound, "Payment request not found.")
+		return
+	}
+
+	h.writeJSON(w, http.StatusNoContent, nil)
 }

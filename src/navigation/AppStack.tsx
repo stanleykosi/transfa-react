@@ -40,6 +40,7 @@ import MultiReceiptScreen from '@/screens/PaymentFlow/MultiReceiptScreen';
 import CreateRequestScreen from '@/screens/PaymentRequests/CreateRequestScreen';
 import PaymentRequestSuccessScreen from '@/screens/PaymentRequests/PaymentRequestSuccessScreen';
 import PaymentRequestsListScreen from '@/screens/PaymentRequests/PaymentRequestsListScreen';
+import PaymentRequestHistoryScreen from '@/screens/PaymentRequests/PaymentRequestHistoryScreen';
 import CreateDropWizardScreen from '@/screens/MoneyDrop/CreateDropWizardScreen';
 import MoneyDropSuccessScreen from '@/screens/MoneyDrop/MoneyDropSuccessScreen';
 import ClaimDropScreen from '@/screens/MoneyDrop/ClaimDropScreen';
@@ -98,6 +99,7 @@ export type AppStackParamList = {
     }>;
   };
   PaymentRequestsList: undefined; // New screen for viewing payment request history
+  PaymentRequestHistory: undefined;
   CreatePaymentRequest: undefined;
   PaymentRequestSuccess: { requestId: string };
   // Money Drop Screens
@@ -253,6 +255,11 @@ const AppStack = () => {
       <Stack.Screen
         name="PaymentRequestsList"
         component={PaymentRequestsListScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PaymentRequestHistory"
+        component={PaymentRequestHistoryScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen

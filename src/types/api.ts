@@ -341,19 +341,36 @@ export interface PlatformFeeInvoice {
 export interface PaymentRequest {
   id: string;
   creator_id: string;
-  status: 'pending' | 'fulfilled';
+  status: 'pending' | 'fulfilled' | 'declined';
+  display_status: 'pending' | 'paid' | 'declined';
+  request_type: 'general' | 'individual';
+  title: string;
+  recipient_user_id?: string;
+  recipient_username?: string;
+  recipient_full_name?: string;
   amount: number; // in kobo
   description?: string;
   image_url?: string;
+  shareable_link?: string;
+  qr_code_content?: string;
   created_at: string;
   updated_at: string;
 }
 
 // Payload for creating a new payment request.
 export interface CreatePaymentRequestPayload {
+  request_type: 'general' | 'individual';
+  title: string;
+  recipient_username?: string;
   amount: number; // in kobo
   description?: string;
   image_url?: string;
+}
+
+export interface ListPaymentRequestsParams {
+  limit?: number;
+  offset?: number;
+  q?: string;
 }
 
 export interface TransactionStatusResponse {

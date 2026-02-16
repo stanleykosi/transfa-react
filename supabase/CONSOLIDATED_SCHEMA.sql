@@ -18,7 +18,8 @@ CREATE TYPE public.transaction_type AS ENUM (
 );
 CREATE TYPE public.transaction_status AS ENUM ('pending', 'completed', 'failed');
 CREATE TYPE public.money_drop_status AS ENUM ('active', 'completed', 'expired_and_refunded');
-CREATE TYPE public.payment_request_status AS ENUM ('pending', 'fulfilled');
+CREATE TYPE public.payment_request_status AS ENUM ('pending', 'fulfilled', 'declined');
+CREATE TYPE public.payment_request_type AS ENUM ('general', 'individual');
 CREATE TYPE public.platform_fee_status AS ENUM ('pending', 'paid', 'failed', 'delinquent', 'waived');
 CREATE TYPE public.platform_fee_attempt_status AS ENUM ('success', 'failed');
 
@@ -436,20 +437,36 @@ CREATE TABLE public.payment_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     creator_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
     status public.payment_request_status NOT NULL DEFAULT 'pending',
+    request_type public.payment_request_type NOT NULL DEFAULT 'general',
+    title TEXT NOT NULL DEFAULT 'Payment request',
+    recipient_user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+    recipient_username_snapshot VARCHAR(50),
+    recipient_full_name_snapshot VARCHAR(255),
     amount BIGINT NOT NULL,
     description TEXT,
     image_url TEXT,
+    deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX idx_payment_requests_creator_id ON public.payment_requests(creator_id);
+CREATE INDEX idx_payment_requests_creator_created_at ON public.payment_requests(creator_id, created_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX idx_payment_requests_creator_type ON public.payment_requests(creator_id, request_type) WHERE deleted_at IS NULL;
+CREATE INDEX idx_payment_requests_recipient_user ON public.payment_requests(recipient_user_id) WHERE deleted_at IS NULL;
+CREATE INDEX idx_payment_requests_recipient_username_search ON public.payment_requests(LOWER(recipient_username_snapshot)) WHERE deleted_at IS NULL;
 
 COMMENT ON TABLE public.payment_requests IS 'Stores user-created payment requests with status and details.';
 COMMENT ON COLUMN public.payment_requests.creator_id IS 'Foreign key to the user who created the request.';
-COMMENT ON COLUMN public.payment_requests.status IS 'The current status of the request (pending or fulfilled).';
+COMMENT ON COLUMN public.payment_requests.status IS 'The current status of the request (pending, fulfilled/paid, or declined).';
+COMMENT ON COLUMN public.payment_requests.request_type IS 'Whether request is shareable general request or user-targeted individual request.';
+COMMENT ON COLUMN public.payment_requests.title IS 'Short title for the payment request shown in request cards and details.';
+COMMENT ON COLUMN public.payment_requests.recipient_user_id IS 'Internal recipient user id when request_type is individual.';
+COMMENT ON COLUMN public.payment_requests.recipient_username_snapshot IS 'Recipient username captured at creation time for immutable history display.';
+COMMENT ON COLUMN public.payment_requests.recipient_full_name_snapshot IS 'Recipient full name captured at creation time for immutable history display.';
 COMMENT ON COLUMN public.payment_requests.amount IS 'The requested amount in the smallest currency unit (kobo).';
 COMMENT ON COLUMN public.payment_requests.image_url IS 'URL of an optional image uploaded to Supabase Storage.';
+COMMENT ON COLUMN public.payment_requests.deleted_at IS 'Soft-delete timestamp. Non-null rows are hidden from app lists/details.';
 
 CREATE TRIGGER set_payment_requests_updated_at
 BEFORE UPDATE ON public.payment_requests

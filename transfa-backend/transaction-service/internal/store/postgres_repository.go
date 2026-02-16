@@ -26,13 +26,14 @@ import (
 )
 
 var (
-	ErrUserNotFound          = errors.New("user not found")
-	ErrAccountNotFound       = errors.New("account not found")
-	ErrBeneficiaryNotFound   = errors.New("beneficiary not found")
-	ErrInsufficientFunds     = errors.New("insufficient funds")
-	ErrPlatformFeeDelinquent = errors.New("platform fee delinquent")
-	ErrTransactionNotFound   = errors.New("transaction not found")
-	ErrTransactionPINNotSet  = errors.New("transaction pin not set")
+	ErrUserNotFound           = errors.New("user not found")
+	ErrAccountNotFound        = errors.New("account not found")
+	ErrBeneficiaryNotFound    = errors.New("beneficiary not found")
+	ErrInsufficientFunds      = errors.New("insufficient funds")
+	ErrPlatformFeeDelinquent  = errors.New("platform fee delinquent")
+	ErrTransactionNotFound    = errors.New("transaction not found")
+	ErrTransactionPINNotSet   = errors.New("transaction pin not set")
+	ErrPaymentRequestNotFound = errors.New("payment request not found")
 )
 
 // PostgresRepository is a concrete implementation of the Repository interface for PostgreSQL.
@@ -63,8 +64,8 @@ func (r *PostgresRepository) FindUserIDByClerkUserID(ctx context.Context, clerkU
 // FindUserByUsername retrieves a user from the database by their username.
 func (r *PostgresRepository) FindUserByUsername(ctx context.Context, username string) (*domain.User, error) {
 	var user domain.User
-	query := `SELECT id, username, allow_sending, anchor_customer_id FROM users WHERE username = $1`
-	err := r.db.QueryRow(ctx, query, username).Scan(&user.ID, &user.Username, &user.AllowSending, &user.AnchorCustomerID)
+	query := `SELECT id, username, full_name, allow_sending, anchor_customer_id FROM users WHERE lower(username) = lower($1)`
+	err := r.db.QueryRow(ctx, query, username).Scan(&user.ID, &user.Username, &user.FullName, &user.AllowSending, &user.AnchorCustomerID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrUserNotFound
@@ -77,8 +78,8 @@ func (r *PostgresRepository) FindUserByUsername(ctx context.Context, username st
 // FindUserByID retrieves a user from the database by their ID.
 func (r *PostgresRepository) FindUserByID(ctx context.Context, userID uuid.UUID) (*domain.User, error) {
 	var user domain.User
-	query := `SELECT id, username, allow_sending, anchor_customer_id FROM users WHERE id = $1`
-	err := r.db.QueryRow(ctx, query, userID).Scan(&user.ID, &user.Username, &user.AllowSending, &user.AnchorCustomerID)
+	query := `SELECT id, username, full_name, allow_sending, anchor_customer_id FROM users WHERE id = $1`
+	err := r.db.QueryRow(ctx, query, userID).Scan(&user.ID, &user.Username, &user.FullName, &user.AllowSending, &user.AnchorCustomerID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrUserNotFound
@@ -975,14 +976,67 @@ func (r *PostgresRepository) UpdateReceivingPreference(ctx context.Context, user
 // CreatePaymentRequest inserts a new payment request record into the database.
 func (r *PostgresRepository) CreatePaymentRequest(ctx context.Context, req *domain.PaymentRequest) (*domain.PaymentRequest, error) {
 	query := `
-        INSERT INTO payment_requests (id, creator_id, status, amount, description, image_url)
-        VALUES ($1, $2, $3, $4, $5, $6)
-        RETURNING id, creator_id, status, amount, description, image_url, created_at, updated_at
+        INSERT INTO payment_requests (
+            id,
+            creator_id,
+            status,
+            request_type,
+            title,
+            recipient_user_id,
+            recipient_username_snapshot,
+            recipient_full_name_snapshot,
+            amount,
+            description,
+            image_url
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING
+            id,
+            creator_id,
+            status,
+            request_type,
+            title,
+            recipient_user_id,
+            recipient_username_snapshot,
+            recipient_full_name_snapshot,
+            amount,
+            description,
+            image_url,
+            deleted_at,
+            created_at,
+            updated_at
     `
 	var createdRequest domain.PaymentRequest
-	err := r.db.QueryRow(ctx, query, req.ID, req.CreatorID, req.Status, req.Amount, req.Description, req.ImageURL).Scan(
-		&createdRequest.ID, &createdRequest.CreatorID, &createdRequest.Status, &createdRequest.Amount,
-		&createdRequest.Description, &createdRequest.ImageURL, &createdRequest.CreatedAt, &createdRequest.UpdatedAt)
+	err := r.db.QueryRow(
+		ctx,
+		query,
+		req.ID,
+		req.CreatorID,
+		req.Status,
+		req.RequestType,
+		req.Title,
+		req.RecipientUserID,
+		req.RecipientUsername,
+		req.RecipientFullName,
+		req.Amount,
+		req.Description,
+		req.ImageURL,
+	).Scan(
+		&createdRequest.ID,
+		&createdRequest.CreatorID,
+		&createdRequest.Status,
+		&createdRequest.RequestType,
+		&createdRequest.Title,
+		&createdRequest.RecipientUserID,
+		&createdRequest.RecipientUsername,
+		&createdRequest.RecipientFullName,
+		&createdRequest.Amount,
+		&createdRequest.Description,
+		&createdRequest.ImageURL,
+		&createdRequest.DeletedAt,
+		&createdRequest.CreatedAt,
+		&createdRequest.UpdatedAt,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -990,14 +1044,62 @@ func (r *PostgresRepository) CreatePaymentRequest(ctx context.Context, req *doma
 }
 
 // ListPaymentRequestsByCreator retrieves all payment requests created by a specific user.
-func (r *PostgresRepository) ListPaymentRequestsByCreator(ctx context.Context, creatorID uuid.UUID) ([]domain.PaymentRequest, error) {
+func (r *PostgresRepository) ListPaymentRequestsByCreator(ctx context.Context, creatorID uuid.UUID, opts domain.PaymentRequestListOptions) ([]domain.PaymentRequest, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
 	query := `
-        SELECT id, creator_id, status, amount, description, image_url, created_at, updated_at
-        FROM payment_requests
-        WHERE creator_id = $1
-        ORDER BY created_at DESC
+        SELECT
+            pr.id,
+            pr.creator_id,
+            pr.status,
+            pr.request_type,
+            pr.title,
+            pr.recipient_user_id,
+            COALESCE(pr.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(pr.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
+            pr.amount,
+            pr.description,
+            pr.image_url,
+            pr.deleted_at,
+            pr.created_at,
+            pr.updated_at
+        FROM payment_requests pr
+        LEFT JOIN users ru ON ru.id = pr.recipient_user_id
+        WHERE pr.creator_id = $1
+          AND pr.deleted_at IS NULL
     `
-	rows, err := r.db.Query(ctx, query, creatorID)
+
+	args := []interface{}{creatorID}
+	argPos := 2
+	if opts.Search != "" {
+		query += fmt.Sprintf(`
+          AND (
+            COALESCE(pr.recipient_username_snapshot, ru.username, '') ILIKE '%%' || $%d || '%%'
+            OR COALESCE(pr.recipient_full_name_snapshot, ru.full_name, '') ILIKE '%%' || $%d || '%%'
+            OR pr.title ILIKE '%%' || $%d || '%%'
+          )
+        `, argPos, argPos, argPos)
+		args = append(args, opts.Search)
+		argPos++
+	}
+
+	query += fmt.Sprintf(`
+        ORDER BY pr.created_at DESC
+        LIMIT $%d OFFSET $%d
+    `, argPos, argPos+1)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1006,8 +1108,22 @@ func (r *PostgresRepository) ListPaymentRequestsByCreator(ctx context.Context, c
 	var requests []domain.PaymentRequest
 	for rows.Next() {
 		var request domain.PaymentRequest
-		err := rows.Scan(&request.ID, &request.CreatorID, &request.Status, &request.Amount,
-			&request.Description, &request.ImageURL, &request.CreatedAt, &request.UpdatedAt)
+		err := rows.Scan(
+			&request.ID,
+			&request.CreatorID,
+			&request.Status,
+			&request.RequestType,
+			&request.Title,
+			&request.RecipientUserID,
+			&request.RecipientUsername,
+			&request.RecipientFullName,
+			&request.Amount,
+			&request.Description,
+			&request.ImageURL,
+			&request.DeletedAt,
+			&request.CreatedAt,
+			&request.UpdatedAt,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -1018,16 +1134,46 @@ func (r *PostgresRepository) ListPaymentRequestsByCreator(ctx context.Context, c
 }
 
 // GetPaymentRequestByID retrieves a single payment request by its unique ID.
-func (r *PostgresRepository) GetPaymentRequestByID(ctx context.Context, requestID uuid.UUID) (*domain.PaymentRequest, error) {
+func (r *PostgresRepository) GetPaymentRequestByID(ctx context.Context, requestID uuid.UUID, creatorID uuid.UUID) (*domain.PaymentRequest, error) {
 	query := `
-        SELECT id, creator_id, status, amount, description, image_url, created_at, updated_at
-        FROM payment_requests
-        WHERE id = $1
+        SELECT
+            pr.id,
+            pr.creator_id,
+            pr.status,
+            pr.request_type,
+            pr.title,
+            pr.recipient_user_id,
+            COALESCE(pr.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(pr.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
+            pr.amount,
+            pr.description,
+            pr.image_url,
+            pr.deleted_at,
+            pr.created_at,
+            pr.updated_at
+        FROM payment_requests pr
+        LEFT JOIN users ru ON ru.id = pr.recipient_user_id
+        WHERE pr.id = $1
+          AND pr.creator_id = $2
+          AND pr.deleted_at IS NULL
     `
 	var request domain.PaymentRequest
-	err := r.db.QueryRow(ctx, query, requestID).Scan(
-		&request.ID, &request.CreatorID, &request.Status, &request.Amount,
-		&request.Description, &request.ImageURL, &request.CreatedAt, &request.UpdatedAt)
+	err := r.db.QueryRow(ctx, query, requestID, creatorID).Scan(
+		&request.ID,
+		&request.CreatorID,
+		&request.Status,
+		&request.RequestType,
+		&request.Title,
+		&request.RecipientUserID,
+		&request.RecipientUsername,
+		&request.RecipientFullName,
+		&request.Amount,
+		&request.Description,
+		&request.ImageURL,
+		&request.DeletedAt,
+		&request.CreatedAt,
+		&request.UpdatedAt,
+	)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil // Return nil, nil if not found
@@ -1035,6 +1181,22 @@ func (r *PostgresRepository) GetPaymentRequestByID(ctx context.Context, requestI
 		return nil, err
 	}
 	return &request, nil
+}
+
+// DeletePaymentRequest soft-deletes a creator-owned payment request.
+func (r *PostgresRepository) DeletePaymentRequest(ctx context.Context, requestID uuid.UUID, creatorID uuid.UUID) (bool, error) {
+	query := `
+        UPDATE payment_requests
+        SET deleted_at = NOW(), updated_at = NOW()
+        WHERE id = $1
+          AND creator_id = $2
+          AND deleted_at IS NULL
+    `
+	tag, err := r.db.Exec(ctx, query, requestID, creatorID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // Money Drop Implementations
