@@ -63,10 +63,25 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 
 		// Payment Request routes
 		r.Route("/payment-requests", func(r chi.Router) {
-			r.Post("/", h.CreatePaymentRequestHandler)       // Create a new payment request
-			r.Get("/", h.ListPaymentRequestsHandler)         // List creator-owned payment requests
+			r.Post("/", h.CreatePaymentRequestHandler) // Create a new payment request
+			r.Get("/", h.ListPaymentRequestsHandler)   // List creator-owned payment requests
+
+			// Incoming request routes (recipient-side)
+			r.Get("/incoming", h.ListIncomingPaymentRequestsHandler)
+			r.Get("/incoming/{id}", h.GetIncomingPaymentRequestByIDHandler)
+			r.Post("/incoming/{id}/pay", h.PayIncomingPaymentRequestHandler)
+			r.Post("/incoming/{id}/decline", h.DeclineIncomingPaymentRequestHandler)
+
 			r.Get("/{id}", h.GetPaymentRequestByIDHandler)   // Get a specific creator-owned payment request
 			r.Delete("/{id}", h.DeletePaymentRequestHandler) // Soft-delete a creator-owned payment request
+		})
+
+		// In-app notifications routes
+		r.Route("/notifications", func(r chi.Router) {
+			r.Get("/", h.ListInAppNotificationsHandler)
+			r.Get("/unread-counts", h.GetInAppNotificationUnreadCountsHandler)
+			r.Post("/read-all", h.MarkAllInAppNotificationsReadHandler)
+			r.Post("/{id}/read", h.MarkInAppNotificationReadHandler)
 		})
 
 		// Money Drop routes

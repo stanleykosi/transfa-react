@@ -15,6 +15,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/transfa/transaction-service/internal/domain"
@@ -64,11 +65,28 @@ type Repository interface {
 	ListPaymentRequestsByCreator(ctx context.Context, creatorID uuid.UUID, opts domain.PaymentRequestListOptions) ([]domain.PaymentRequest, error)
 	GetPaymentRequestByID(ctx context.Context, requestID uuid.UUID, creatorID uuid.UUID) (*domain.PaymentRequest, error)
 	DeletePaymentRequest(ctx context.Context, requestID uuid.UUID, creatorID uuid.UUID) (bool, error)
+	ListIncomingPaymentRequests(ctx context.Context, recipientID uuid.UUID, opts domain.PaymentRequestListOptions) ([]domain.PaymentRequest, error)
+	GetIncomingPaymentRequestByID(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID) (*domain.PaymentRequest, error)
+	ClaimIncomingPaymentRequestForPayment(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID) (*domain.PaymentRequest, error)
+	AttachProcessingPaymentRequestSettlementTransaction(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID, settledTransactionID uuid.UUID) (*domain.PaymentRequest, error)
+	MarkPaymentRequestFulfilled(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID, settledTransactionID uuid.UUID) (*domain.PaymentRequest, error)
+	MarkPaymentRequestFulfilledBySettlementTransaction(ctx context.Context, settledTransactionID uuid.UUID) (*domain.PaymentRequest, error)
+	ReleasePaymentRequestFromProcessing(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID) error
+	ReleasePaymentRequestFromProcessingBySettlementTransaction(ctx context.Context, settledTransactionID uuid.UUID) error
+	DeclineIncomingPaymentRequest(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID, reason *string) (*domain.PaymentRequest, error)
+
+	// In-app notification methods
+	CreateInAppNotification(ctx context.Context, item domain.InAppNotification) error
+	ListInAppNotifications(ctx context.Context, userID uuid.UUID, opts domain.NotificationListOptions) ([]domain.InAppNotification, error)
+	MarkInAppNotificationRead(ctx context.Context, userID uuid.UUID, notificationID uuid.UUID) (bool, error)
+	MarkAllInAppNotificationsRead(ctx context.Context, userID uuid.UUID, category *string) (int64, error)
+	GetInAppNotificationUnreadCounts(ctx context.Context, userID uuid.UUID) (*domain.NotificationUnreadCounts, error)
 
 	// Transaction history methods
 	FindTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]domain.Transaction, error)
 	UpdateTransactionDestinations(ctx context.Context, transactionID uuid.UUID, destinationAccountID *uuid.UUID, destinationBeneficiaryID *uuid.UUID) error
 	FindTransactionByID(ctx context.Context, transactionID uuid.UUID) (*domain.Transaction, error)
+	FindLikelyPaymentRequestSettlementTransaction(ctx context.Context, senderID uuid.UUID, recipientID uuid.UUID, amount int64, description string, since time.Time) (*domain.Transaction, error)
 	FindTransactionByAnchorTransferID(ctx context.Context, anchorTransferID string) (*domain.Transaction, error)
 	MarkTransactionAsFailed(ctx context.Context, transactionID uuid.UUID, anchorTransferID, failureReason string) error
 	MarkTransactionAsCompleted(ctx context.Context, transactionID uuid.UUID, anchorTransferID string) error

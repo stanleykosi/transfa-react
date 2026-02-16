@@ -178,6 +178,8 @@ type AccountBalance struct {
 type PaymentRequest struct {
 	ID                uuid.UUID  `json:"id" db:"id"`
 	CreatorID         uuid.UUID  `json:"creator_id" db:"creator_id"`
+	CreatorUsername   *string    `json:"creator_username,omitempty" db:"creator_username"`
+	CreatorFullName   *string    `json:"creator_full_name,omitempty" db:"creator_full_name"`
 	Status            string     `json:"status" db:"status"`
 	DisplayStatus     string     `json:"display_status,omitempty"`
 	RequestType       string     `json:"request_type" db:"request_type"`
@@ -188,6 +190,11 @@ type PaymentRequest struct {
 	Amount            int64      `json:"amount" db:"amount"`
 	Description       *string    `json:"description,omitempty" db:"description"`
 	ImageURL          *string    `json:"image_url,omitempty" db:"image_url"`
+	FulfilledByUserID *uuid.UUID `json:"fulfilled_by_user_id,omitempty" db:"fulfilled_by_user_id"`
+	SettledTxID       *uuid.UUID `json:"settled_transaction_id,omitempty" db:"settled_transaction_id"`
+	ProcessingStarted *time.Time `json:"processing_started_at,omitempty" db:"processing_started_at"`
+	RespondedAt       *time.Time `json:"responded_at,omitempty" db:"responded_at"`
+	DeclinedReason    *string    `json:"declined_reason,omitempty" db:"declined_reason"`
 	ShareableLink     string     `json:"shareable_link,omitempty"`
 	QRCodeContent     string     `json:"qr_code_content,omitempty"`
 	DeletedAt         *time.Time `json:"-" db:"deleted_at"`
@@ -210,6 +217,53 @@ type PaymentRequestListOptions struct {
 	Limit  int
 	Offset int
 	Search string
+	Status string
+	Type   string
+}
+
+type PayIncomingPaymentRequestPayload struct {
+	TransactionPIN string `json:"transaction_pin"`
+}
+
+type DeclineIncomingPaymentRequestPayload struct {
+	Reason *string `json:"reason,omitempty"`
+}
+
+type PayIncomingPaymentRequestResult struct {
+	Request     *PaymentRequest `json:"request"`
+	Transaction *Transaction    `json:"transaction"`
+}
+
+type NotificationListOptions struct {
+	Limit    int
+	Offset   int
+	Search   string
+	Category string
+	Status   string
+}
+
+type InAppNotification struct {
+	ID                uuid.UUID              `json:"id"`
+	UserID            uuid.UUID              `json:"user_id"`
+	Category          string                 `json:"category"`
+	Type              string                 `json:"type"`
+	Title             string                 `json:"title"`
+	Body              *string                `json:"body,omitempty"`
+	Status            string                 `json:"status"`
+	RelatedEntityType *string                `json:"related_entity_type,omitempty"`
+	RelatedEntityID   *uuid.UUID             `json:"related_entity_id,omitempty"`
+	Data              map[string]interface{} `json:"data,omitempty"`
+	DedupeKey         *string                `json:"-"`
+	ReadAt            *time.Time             `json:"read_at,omitempty"`
+	CreatedAt         time.Time              `json:"created_at"`
+	UpdatedAt         time.Time              `json:"updated_at"`
+}
+
+type NotificationUnreadCounts struct {
+	Total      int64 `json:"total"`
+	Request    int64 `json:"request"`
+	Newsletter int64 `json:"newsletter"`
+	System     int64 `json:"system"`
 }
 
 // MoneyDrop represents the state of a money drop in the database.

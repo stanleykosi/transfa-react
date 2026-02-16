@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/transfa/transaction-service/internal/domain"
 	"github.com/transfa/transaction-service/internal/store"
 )
@@ -124,6 +125,34 @@ func (c *TransferStatusConsumer) handleFailure(ctx context.Context, tx *domain.T
 		log.Printf("level=warn component=transfer_consumer msg=\"fee refund failed\" transaction_id=%s err=%v", tx.ID, err)
 	}
 
+	if err := c.repo.ReleasePaymentRequestFromProcessingBySettlementTransaction(ctx, tx.ID); err != nil {
+		return fmt.Errorf("release processing payment request: %w", err)
+	}
+
+	body := "A transfer failed and your wallet was refunded."
+	relatedEntityType := "transaction"
+	dedupeKey := fmt.Sprintf("transfer.failed:%s", tx.ID)
+	relatedID := tx.ID
+	c.emitInAppNotification(ctx, "transfer.failed", domain.InAppNotification{
+		ID:                uuid.New(),
+		UserID:            tx.SenderID,
+		Category:          "system",
+		Type:              "transfer.failed",
+		Title:             "Transfer Failed",
+		Body:              &body,
+		Status:            "unread",
+		RelatedEntityType: &relatedEntityType,
+		RelatedEntityID:   &relatedID,
+		DedupeKey:         &dedupeKey,
+		Data: map[string]interface{}{
+			"transaction_id": tx.ID.String(),
+			"amount":         tx.Amount,
+			"fee":            tx.Fee,
+			"reason":         event.Reason,
+			"status":         "failed",
+		},
+	})
+
 	return nil
 }
 
@@ -131,7 +160,99 @@ func (c *TransferStatusConsumer) handleSuccess(ctx context.Context, tx *domain.T
 	if tx.Status == "completed" {
 		return nil
 	}
-	return c.repo.MarkTransactionAsCompleted(ctx, tx.ID, event.AnchorTransferID)
+	if err := c.repo.MarkTransactionAsCompleted(ctx, tx.ID, event.AnchorTransferID); err != nil {
+		return err
+	}
+
+	settledRequest, err := c.repo.MarkPaymentRequestFulfilledBySettlementTransaction(ctx, tx.ID)
+	if err != nil {
+		return fmt.Errorf("finalize processing payment request: %w", err)
+	}
+
+	if tx.RecipientID == nil {
+		body := "Your transfer completed successfully."
+		title := "Transfer Completed"
+		if tx.Type == "self_transfer" {
+			body = "Your withdrawal was completed successfully."
+			title = "Withdrawal Completed"
+		}
+
+		relatedEntityType := "transaction"
+		dedupeKey := fmt.Sprintf("transfer.completed:%s", tx.ID)
+		relatedID := tx.ID
+		c.emitInAppNotification(ctx, "transfer.completed", domain.InAppNotification{
+			ID:                uuid.New(),
+			UserID:            tx.SenderID,
+			Category:          "system",
+			Type:              "transfer.completed",
+			Title:             title,
+			Body:              &body,
+			Status:            "unread",
+			RelatedEntityType: &relatedEntityType,
+			RelatedEntityID:   &relatedID,
+			DedupeKey:         &dedupeKey,
+			Data: map[string]interface{}{
+				"transaction_id":   tx.ID.String(),
+				"amount":           tx.Amount,
+				"fee":              tx.Fee,
+				"description":      tx.Description,
+				"anchor_transfer":  event.AnchorTransferID,
+				"transfer_type":    tx.TransferType,
+				"transaction_type": tx.Type,
+				"status":           "completed",
+			},
+		})
+		return nil
+	}
+
+	sender, err := c.repo.FindUserByID(ctx, tx.SenderID)
+	if err != nil {
+		log.Printf("level=warn component=transfer_consumer msg=\"sender lookup failed for notification\" sender_id=%s err=%v", tx.SenderID, err)
+	}
+
+	senderUsername := ""
+	if sender != nil {
+		senderUsername = strings.TrimLeft(strings.TrimSpace(sender.Username), "_")
+	}
+
+	if settledRequest != nil {
+		c.emitRequestPaidNotification(ctx, settledRequest, tx, senderUsername)
+	}
+
+	body := "You received a transfer."
+	if senderUsername != "" {
+		body = fmt.Sprintf("You received a transfer from %s.", senderUsername)
+	}
+
+	relatedEntityType := "transaction"
+	dedupeKey := fmt.Sprintf("transfer.received:%s", tx.ID)
+	relatedID := tx.ID
+	c.emitInAppNotification(ctx, "transfer.received", domain.InAppNotification{
+		ID:                uuid.New(),
+		UserID:            *tx.RecipientID,
+		Category:          "system",
+		Type:              "transfer.received",
+		Title:             "Incoming Transfer",
+		Body:              &body,
+		Status:            "unread",
+		RelatedEntityType: &relatedEntityType,
+		RelatedEntityID:   &relatedID,
+		DedupeKey:         &dedupeKey,
+		Data: map[string]interface{}{
+			"transaction_id":   tx.ID.String(),
+			"amount":           tx.Amount,
+			"fee":              tx.Fee,
+			"description":      tx.Description,
+			"sender_user_id":   tx.SenderID.String(),
+			"sender_username":  senderUsername,
+			"anchor_transfer":  event.AnchorTransferID,
+			"transfer_type":    tx.TransferType,
+			"transaction_type": tx.Type,
+			"status":           "completed",
+		},
+	})
+
+	return nil
 }
 
 func normalizeStatus(status string) string {
@@ -166,6 +287,63 @@ func optionalString(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+func (c *TransferStatusConsumer) emitInAppNotification(ctx context.Context, source string, item domain.InAppNotification) {
+	if err := c.repo.CreateInAppNotification(ctx, item); err != nil {
+		log.Printf(
+			"level=warn component=transfer_consumer flow=notification_emit source=%s type=%s category=%s user_id=%s err=%v",
+			source,
+			item.Type,
+			item.Category,
+			item.UserID,
+			err,
+		)
+	}
+}
+
+func (c *TransferStatusConsumer) emitRequestPaidNotification(ctx context.Context, request *domain.PaymentRequest, tx *domain.Transaction, payerUsername string) {
+	if request == nil || tx == nil {
+		return
+	}
+
+	body := fmt.Sprintf("Your request \"%s\" has been paid.", request.Title)
+	relatedEntityType := "payment_request"
+	dedupeKey := fmt.Sprintf("request.paid:%s:%s", request.ID, tx.ID)
+	payerID := tx.SenderID
+
+	c.emitInAppNotification(ctx, "request.paid", domain.InAppNotification{
+		ID:                uuid.New(),
+		UserID:            request.CreatorID,
+		Category:          "request",
+		Type:              "request.paid",
+		Title:             "Request Paid",
+		Body:              &body,
+		Status:            "unread",
+		RelatedEntityType: &relatedEntityType,
+		RelatedEntityID:   &request.ID,
+		DedupeKey:         &dedupeKey,
+		Data: map[string]interface{}{
+			"request_id":        request.ID.String(),
+			"transaction_id":    tx.ID.String(),
+			"amount":            request.Amount,
+			"status":            request.Status,
+			"display_status":    "paid",
+			"paid_by_user_id":   payerID.String(),
+			"paid_by_username":  payerUsername,
+			"title":             request.Title,
+			"description":       request.Description,
+			"responded_at":      time.Now().UTC().Format(time.RFC3339),
+			"recipient_user_id": optionalUUIDStringFromPointer(request.RecipientUserID),
+		},
+	})
+}
+
+func optionalUUIDStringFromPointer(value *uuid.UUID) string {
+	if value == nil {
+		return ""
+	}
+	return value.String()
 }
 
 func looksLikeFeeEvent(event domain.TransferStatusEvent) bool {

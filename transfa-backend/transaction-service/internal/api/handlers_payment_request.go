@@ -10,6 +10,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -50,6 +51,20 @@ func parseOptionalInt(raw string, defaultValue int) (int, error) {
 		return 0, err
 	}
 	return value, nil
+}
+
+func normalizeIncomingPaymentRequestStatusFilter(raw string) (string, error) {
+	status := strings.TrimSpace(strings.ToLower(raw))
+	if status == "" {
+		return "", nil
+	}
+
+	switch status {
+	case "pending", "processing", "fulfilled", "declined":
+		return status, nil
+	default:
+		return "", errors.New("invalid payment request status filter")
+	}
 }
 
 // CreatePaymentRequestHandler handles the creation of a new payment request.
@@ -180,4 +195,166 @@ func (h *TransactionHandlers) DeletePaymentRequestHandler(w http.ResponseWriter,
 	}
 
 	h.writeJSON(w, http.StatusNoContent, nil)
+}
+
+// ListIncomingPaymentRequestsHandler lists incoming (recipient-side) payment requests.
+func (h *TransactionHandlers) ListIncomingPaymentRequestsHandler(w http.ResponseWriter, r *http.Request) {
+	userID, statusCode, message := h.resolveAuthenticatedInternalUserID(r)
+	if statusCode != 0 {
+		h.writeError(w, statusCode, message)
+		return
+	}
+
+	limit, err := parseOptionalInt(r.URL.Query().Get("limit"), 50)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid limit")
+		return
+	}
+	offset, err := parseOptionalInt(r.URL.Query().Get("offset"), 0)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid offset")
+		return
+	}
+
+	statusFilter, err := normalizeIncomingPaymentRequestStatusFilter(r.URL.Query().Get("status"))
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid status")
+		return
+	}
+
+	opts := domain.PaymentRequestListOptions{
+		Limit:  limit,
+		Offset: offset,
+		Search: strings.TrimSpace(r.URL.Query().Get("q")),
+		Status: statusFilter,
+	}
+
+	requests, err := h.service.ListIncomingPaymentRequests(r.Context(), userID, opts)
+	if err != nil {
+		log.Printf("level=error component=api endpoint=list_incoming_payment_requests outcome=failed user_id=%s err=%v", userID, err)
+		h.writeError(w, http.StatusInternalServerError, "Could not retrieve incoming payment requests.")
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, requests)
+}
+
+// GetIncomingPaymentRequestByIDHandler retrieves one incoming payment request.
+func (h *TransactionHandlers) GetIncomingPaymentRequestByIDHandler(w http.ResponseWriter, r *http.Request) {
+	userID, statusCode, message := h.resolveAuthenticatedInternalUserID(r)
+	if statusCode != 0 {
+		h.writeError(w, statusCode, message)
+		return
+	}
+
+	requestID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid payment request ID.")
+		return
+	}
+
+	request, err := h.service.GetIncomingPaymentRequestByID(r.Context(), requestID, userID)
+	if err != nil {
+		log.Printf("level=error component=api endpoint=get_incoming_payment_request outcome=failed request_id=%s user_id=%s err=%v", requestID, userID, err)
+		h.writeError(w, http.StatusInternalServerError, "Could not retrieve incoming payment request.")
+		return
+	}
+	if request == nil {
+		h.writeError(w, http.StatusNotFound, "Payment request not found.")
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, request)
+}
+
+// PayIncomingPaymentRequestHandler settles an incoming request by paying it.
+func (h *TransactionHandlers) PayIncomingPaymentRequestHandler(w http.ResponseWriter, r *http.Request) {
+	userID, statusCode, message := h.resolveAuthenticatedInternalUserID(r)
+	if statusCode != 0 {
+		h.writeError(w, statusCode, message)
+		return
+	}
+
+	requestID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid payment request ID.")
+		return
+	}
+
+	var payload domain.PayIncomingPaymentRequestPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid request payload.")
+		return
+	}
+
+	if !h.authorizeTransactionPIN(r, w, userID, payload.TransactionPIN) {
+		return
+	}
+
+	result, err := h.service.PayIncomingPaymentRequest(r.Context(), requestID, userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrInsufficientFunds):
+			h.writeError(w, http.StatusPaymentRequired, err.Error())
+		case errors.Is(err, app.ErrInvalidTransferAmount),
+			errors.Is(err, app.ErrInvalidDescription),
+			errors.Is(err, app.ErrInvalidRecipient):
+			h.writeError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, app.ErrPaymentRequestNotPending):
+			h.writeError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, app.ErrPaymentRequestNotFound):
+			h.writeError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, store.ErrUserNotFound):
+			h.writeError(w, http.StatusNotFound, "Request creator not found")
+		default:
+			log.Printf("level=error component=api endpoint=pay_incoming_payment_request outcome=failed request_id=%s payer_id=%s err=%v", requestID, userID, err)
+			h.writeError(w, http.StatusInternalServerError, "Could not process payment request.")
+		}
+		return
+	}
+
+	response := map[string]interface{}{
+		"request":     result.Request,
+		"transaction": buildTransferInitiationResponse(result.Transaction, "Transfer initiated"),
+	}
+	h.writeJSON(w, http.StatusOK, response)
+}
+
+// DeclineIncomingPaymentRequestHandler declines one incoming request.
+func (h *TransactionHandlers) DeclineIncomingPaymentRequestHandler(w http.ResponseWriter, r *http.Request) {
+	userID, statusCode, message := h.resolveAuthenticatedInternalUserID(r)
+	if statusCode != 0 {
+		h.writeError(w, statusCode, message)
+		return
+	}
+
+	requestID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid payment request ID.")
+		return
+	}
+
+	var payload domain.DeclineIncomingPaymentRequestPayload
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil && !errors.Is(err, io.EOF) {
+		h.writeError(w, http.StatusBadRequest, "Invalid request payload.")
+		return
+	}
+
+	request, err := h.service.DeclineIncomingPaymentRequest(r.Context(), requestID, userID, payload.Reason)
+	if err != nil {
+		switch {
+		case errors.Is(err, app.ErrInvalidPaymentRequestDecline):
+			h.writeError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, app.ErrPaymentRequestNotPending):
+			h.writeError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, app.ErrPaymentRequestNotFound):
+			h.writeError(w, http.StatusNotFound, err.Error())
+		default:
+			log.Printf("level=error component=api endpoint=decline_incoming_payment_request outcome=failed request_id=%s recipient_id=%s err=%v", requestID, userID, err)
+			h.writeError(w, http.StatusInternalServerError, "Could not decline payment request.")
+		}
+		return
+	}
+
+	h.writeJSON(w, http.StatusOK, request)
 }

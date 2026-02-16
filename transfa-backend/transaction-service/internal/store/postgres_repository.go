@@ -14,8 +14,10 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,6 +36,7 @@ var (
 	ErrTransactionNotFound    = errors.New("transaction not found")
 	ErrTransactionPINNotSet   = errors.New("transaction pin not set")
 	ErrPaymentRequestNotFound = errors.New("payment request not found")
+	ErrPaymentRequestNotReady = errors.New("payment request is not payable")
 )
 
 // PostgresRepository is a concrete implementation of the Repository interface for PostgreSQL.
@@ -493,6 +496,56 @@ func (r *PostgresRepository) FindTransactionByID(ctx context.Context, transactio
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ErrTransactionNotFound
+		}
+		return nil, err
+	}
+	return &tx, nil
+}
+
+// FindLikelyPaymentRequestSettlementTransaction returns a recent transfer that likely settled a payment request.
+func (r *PostgresRepository) FindLikelyPaymentRequestSettlementTransaction(ctx context.Context, senderID uuid.UUID, recipientID uuid.UUID, amount int64, description string, since time.Time) (*domain.Transaction, error) {
+	query := `
+        SELECT id, anchor_transfer_id, sender_id, recipient_id, source_account_id,
+               destination_account_id, destination_beneficiary_id, type, category, status,
+               amount, fee, description, transfer_type, failure_reason, anchor_session_id,
+               anchor_reason, created_at, updated_at
+        FROM transactions
+        WHERE sender_id = $1
+          AND recipient_id = $2
+          AND amount = $3
+          AND description = $4
+          AND category = 'p2p_transfer'
+          AND status IN ('pending', 'failed', 'completed')
+          AND created_at >= $5
+        ORDER BY created_at DESC
+        LIMIT 1
+    `
+
+	var tx domain.Transaction
+	err := r.db.QueryRow(ctx, query, senderID, recipientID, amount, description, since).Scan(
+		&tx.ID,
+		&tx.AnchorTransferID,
+		&tx.SenderID,
+		&tx.RecipientID,
+		&tx.SourceAccountID,
+		&tx.DestinationAccountID,
+		&tx.DestinationBeneficiaryID,
+		&tx.Type,
+		&tx.Category,
+		&tx.Status,
+		&tx.Amount,
+		&tx.Fee,
+		&tx.Description,
+		&tx.TransferType,
+		&tx.FailureReason,
+		&tx.AnchorSessionID,
+		&tx.AnchorReason,
+		&tx.CreatedAt,
+		&tx.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
 		}
 		return nil, err
 	}
@@ -1002,6 +1055,11 @@ func (r *PostgresRepository) CreatePaymentRequest(ctx context.Context, req *doma
             amount,
             description,
             image_url,
+            fulfilled_by_user_id,
+            settled_transaction_id,
+            processing_started_at,
+            responded_at,
+            declined_reason,
             deleted_at,
             created_at,
             updated_at
@@ -1033,6 +1091,11 @@ func (r *PostgresRepository) CreatePaymentRequest(ctx context.Context, req *doma
 		&createdRequest.Amount,
 		&createdRequest.Description,
 		&createdRequest.ImageURL,
+		&createdRequest.FulfilledByUserID,
+		&createdRequest.SettledTxID,
+		&createdRequest.ProcessingStarted,
+		&createdRequest.RespondedAt,
+		&createdRequest.DeclinedReason,
 		&createdRequest.DeletedAt,
 		&createdRequest.CreatedAt,
 		&createdRequest.UpdatedAt,
@@ -1061,6 +1124,8 @@ func (r *PostgresRepository) ListPaymentRequestsByCreator(ctx context.Context, c
         SELECT
             pr.id,
             pr.creator_id,
+            cu.username AS creator_username,
+            cu.full_name AS creator_full_name,
             pr.status,
             pr.request_type,
             pr.title,
@@ -1070,11 +1135,17 @@ func (r *PostgresRepository) ListPaymentRequestsByCreator(ctx context.Context, c
             pr.amount,
             pr.description,
             pr.image_url,
+            pr.fulfilled_by_user_id,
+            pr.settled_transaction_id,
+            pr.processing_started_at,
+            pr.responded_at,
+            pr.declined_reason,
             pr.deleted_at,
             pr.created_at,
             pr.updated_at
         FROM payment_requests pr
         LEFT JOIN users ru ON ru.id = pr.recipient_user_id
+        LEFT JOIN users cu ON cu.id = pr.creator_id
         WHERE pr.creator_id = $1
           AND pr.deleted_at IS NULL
     `
@@ -1111,6 +1182,8 @@ func (r *PostgresRepository) ListPaymentRequestsByCreator(ctx context.Context, c
 		err := rows.Scan(
 			&request.ID,
 			&request.CreatorID,
+			&request.CreatorUsername,
+			&request.CreatorFullName,
 			&request.Status,
 			&request.RequestType,
 			&request.Title,
@@ -1120,6 +1193,11 @@ func (r *PostgresRepository) ListPaymentRequestsByCreator(ctx context.Context, c
 			&request.Amount,
 			&request.Description,
 			&request.ImageURL,
+			&request.FulfilledByUserID,
+			&request.SettledTxID,
+			&request.ProcessingStarted,
+			&request.RespondedAt,
+			&request.DeclinedReason,
 			&request.DeletedAt,
 			&request.CreatedAt,
 			&request.UpdatedAt,
@@ -1139,6 +1217,8 @@ func (r *PostgresRepository) GetPaymentRequestByID(ctx context.Context, requestI
         SELECT
             pr.id,
             pr.creator_id,
+            cu.username AS creator_username,
+            cu.full_name AS creator_full_name,
             pr.status,
             pr.request_type,
             pr.title,
@@ -1148,11 +1228,17 @@ func (r *PostgresRepository) GetPaymentRequestByID(ctx context.Context, requestI
             pr.amount,
             pr.description,
             pr.image_url,
+            pr.fulfilled_by_user_id,
+            pr.settled_transaction_id,
+            pr.processing_started_at,
+            pr.responded_at,
+            pr.declined_reason,
             pr.deleted_at,
             pr.created_at,
             pr.updated_at
         FROM payment_requests pr
         LEFT JOIN users ru ON ru.id = pr.recipient_user_id
+        LEFT JOIN users cu ON cu.id = pr.creator_id
         WHERE pr.id = $1
           AND pr.creator_id = $2
           AND pr.deleted_at IS NULL
@@ -1161,6 +1247,8 @@ func (r *PostgresRepository) GetPaymentRequestByID(ctx context.Context, requestI
 	err := r.db.QueryRow(ctx, query, requestID, creatorID).Scan(
 		&request.ID,
 		&request.CreatorID,
+		&request.CreatorUsername,
+		&request.CreatorFullName,
 		&request.Status,
 		&request.RequestType,
 		&request.Title,
@@ -1170,6 +1258,11 @@ func (r *PostgresRepository) GetPaymentRequestByID(ctx context.Context, requestI
 		&request.Amount,
 		&request.Description,
 		&request.ImageURL,
+		&request.FulfilledByUserID,
+		&request.SettledTxID,
+		&request.ProcessingStarted,
+		&request.RespondedAt,
+		&request.DeclinedReason,
 		&request.DeletedAt,
 		&request.CreatedAt,
 		&request.UpdatedAt,
@@ -1197,6 +1290,821 @@ func (r *PostgresRepository) DeletePaymentRequest(ctx context.Context, requestID
 		return false, err
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+// ListIncomingPaymentRequests retrieves individual requests where the authenticated user is the recipient.
+func (r *PostgresRepository) ListIncomingPaymentRequests(ctx context.Context, recipientID uuid.UUID, opts domain.PaymentRequestListOptions) ([]domain.PaymentRequest, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := `
+        SELECT
+            pr.id,
+            pr.creator_id,
+            cu.username AS creator_username,
+            cu.full_name AS creator_full_name,
+            pr.status,
+            pr.request_type,
+            pr.title,
+            pr.recipient_user_id,
+            COALESCE(pr.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(pr.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
+            pr.amount,
+            pr.description,
+            pr.image_url,
+            pr.fulfilled_by_user_id,
+            pr.settled_transaction_id,
+            pr.processing_started_at,
+            pr.responded_at,
+            pr.declined_reason,
+            pr.deleted_at,
+            pr.created_at,
+            pr.updated_at
+        FROM payment_requests pr
+        LEFT JOIN users ru ON ru.id = pr.recipient_user_id
+        LEFT JOIN users cu ON cu.id = pr.creator_id
+        WHERE pr.recipient_user_id = $1
+          AND pr.request_type = 'individual'
+          AND pr.deleted_at IS NULL
+    `
+
+	args := []interface{}{recipientID}
+	argPos := 2
+
+	if status := strings.TrimSpace(strings.ToLower(opts.Status)); status != "" {
+		query += fmt.Sprintf(" AND pr.status = $%d", argPos)
+		args = append(args, status)
+		argPos++
+	}
+
+	if search := strings.TrimSpace(opts.Search); search != "" {
+		query += fmt.Sprintf(`
+          AND (
+            COALESCE(cu.username, '') ILIKE '%%' || $%d || '%%'
+            OR COALESCE(cu.full_name, '') ILIKE '%%' || $%d || '%%'
+            OR pr.title ILIKE '%%' || $%d || '%%'
+          )
+        `, argPos, argPos, argPos)
+		args = append(args, search)
+		argPos++
+	}
+
+	query += fmt.Sprintf(`
+        ORDER BY pr.created_at DESC
+        LIMIT $%d OFFSET $%d
+    `, argPos, argPos+1)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make([]domain.PaymentRequest, 0, limit)
+	for rows.Next() {
+		var item domain.PaymentRequest
+		if err := rows.Scan(
+			&item.ID,
+			&item.CreatorID,
+			&item.CreatorUsername,
+			&item.CreatorFullName,
+			&item.Status,
+			&item.RequestType,
+			&item.Title,
+			&item.RecipientUserID,
+			&item.RecipientUsername,
+			&item.RecipientFullName,
+			&item.Amount,
+			&item.Description,
+			&item.ImageURL,
+			&item.FulfilledByUserID,
+			&item.SettledTxID,
+			&item.ProcessingStarted,
+			&item.RespondedAt,
+			&item.DeclinedReason,
+			&item.DeletedAt,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, item)
+	}
+	return results, nil
+}
+
+// GetIncomingPaymentRequestByID retrieves one incoming request for a recipient user.
+func (r *PostgresRepository) GetIncomingPaymentRequestByID(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID) (*domain.PaymentRequest, error) {
+	query := `
+        SELECT
+            pr.id,
+            pr.creator_id,
+            cu.username AS creator_username,
+            cu.full_name AS creator_full_name,
+            pr.status,
+            pr.request_type,
+            pr.title,
+            pr.recipient_user_id,
+            COALESCE(pr.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(pr.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
+            pr.amount,
+            pr.description,
+            pr.image_url,
+            pr.fulfilled_by_user_id,
+            pr.settled_transaction_id,
+            pr.processing_started_at,
+            pr.responded_at,
+            pr.declined_reason,
+            pr.deleted_at,
+            pr.created_at,
+            pr.updated_at
+        FROM payment_requests pr
+        LEFT JOIN users ru ON ru.id = pr.recipient_user_id
+        LEFT JOIN users cu ON cu.id = pr.creator_id
+        WHERE pr.id = $1
+          AND pr.recipient_user_id = $2
+          AND pr.request_type = 'individual'
+          AND pr.deleted_at IS NULL
+    `
+
+	var item domain.PaymentRequest
+	err := r.db.QueryRow(ctx, query, requestID, recipientID).Scan(
+		&item.ID,
+		&item.CreatorID,
+		&item.CreatorUsername,
+		&item.CreatorFullName,
+		&item.Status,
+		&item.RequestType,
+		&item.Title,
+		&item.RecipientUserID,
+		&item.RecipientUsername,
+		&item.RecipientFullName,
+		&item.Amount,
+		&item.Description,
+		&item.ImageURL,
+		&item.FulfilledByUserID,
+		&item.SettledTxID,
+		&item.ProcessingStarted,
+		&item.RespondedAt,
+		&item.DeclinedReason,
+		&item.DeletedAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+// ClaimIncomingPaymentRequestForPayment atomically moves an incoming request into processing state.
+func (r *PostgresRepository) ClaimIncomingPaymentRequestForPayment(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID) (*domain.PaymentRequest, error) {
+	query := `
+        WITH claimed AS (
+            UPDATE payment_requests
+            SET
+                status = 'processing',
+                processing_started_at = NOW(),
+                updated_at = NOW()
+            WHERE id = $1
+              AND recipient_user_id = $2
+              AND request_type = 'individual'
+              AND deleted_at IS NULL
+              AND (
+                status = 'pending'
+                OR (status = 'processing' AND processing_started_at < NOW() - INTERVAL '5 minutes')
+              )
+            RETURNING *
+        )
+        SELECT
+            c.id,
+            c.creator_id,
+            cu.username AS creator_username,
+            cu.full_name AS creator_full_name,
+            c.status,
+            c.request_type,
+            c.title,
+            c.recipient_user_id,
+            COALESCE(c.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(c.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
+            c.amount,
+            c.description,
+            c.image_url,
+            c.fulfilled_by_user_id,
+            c.settled_transaction_id,
+            c.processing_started_at,
+            c.responded_at,
+            c.declined_reason,
+            c.deleted_at,
+            c.created_at,
+            c.updated_at
+        FROM claimed c
+        LEFT JOIN users ru ON ru.id = c.recipient_user_id
+        LEFT JOIN users cu ON cu.id = c.creator_id
+    `
+
+	var item domain.PaymentRequest
+	err := r.db.QueryRow(ctx, query, requestID, recipientID).Scan(
+		&item.ID,
+		&item.CreatorID,
+		&item.CreatorUsername,
+		&item.CreatorFullName,
+		&item.Status,
+		&item.RequestType,
+		&item.Title,
+		&item.RecipientUserID,
+		&item.RecipientUsername,
+		&item.RecipientFullName,
+		&item.Amount,
+		&item.Description,
+		&item.ImageURL,
+		&item.FulfilledByUserID,
+		&item.SettledTxID,
+		&item.ProcessingStarted,
+		&item.RespondedAt,
+		&item.DeclinedReason,
+		&item.DeletedAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrPaymentRequestNotReady
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+// AttachProcessingPaymentRequestSettlementTransaction links an in-flight transfer to a processing request.
+func (r *PostgresRepository) AttachProcessingPaymentRequestSettlementTransaction(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID, settledTransactionID uuid.UUID) (*domain.PaymentRequest, error) {
+	query := `
+        WITH updated AS (
+            UPDATE payment_requests
+            SET
+                settled_transaction_id = $3,
+                updated_at = NOW()
+            WHERE id = $1
+              AND recipient_user_id = $2
+              AND request_type = 'individual'
+              AND deleted_at IS NULL
+              AND status = 'processing'
+            RETURNING *
+        )
+        SELECT
+            u.id,
+            u.creator_id,
+            cu.username AS creator_username,
+            cu.full_name AS creator_full_name,
+            u.status,
+            u.request_type,
+            u.title,
+            u.recipient_user_id,
+            COALESCE(u.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(u.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
+            u.amount,
+            u.description,
+            u.image_url,
+            u.fulfilled_by_user_id,
+            u.settled_transaction_id,
+            u.processing_started_at,
+            u.responded_at,
+            u.declined_reason,
+            u.deleted_at,
+            u.created_at,
+            u.updated_at
+        FROM updated u
+        LEFT JOIN users ru ON ru.id = u.recipient_user_id
+        LEFT JOIN users cu ON cu.id = u.creator_id
+    `
+
+	var item domain.PaymentRequest
+	err := r.db.QueryRow(ctx, query, requestID, recipientID, settledTransactionID).Scan(
+		&item.ID,
+		&item.CreatorID,
+		&item.CreatorUsername,
+		&item.CreatorFullName,
+		&item.Status,
+		&item.RequestType,
+		&item.Title,
+		&item.RecipientUserID,
+		&item.RecipientUsername,
+		&item.RecipientFullName,
+		&item.Amount,
+		&item.Description,
+		&item.ImageURL,
+		&item.FulfilledByUserID,
+		&item.SettledTxID,
+		&item.ProcessingStarted,
+		&item.RespondedAt,
+		&item.DeclinedReason,
+		&item.DeletedAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrPaymentRequestNotReady
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+// MarkPaymentRequestFulfilled finalizes a processing request after successful transfer.
+func (r *PostgresRepository) MarkPaymentRequestFulfilled(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID, settledTransactionID uuid.UUID) (*domain.PaymentRequest, error) {
+	query := `
+        WITH updated AS (
+            UPDATE payment_requests
+            SET
+                status = 'fulfilled',
+                fulfilled_by_user_id = $3,
+                settled_transaction_id = $4,
+                processing_started_at = NULL,
+                responded_at = NOW(),
+                declined_reason = NULL,
+                updated_at = NOW()
+            WHERE id = $1
+              AND recipient_user_id = $2
+              AND request_type = 'individual'
+              AND deleted_at IS NULL
+              AND status = 'processing'
+            RETURNING *
+        )
+        SELECT
+            u.id,
+            u.creator_id,
+            cu.username AS creator_username,
+            cu.full_name AS creator_full_name,
+            u.status,
+            u.request_type,
+            u.title,
+            u.recipient_user_id,
+            COALESCE(u.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(u.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
+            u.amount,
+            u.description,
+            u.image_url,
+            u.fulfilled_by_user_id,
+            u.settled_transaction_id,
+            u.processing_started_at,
+            u.responded_at,
+            u.declined_reason,
+            u.deleted_at,
+            u.created_at,
+            u.updated_at
+        FROM updated u
+        LEFT JOIN users ru ON ru.id = u.recipient_user_id
+        LEFT JOIN users cu ON cu.id = u.creator_id
+    `
+
+	var item domain.PaymentRequest
+	err := r.db.QueryRow(ctx, query, requestID, recipientID, recipientID, settledTransactionID).Scan(
+		&item.ID,
+		&item.CreatorID,
+		&item.CreatorUsername,
+		&item.CreatorFullName,
+		&item.Status,
+		&item.RequestType,
+		&item.Title,
+		&item.RecipientUserID,
+		&item.RecipientUsername,
+		&item.RecipientFullName,
+		&item.Amount,
+		&item.Description,
+		&item.ImageURL,
+		&item.FulfilledByUserID,
+		&item.SettledTxID,
+		&item.ProcessingStarted,
+		&item.RespondedAt,
+		&item.DeclinedReason,
+		&item.DeletedAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrPaymentRequestNotReady
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+// MarkPaymentRequestFulfilledBySettlementTransaction finalizes a processing request from transfer completion.
+func (r *PostgresRepository) MarkPaymentRequestFulfilledBySettlementTransaction(ctx context.Context, settledTransactionID uuid.UUID) (*domain.PaymentRequest, error) {
+	query := `
+        WITH updated AS (
+            UPDATE payment_requests
+            SET
+                status = 'fulfilled',
+                fulfilled_by_user_id = recipient_user_id,
+                processing_started_at = NULL,
+                responded_at = NOW(),
+                declined_reason = NULL,
+                updated_at = NOW()
+            WHERE settled_transaction_id = $1
+              AND request_type = 'individual'
+              AND deleted_at IS NULL
+              AND status = 'processing'
+            RETURNING *
+        )
+        SELECT
+            u.id,
+            u.creator_id,
+            cu.username AS creator_username,
+            cu.full_name AS creator_full_name,
+            u.status,
+            u.request_type,
+            u.title,
+            u.recipient_user_id,
+            COALESCE(u.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(u.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
+            u.amount,
+            u.description,
+            u.image_url,
+            u.fulfilled_by_user_id,
+            u.settled_transaction_id,
+            u.processing_started_at,
+            u.responded_at,
+            u.declined_reason,
+            u.deleted_at,
+            u.created_at,
+            u.updated_at
+        FROM updated u
+        LEFT JOIN users ru ON ru.id = u.recipient_user_id
+        LEFT JOIN users cu ON cu.id = u.creator_id
+    `
+
+	var item domain.PaymentRequest
+	err := r.db.QueryRow(ctx, query, settledTransactionID).Scan(
+		&item.ID,
+		&item.CreatorID,
+		&item.CreatorUsername,
+		&item.CreatorFullName,
+		&item.Status,
+		&item.RequestType,
+		&item.Title,
+		&item.RecipientUserID,
+		&item.RecipientUsername,
+		&item.RecipientFullName,
+		&item.Amount,
+		&item.Description,
+		&item.ImageURL,
+		&item.FulfilledByUserID,
+		&item.SettledTxID,
+		&item.ProcessingStarted,
+		&item.RespondedAt,
+		&item.DeclinedReason,
+		&item.DeletedAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+// ReleasePaymentRequestFromProcessing resets request state to pending after a failed payment attempt.
+func (r *PostgresRepository) ReleasePaymentRequestFromProcessing(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID) error {
+	query := `
+        UPDATE payment_requests
+        SET status = 'pending', processing_started_at = NULL, updated_at = NOW()
+        WHERE id = $1
+          AND recipient_user_id = $2
+          AND request_type = 'individual'
+          AND deleted_at IS NULL
+          AND status = 'processing'
+    `
+	_, err := r.db.Exec(ctx, query, requestID, recipientID)
+	return err
+}
+
+// ReleasePaymentRequestFromProcessingBySettlementTransaction resets a processing request after transfer failure.
+func (r *PostgresRepository) ReleasePaymentRequestFromProcessingBySettlementTransaction(ctx context.Context, settledTransactionID uuid.UUID) error {
+	query := `
+        UPDATE payment_requests
+        SET
+            status = 'pending',
+            processing_started_at = NULL,
+            settled_transaction_id = NULL,
+            updated_at = NOW()
+        WHERE settled_transaction_id = $1
+          AND request_type = 'individual'
+          AND deleted_at IS NULL
+          AND status = 'processing'
+    `
+	_, err := r.db.Exec(ctx, query, settledTransactionID)
+	return err
+}
+
+// DeclineIncomingPaymentRequest marks an incoming request as declined.
+func (r *PostgresRepository) DeclineIncomingPaymentRequest(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID, reason *string) (*domain.PaymentRequest, error) {
+	query := `
+        WITH updated AS (
+            UPDATE payment_requests
+            SET
+                status = 'declined',
+                declined_reason = $3,
+                processing_started_at = NULL,
+                responded_at = NOW(),
+                updated_at = NOW()
+            WHERE id = $1
+              AND recipient_user_id = $2
+              AND request_type = 'individual'
+              AND deleted_at IS NULL
+              AND status = 'pending'
+            RETURNING *
+        )
+        SELECT
+            u.id,
+            u.creator_id,
+            cu.username AS creator_username,
+            cu.full_name AS creator_full_name,
+            u.status,
+            u.request_type,
+            u.title,
+            u.recipient_user_id,
+            COALESCE(u.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(u.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
+            u.amount,
+            u.description,
+            u.image_url,
+            u.fulfilled_by_user_id,
+            u.settled_transaction_id,
+            u.processing_started_at,
+            u.responded_at,
+            u.declined_reason,
+            u.deleted_at,
+            u.created_at,
+            u.updated_at
+        FROM updated u
+        LEFT JOIN users ru ON ru.id = u.recipient_user_id
+        LEFT JOIN users cu ON cu.id = u.creator_id
+    `
+
+	var item domain.PaymentRequest
+	err := r.db.QueryRow(ctx, query, requestID, recipientID, reason).Scan(
+		&item.ID,
+		&item.CreatorID,
+		&item.CreatorUsername,
+		&item.CreatorFullName,
+		&item.Status,
+		&item.RequestType,
+		&item.Title,
+		&item.RecipientUserID,
+		&item.RecipientUsername,
+		&item.RecipientFullName,
+		&item.Amount,
+		&item.Description,
+		&item.ImageURL,
+		&item.FulfilledByUserID,
+		&item.SettledTxID,
+		&item.ProcessingStarted,
+		&item.RespondedAt,
+		&item.DeclinedReason,
+		&item.DeletedAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrPaymentRequestNotReady
+		}
+		return nil, err
+	}
+	return &item, nil
+}
+
+// CreateInAppNotification writes a new inbox notification and supports idempotent dedupe keys.
+func (r *PostgresRepository) CreateInAppNotification(ctx context.Context, item domain.InAppNotification) error {
+	data := item.Data
+	if data == nil {
+		data = map[string]interface{}{}
+	}
+	dataJSON, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+
+	if item.DedupeKey != nil && strings.TrimSpace(*item.DedupeKey) != "" {
+		query := `
+            INSERT INTO in_app_notifications (
+                id, user_id, category, type, title, body, status,
+                related_entity_type, related_entity_id, data, dedupe_key, read_at
+            )
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+            ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
+        `
+		_, err = r.db.Exec(ctx, query,
+			item.ID,
+			item.UserID,
+			item.Category,
+			item.Type,
+			item.Title,
+			item.Body,
+			item.Status,
+			item.RelatedEntityType,
+			item.RelatedEntityID,
+			dataJSON,
+			item.DedupeKey,
+			item.ReadAt,
+		)
+		return err
+	}
+
+	query := `
+        INSERT INTO in_app_notifications (
+            id, user_id, category, type, title, body, status,
+            related_entity_type, related_entity_id, data, dedupe_key, read_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+    `
+	_, err = r.db.Exec(ctx, query,
+		item.ID,
+		item.UserID,
+		item.Category,
+		item.Type,
+		item.Title,
+		item.Body,
+		item.Status,
+		item.RelatedEntityType,
+		item.RelatedEntityID,
+		dataJSON,
+		item.DedupeKey,
+		item.ReadAt,
+	)
+	return err
+}
+
+// ListInAppNotifications retrieves paginated inbox notifications.
+func (r *PostgresRepository) ListInAppNotifications(ctx context.Context, userID uuid.UUID, opts domain.NotificationListOptions) ([]domain.InAppNotification, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := `
+        SELECT
+            id, user_id, category, type, title, body, status,
+            related_entity_type, related_entity_id, data, dedupe_key,
+            read_at, created_at, updated_at
+        FROM in_app_notifications
+        WHERE user_id = $1
+    `
+	args := []interface{}{userID}
+	argPos := 2
+
+	if category := strings.TrimSpace(strings.ToLower(opts.Category)); category != "" {
+		query += fmt.Sprintf(" AND category = $%d", argPos)
+		args = append(args, category)
+		argPos++
+	}
+	if status := strings.TrimSpace(strings.ToLower(opts.Status)); status != "" {
+		query += fmt.Sprintf(" AND status = $%d", argPos)
+		args = append(args, status)
+		argPos++
+	}
+	if search := strings.TrimSpace(opts.Search); search != "" {
+		query += fmt.Sprintf(`
+          AND (
+            title ILIKE '%%' || $%d || '%%'
+            OR COALESCE(body, '') ILIKE '%%' || $%d || '%%'
+            OR COALESCE(data->>'actor_username', '') ILIKE '%%' || $%d || '%%'
+          )
+        `, argPos, argPos, argPos)
+		args = append(args, search)
+		argPos++
+	}
+
+	query += fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", argPos, argPos+1)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make([]domain.InAppNotification, 0, limit)
+	for rows.Next() {
+		var item domain.InAppNotification
+		var payload []byte
+		if err := rows.Scan(
+			&item.ID,
+			&item.UserID,
+			&item.Category,
+			&item.Type,
+			&item.Title,
+			&item.Body,
+			&item.Status,
+			&item.RelatedEntityType,
+			&item.RelatedEntityID,
+			&payload,
+			&item.DedupeKey,
+			&item.ReadAt,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		item.Data = map[string]interface{}{}
+		if len(payload) > 0 {
+			if err := json.Unmarshal(payload, &item.Data); err != nil {
+				return nil, err
+			}
+		}
+		results = append(results, item)
+	}
+
+	return results, nil
+}
+
+func (r *PostgresRepository) MarkInAppNotificationRead(ctx context.Context, userID uuid.UUID, notificationID uuid.UUID) (bool, error) {
+	query := `
+        UPDATE in_app_notifications
+        SET
+            status = 'read',
+            read_at = COALESCE(read_at, NOW()),
+            updated_at = NOW()
+        WHERE id = $1
+          AND user_id = $2
+    `
+	tag, err := r.db.Exec(ctx, query, notificationID, userID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+func (r *PostgresRepository) MarkAllInAppNotificationsRead(ctx context.Context, userID uuid.UUID, category *string) (int64, error) {
+	query := `
+        UPDATE in_app_notifications
+        SET
+            status = 'read',
+            read_at = COALESCE(read_at, NOW()),
+            updated_at = NOW()
+        WHERE user_id = $1
+          AND status = 'unread'
+    `
+	args := []interface{}{userID}
+	if category != nil && strings.TrimSpace(*category) != "" {
+		query += " AND category = $2"
+		args = append(args, strings.ToLower(strings.TrimSpace(*category)))
+	}
+
+	tag, err := r.db.Exec(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+func (r *PostgresRepository) GetInAppNotificationUnreadCounts(ctx context.Context, userID uuid.UUID) (*domain.NotificationUnreadCounts, error) {
+	query := `
+        SELECT
+            COUNT(*) FILTER (WHERE status = 'unread') AS total,
+            COUNT(*) FILTER (WHERE status = 'unread' AND category = 'request') AS request_count,
+            COUNT(*) FILTER (WHERE status = 'unread' AND category = 'newsletter') AS newsletter_count,
+            COUNT(*) FILTER (WHERE status = 'unread' AND category = 'system') AS system_count
+        FROM in_app_notifications
+        WHERE user_id = $1
+    `
+
+	var counts domain.NotificationUnreadCounts
+	if err := r.db.QueryRow(ctx, query, userID).Scan(
+		&counts.Total,
+		&counts.Request,
+		&counts.Newsletter,
+		&counts.System,
+	); err != nil {
+		return nil, err
+	}
+	return &counts, nil
 }
 
 // Money Drop Implementations

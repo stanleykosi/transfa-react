@@ -40,6 +40,12 @@ import {
   PrimaryAccountDetails,
   CreatePaymentRequestPayload,
   ListPaymentRequestsParams,
+  PayIncomingPaymentRequestPayload,
+  PayIncomingPaymentRequestResponse,
+  DeclineIncomingPaymentRequestPayload,
+  InAppNotification,
+  NotificationListParams,
+  NotificationUnreadCounts,
   CreateMoneyDropPayload,
   MoneyDropResponse,
   ClaimMoneyDropResponse,
@@ -57,6 +63,9 @@ const RECEIVING_PREFERENCE_QUERY_KEY = 'receiving-preference';
 const DEFAULT_BENEFICIARY_QUERY_KEY = 'default-beneficiary';
 const ACCOUNT_BALANCE_QUERY_KEY = 'account-balance';
 const PAYMENT_REQUESTS_QUERY_KEY = 'paymentRequests';
+const INCOMING_PAYMENT_REQUESTS_QUERY_KEY = 'incomingPaymentRequests';
+const NOTIFICATIONS_QUERY_KEY = 'notifications';
+const NOTIFICATION_UNREAD_COUNTS_QUERY_KEY = 'notificationUnreadCounts';
 const USER_PROFILE_QUERY_KEY = 'user-profile';
 const PRIMARY_ACCOUNT_QUERY_KEY = 'primary-account';
 const MONEY_DROP_QUERY_KEY = 'moneyDrop';
@@ -480,6 +489,258 @@ export const useDeletePaymentRequest = (
     mutationFn: deletePaymentRequestMutation,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [PAYMENT_REQUESTS_QUERY_KEY] });
+    },
+    ...options,
+  });
+};
+
+/**
+ * Recipient-side incoming payment request list.
+ */
+export const useListIncomingPaymentRequests = (params?: ListPaymentRequestsParams) => {
+  const fetchIncomingPaymentRequests = async (): Promise<PaymentRequest[]> => {
+    const { data } = await apiClient.get<PaymentRequest[]>(
+      '/transactions/payment-requests/incoming',
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+        params,
+      }
+    );
+    return data.map(normalizePaymentRequest);
+  };
+
+  return useQuery<PaymentRequest[], Error>({
+    queryKey: [
+      INCOMING_PAYMENT_REQUESTS_QUERY_KEY,
+      params?.limit ?? null,
+      params?.offset ?? null,
+      params?.q ?? '',
+      params?.status ?? '',
+    ],
+    queryFn: fetchIncomingPaymentRequests,
+    refetchInterval: 15000,
+    refetchIntervalInBackground: false,
+  });
+};
+
+/**
+ * Recipient-side incoming payment request details.
+ */
+export const useGetIncomingPaymentRequest = (requestId: string) => {
+  const fetchIncomingPaymentRequest = async (): Promise<PaymentRequest> => {
+    const { data } = await apiClient.get<PaymentRequest>(
+      `/transactions/payment-requests/incoming/${requestId}`,
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
+    return normalizePaymentRequest(data);
+  };
+
+  return useQuery<PaymentRequest, Error>({
+    queryKey: [INCOMING_PAYMENT_REQUESTS_QUERY_KEY, requestId],
+    queryFn: fetchIncomingPaymentRequest,
+    enabled: !!requestId,
+  });
+};
+
+export const usePayIncomingPaymentRequest = (
+  options?: UseMutationOptions<
+    PayIncomingPaymentRequestResponse,
+    Error,
+    { requestId: string; payload: PayIncomingPaymentRequestPayload }
+  >
+) => {
+  const queryClient = useQueryClient();
+
+  const payMutation = async ({
+    requestId,
+    payload,
+  }: {
+    requestId: string;
+    payload: PayIncomingPaymentRequestPayload;
+  }): Promise<PayIncomingPaymentRequestResponse> => {
+    const { data } = await apiClient.post<PayIncomingPaymentRequestResponse>(
+      `/transactions/payment-requests/incoming/${requestId}/pay`,
+      payload,
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
+    return {
+      ...data,
+      request: normalizePaymentRequest(data.request),
+    };
+  };
+
+  return useMutation<
+    PayIncomingPaymentRequestResponse,
+    Error,
+    { requestId: string; payload: PayIncomingPaymentRequestPayload }
+  >({
+    mutationFn: payMutation,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [INCOMING_PAYMENT_REQUESTS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [PAYMENT_REQUESTS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [NOTIFICATIONS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [NOTIFICATION_UNREAD_COUNTS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [TRANSACTIONS_QUERY_KEY] });
+    },
+    ...options,
+  });
+};
+
+export const useDeclineIncomingPaymentRequest = (
+  options?: UseMutationOptions<
+    PaymentRequest,
+    Error,
+    { requestId: string; payload?: DeclineIncomingPaymentRequestPayload }
+  >
+) => {
+  const queryClient = useQueryClient();
+
+  const declineMutation = async ({
+    requestId,
+    payload,
+  }: {
+    requestId: string;
+    payload?: DeclineIncomingPaymentRequestPayload;
+  }): Promise<PaymentRequest> => {
+    const { data } = await apiClient.post<PaymentRequest>(
+      `/transactions/payment-requests/incoming/${requestId}/decline`,
+      payload ?? {},
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
+    return normalizePaymentRequest(data);
+  };
+
+  return useMutation<
+    PaymentRequest,
+    Error,
+    { requestId: string; payload?: DeclineIncomingPaymentRequestPayload }
+  >({
+    mutationFn: declineMutation,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [INCOMING_PAYMENT_REQUESTS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [PAYMENT_REQUESTS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [NOTIFICATIONS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [NOTIFICATION_UNREAD_COUNTS_QUERY_KEY] });
+    },
+    ...options,
+  });
+};
+
+export const useListInAppNotifications = (params?: NotificationListParams) => {
+  const fetchNotifications = async (): Promise<InAppNotification[]> => {
+    const { data } = await apiClient.get<InAppNotification[]>('/transactions/notifications', {
+      baseURL: TRANSACTION_SERVICE_URL,
+      params,
+    });
+    return data ?? [];
+  };
+
+  return useQuery<InAppNotification[], Error>({
+    queryKey: [
+      NOTIFICATIONS_QUERY_KEY,
+      params?.limit ?? null,
+      params?.offset ?? null,
+      params?.q ?? '',
+      params?.category ?? '',
+      params?.status ?? '',
+    ],
+    queryFn: fetchNotifications,
+    staleTime: 1000 * 10,
+    refetchInterval: 15000,
+    refetchIntervalInBackground: false,
+  });
+};
+
+export const useNotificationUnreadCounts = () => {
+  const fetchCounts = async (): Promise<NotificationUnreadCounts> => {
+    const { data } = await apiClient.get<NotificationUnreadCounts>(
+      '/transactions/notifications/unread-counts',
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
+    return data;
+  };
+
+  return useQuery<NotificationUnreadCounts, Error>({
+    queryKey: [NOTIFICATION_UNREAD_COUNTS_QUERY_KEY],
+    queryFn: fetchCounts,
+    staleTime: 1000 * 15,
+    refetchInterval: 15000,
+    refetchIntervalInBackground: false,
+  });
+};
+
+export const useMarkNotificationRead = (
+  options?: UseMutationOptions<{ updated: boolean }, Error, { notificationId: string }>
+) => {
+  const queryClient = useQueryClient();
+
+  const mutationFn = async ({
+    notificationId,
+  }: {
+    notificationId: string;
+  }): Promise<{ updated: boolean }> => {
+    const { data } = await apiClient.post<{ updated: boolean }>(
+      `/transactions/notifications/${notificationId}/read`,
+      {},
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
+    return data;
+  };
+
+  return useMutation<{ updated: boolean }, Error, { notificationId: string }>({
+    mutationFn,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [NOTIFICATIONS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [NOTIFICATION_UNREAD_COUNTS_QUERY_KEY] });
+    },
+    ...options,
+  });
+};
+
+export const useMarkAllNotificationsRead = (
+  options?: UseMutationOptions<
+    { updated: number },
+    Error,
+    { category?: 'request' | 'newsletter' | 'system' }
+  >
+) => {
+  const queryClient = useQueryClient();
+
+  const mutationFn = async ({
+    category,
+  }: {
+    category?: 'request' | 'newsletter' | 'system';
+  }): Promise<{ updated: number }> => {
+    const { data } = await apiClient.post<{ updated: number }>(
+      '/transactions/notifications/read-all',
+      category ? { category } : {},
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
+    return data;
+  };
+
+  return useMutation<
+    { updated: number },
+    Error,
+    { category?: 'request' | 'newsletter' | 'system' }
+  >({
+    mutationFn,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [NOTIFICATIONS_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [NOTIFICATION_UNREAD_COUNTS_QUERY_KEY] });
     },
     ...options,
   });

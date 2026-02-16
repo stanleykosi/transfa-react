@@ -18,8 +18,10 @@ CREATE TYPE public.transaction_type AS ENUM (
 );
 CREATE TYPE public.transaction_status AS ENUM ('pending', 'completed', 'failed');
 CREATE TYPE public.money_drop_status AS ENUM ('active', 'completed', 'expired_and_refunded');
-CREATE TYPE public.payment_request_status AS ENUM ('pending', 'fulfilled', 'declined');
+CREATE TYPE public.payment_request_status AS ENUM ('pending', 'processing', 'fulfilled', 'declined');
 CREATE TYPE public.payment_request_type AS ENUM ('general', 'individual');
+CREATE TYPE public.notification_category AS ENUM ('request', 'newsletter', 'system');
+CREATE TYPE public.notification_status AS ENUM ('unread', 'read');
 CREATE TYPE public.platform_fee_status AS ENUM ('pending', 'paid', 'failed', 'delinquent', 'waived');
 CREATE TYPE public.platform_fee_attempt_status AS ENUM ('success', 'failed');
 
@@ -293,6 +295,7 @@ CREATE INDEX idx_transactions_sender_id ON public.transactions(sender_id);
 CREATE INDEX idx_transactions_recipient_id ON public.transactions(recipient_id);
 CREATE INDEX idx_transactions_anchor_transfer_id ON public.transactions(anchor_transfer_id);
 CREATE INDEX idx_transactions_transfer_type ON public.transactions(transfer_type);
+CREATE INDEX idx_transactions_request_settlement_lookup ON public.transactions(sender_id, recipient_id, amount, created_at DESC) WHERE category = 'p2p_transfer';
 
 COMMENT ON TABLE public.transactions IS 'The central log of all money movements and financial events.';
 COMMENT ON COLUMN public.transactions.anchor_transfer_id IS 'Foreign key to the Anchor BaaS transfer resource ID.';
@@ -445,6 +448,11 @@ CREATE TABLE public.payment_requests (
     amount BIGINT NOT NULL,
     description TEXT,
     image_url TEXT,
+    fulfilled_by_user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+    settled_transaction_id UUID REFERENCES public.transactions(id) ON DELETE SET NULL,
+    processing_started_at TIMESTAMPTZ,
+    responded_at TIMESTAMPTZ,
+    declined_reason TEXT,
     deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -455,6 +463,8 @@ CREATE INDEX idx_payment_requests_creator_created_at ON public.payment_requests(
 CREATE INDEX idx_payment_requests_creator_type ON public.payment_requests(creator_id, request_type) WHERE deleted_at IS NULL;
 CREATE INDEX idx_payment_requests_recipient_user ON public.payment_requests(recipient_user_id) WHERE deleted_at IS NULL;
 CREATE INDEX idx_payment_requests_recipient_username_search ON public.payment_requests(LOWER(recipient_username_snapshot)) WHERE deleted_at IS NULL;
+CREATE INDEX idx_payment_requests_recipient_status_created ON public.payment_requests(recipient_user_id, status, created_at DESC) WHERE deleted_at IS NULL;
+CREATE INDEX idx_payment_requests_settled_transaction_id ON public.payment_requests(settled_transaction_id) WHERE settled_transaction_id IS NOT NULL;
 
 COMMENT ON TABLE public.payment_requests IS 'Stores user-created payment requests with status and details.';
 COMMENT ON COLUMN public.payment_requests.creator_id IS 'Foreign key to the user who created the request.';
@@ -466,10 +476,49 @@ COMMENT ON COLUMN public.payment_requests.recipient_username_snapshot IS 'Recipi
 COMMENT ON COLUMN public.payment_requests.recipient_full_name_snapshot IS 'Recipient full name captured at creation time for immutable history display.';
 COMMENT ON COLUMN public.payment_requests.amount IS 'The requested amount in the smallest currency unit (kobo).';
 COMMENT ON COLUMN public.payment_requests.image_url IS 'URL of an optional image uploaded to Supabase Storage.';
+COMMENT ON COLUMN public.payment_requests.fulfilled_by_user_id IS 'User who paid/fulfilled the request.';
+COMMENT ON COLUMN public.payment_requests.settled_transaction_id IS 'Transaction record generated when the request was paid.';
+COMMENT ON COLUMN public.payment_requests.processing_started_at IS 'Timestamp when request was claimed for payment processing.';
+COMMENT ON COLUMN public.payment_requests.responded_at IS 'Timestamp when request moved out of pending state.';
+COMMENT ON COLUMN public.payment_requests.declined_reason IS 'Optional decline reason shown to request creator.';
 COMMENT ON COLUMN public.payment_requests.deleted_at IS 'Soft-delete timestamp. Non-null rows are hidden from app lists/details.';
 
 CREATE TRIGGER set_payment_requests_updated_at
 BEFORE UPDATE ON public.payment_requests
+FOR EACH ROW
+EXECUTE FUNCTION public.trigger_set_timestamp();
+
+-- In-App Notifications
+CREATE TABLE public.in_app_notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    category public.notification_category NOT NULL,
+    type VARCHAR(64) NOT NULL,
+    title VARCHAR(120) NOT NULL,
+    body TEXT,
+    status public.notification_status NOT NULL DEFAULT 'unread',
+    related_entity_type VARCHAR(40),
+    related_entity_id UUID,
+    data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    dedupe_key VARCHAR(180),
+    read_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_in_app_notifications_user_created_at ON public.in_app_notifications(user_id, created_at DESC);
+CREATE INDEX idx_in_app_notifications_user_status ON public.in_app_notifications(user_id, status, created_at DESC);
+CREATE INDEX idx_in_app_notifications_user_category_created ON public.in_app_notifications(user_id, category, created_at DESC);
+CREATE UNIQUE INDEX idx_in_app_notifications_dedupe_key ON public.in_app_notifications(dedupe_key) WHERE dedupe_key IS NOT NULL;
+
+COMMENT ON TABLE public.in_app_notifications IS 'In-app notification inbox consumed by mobile clients.';
+COMMENT ON COLUMN public.in_app_notifications.category IS 'Notification tab grouping: request, newsletter, or system.';
+COMMENT ON COLUMN public.in_app_notifications.type IS 'Concrete notification event type (e.g. request.incoming, transfer.received).';
+COMMENT ON COLUMN public.in_app_notifications.data IS 'Structured metadata payload used to render specific notification cards.';
+COMMENT ON COLUMN public.in_app_notifications.dedupe_key IS 'Optional idempotency key to avoid duplicate inbox entries.';
+
+CREATE TRIGGER set_in_app_notifications_updated_at
+BEFORE UPDATE ON public.in_app_notifications
 FOR EACH ROW
 EXECUTE FUNCTION public.trigger_set_timestamp();
 
@@ -487,6 +536,7 @@ ALTER TABLE public.platform_fee_attempts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.money_drops ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.money_drop_claims ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payment_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.in_app_notifications ENABLE ROW LEVEL SECURITY;
 
 -- Users policies
 CREATE POLICY "Users can view their own profile."
@@ -630,5 +680,30 @@ WITH CHECK (
   EXISTS (
     SELECT 1 FROM public.users
     WHERE users.id = payment_requests.creator_id AND users.clerk_user_id = auth.uid()::text
+  )
+);
+
+-- Notifications policies
+CREATE POLICY "Users can view their own notifications."
+ON public.in_app_notifications FOR SELECT
+USING (
+  EXISTS (
+    SELECT 1 FROM public.users
+    WHERE users.id = in_app_notifications.user_id AND users.clerk_user_id = auth.uid()::text
+  )
+);
+
+CREATE POLICY "Users can mark their own notifications as read."
+ON public.in_app_notifications FOR UPDATE
+USING (
+  EXISTS (
+    SELECT 1 FROM public.users
+    WHERE users.id = in_app_notifications.user_id AND users.clerk_user_id = auth.uid()::text
+  )
+)
+WITH CHECK (
+  EXISTS (
+    SELECT 1 FROM public.users
+    WHERE users.id = in_app_notifications.user_id AND users.clerk_user_id = auth.uid()::text
   )
 );

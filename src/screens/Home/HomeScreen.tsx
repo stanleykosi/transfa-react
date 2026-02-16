@@ -165,7 +165,11 @@ const HomeScreen = () => {
               >
                 <Ionicons name="wallet-outline" size={18} color="#F2F2F2" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.headerIconButton} activeOpacity={0.8}>
+              <TouchableOpacity
+                style={styles.headerIconButton}
+                activeOpacity={0.8}
+                onPress={() => navigation.navigate('NotificationCenter')}
+              >
                 <Ionicons name="notifications-outline" size={18} color="#F2F2F2" />
               </TouchableOpacity>
             </View>

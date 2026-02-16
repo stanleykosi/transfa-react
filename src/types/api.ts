@@ -341,7 +341,9 @@ export interface PlatformFeeInvoice {
 export interface PaymentRequest {
   id: string;
   creator_id: string;
-  status: 'pending' | 'fulfilled' | 'declined';
+  creator_username?: string;
+  creator_full_name?: string;
+  status: 'pending' | 'processing' | 'fulfilled' | 'declined';
   display_status: 'pending' | 'paid' | 'declined';
   request_type: 'general' | 'individual';
   title: string;
@@ -351,6 +353,11 @@ export interface PaymentRequest {
   amount: number; // in kobo
   description?: string;
   image_url?: string;
+  fulfilled_by_user_id?: string;
+  settled_transaction_id?: string;
+  processing_started_at?: string;
+  responded_at?: string;
+  declined_reason?: string;
   shareable_link?: string;
   qr_code_content?: string;
   created_at: string;
@@ -371,6 +378,51 @@ export interface ListPaymentRequestsParams {
   limit?: number;
   offset?: number;
   q?: string;
+  status?: 'pending' | 'processing' | 'fulfilled' | 'declined';
+}
+
+export interface PayIncomingPaymentRequestPayload {
+  transaction_pin: string;
+}
+
+export interface DeclineIncomingPaymentRequestPayload {
+  reason?: string;
+}
+
+export interface PayIncomingPaymentRequestResponse {
+  request: PaymentRequest;
+  transaction: TransactionResponse;
+}
+
+export interface NotificationListParams {
+  limit?: number;
+  offset?: number;
+  q?: string;
+  category?: 'request' | 'newsletter' | 'system';
+  status?: 'unread' | 'read';
+}
+
+export interface InAppNotification {
+  id: string;
+  user_id: string;
+  category: 'request' | 'newsletter' | 'system';
+  type: string;
+  title: string;
+  body?: string;
+  status: 'unread' | 'read';
+  related_entity_type?: string;
+  related_entity_id?: string;
+  data?: Record<string, unknown>;
+  read_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationUnreadCounts {
+  total: number;
+  request: number;
+  newsletter: number;
+  system: number;
 }
 
 export interface TransactionStatusResponse {

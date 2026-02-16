@@ -41,6 +41,11 @@ import CreateRequestScreen from '@/screens/PaymentRequests/CreateRequestScreen';
 import PaymentRequestSuccessScreen from '@/screens/PaymentRequests/PaymentRequestSuccessScreen';
 import PaymentRequestsListScreen from '@/screens/PaymentRequests/PaymentRequestsListScreen';
 import PaymentRequestHistoryScreen from '@/screens/PaymentRequests/PaymentRequestHistoryScreen';
+import NotificationCenterScreen from '@/screens/Notifications/NotificationCenterScreen';
+import IncomingRequestsScreen from '@/screens/Notifications/IncomingRequestsScreen';
+import IncomingRequestDetailScreen from '@/screens/Notifications/IncomingRequestDetailScreen';
+import RequestPaymentSummaryScreen from '@/screens/Notifications/RequestPaymentSummaryScreen';
+import RequestPaymentAuthScreen from '@/screens/Notifications/RequestPaymentAuthScreen';
 import CreateDropWizardScreen from '@/screens/MoneyDrop/CreateDropWizardScreen';
 import MoneyDropSuccessScreen from '@/screens/MoneyDrop/MoneyDropSuccessScreen';
 import ClaimDropScreen from '@/screens/MoneyDrop/ClaimDropScreen';
@@ -102,6 +107,11 @@ export type AppStackParamList = {
   PaymentRequestHistory: undefined;
   CreatePaymentRequest: undefined;
   PaymentRequestSuccess: { requestId: string };
+  NotificationCenter: undefined;
+  IncomingRequests: undefined;
+  IncomingRequestDetail: { requestId: string; notificationId?: string };
+  RequestPaymentSummary: { requestId: string };
+  RequestPaymentAuth: { requestId: string };
   // Money Drop Screens
   CreateDropWizard: undefined;
   MoneyDropSuccess: { dropDetails: import('@/types/api').MoneyDropResponse };
@@ -271,6 +281,31 @@ const AppStack = () => {
         name="PaymentRequestSuccess"
         component={PaymentRequestSuccessScreen}
         options={{ headerShown: false, gestureEnabled: false }}
+      />
+      <Stack.Screen
+        name="NotificationCenter"
+        component={NotificationCenterScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="IncomingRequests"
+        component={IncomingRequestsScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="IncomingRequestDetail"
+        component={IncomingRequestDetailScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="RequestPaymentSummary"
+        component={RequestPaymentSummaryScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="RequestPaymentAuth"
+        component={RequestPaymentAuthScreen}
+        options={{ headerShown: false }}
       />
       {/* Money Drop Screens */}
       <Stack.Screen

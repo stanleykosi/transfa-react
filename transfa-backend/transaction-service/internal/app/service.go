@@ -43,6 +43,7 @@ const (
 	maxBulkP2PTransfers             = 10
 	maxPaymentRequestTitleLen       = 80
 	maxPaymentRequestDescriptionLen = 500
+	maxPaymentRequestDeclineLen     = 240
 )
 
 type serviceContextKey string
@@ -64,6 +65,9 @@ var (
 	ErrInvalidPaymentRequestDescription = errors.New("request description cannot exceed 500 characters")
 	ErrInvalidPaymentRequestRecipient   = errors.New("recipient username is required for individual request")
 	ErrSelfPaymentRequest               = errors.New("cannot create an individual request for yourself")
+	ErrPaymentRequestNotFound           = errors.New("payment request not found")
+	ErrPaymentRequestNotPending         = errors.New("payment request is not pending")
+	ErrInvalidPaymentRequestDecline     = errors.New("decline reason cannot exceed 240 characters")
 )
 
 // Service provides the core business logic for transactions.
@@ -1015,7 +1019,48 @@ func (s *Service) CreatePaymentRequest(ctx context.Context, creatorID uuid.UUID,
 	if err != nil {
 		return nil, err
 	}
-	return s.decoratePaymentRequest(created), nil
+	decorated := s.decoratePaymentRequest(created)
+
+	if requestType == "individual" && decorated.RecipientUserID != nil {
+		creator, creatorErr := s.repo.FindUserByID(ctx, creatorID)
+		if creatorErr != nil {
+			log.Printf("level=warn component=service flow=payment_request msg=\"creator lookup failed for notification\" creator_id=%s err=%v", creatorID, creatorErr)
+		} else {
+			recipientID := *decorated.RecipientUserID
+			body := fmt.Sprintf("%s sent you a payment request.", stripUsernamePrefix(creator.Username))
+			dedupeKey := fmt.Sprintf("request.incoming:%s:%s", decorated.ID, recipientID)
+			relatedEntityType := "payment_request"
+
+			s.emitInAppNotification(ctx, "create_payment_request", domain.InAppNotification{
+				ID:                uuid.New(),
+				UserID:            recipientID,
+				Category:          "request",
+				Type:              "request.incoming",
+				Title:             "Incoming Request",
+				Body:              &body,
+				Status:            "unread",
+				RelatedEntityType: &relatedEntityType,
+				RelatedEntityID:   &decorated.ID,
+				DedupeKey:         &dedupeKey,
+				Data: map[string]interface{}{
+					"request_id":        decorated.ID.String(),
+					"amount":            decorated.Amount,
+					"request_type":      decorated.RequestType,
+					"title":             decorated.Title,
+					"description":       decorated.Description,
+					"image_url":         decorated.ImageURL,
+					"actor_user_id":     creator.ID.String(),
+					"actor_username":    stripUsernamePrefix(creator.Username),
+					"actor_full_name":   optionalTrimmedString(creator.FullName),
+					"display_status":    "pending",
+					"created_at":        decorated.CreatedAt.UTC().Format(time.RFC3339),
+					"recipient_user_id": recipientID.String(),
+				},
+			})
+		}
+	}
+
+	return decorated, nil
 }
 
 // ListPaymentRequests retrieves all payment requests for a given user.
@@ -1044,6 +1089,370 @@ func (s *Service) DeletePaymentRequest(ctx context.Context, requestID uuid.UUID,
 	return s.repo.DeletePaymentRequest(ctx, requestID, creatorID)
 }
 
+// ListIncomingPaymentRequests retrieves incoming request cards for a recipient.
+func (s *Service) ListIncomingPaymentRequests(ctx context.Context, recipientID uuid.UUID, opts domain.PaymentRequestListOptions) ([]domain.PaymentRequest, error) {
+	requests, err := s.repo.ListIncomingPaymentRequests(ctx, recipientID, opts)
+	if err != nil {
+		return nil, err
+	}
+	for idx := range requests {
+		s.decoratePaymentRequest(&requests[idx])
+	}
+	return requests, nil
+}
+
+// GetIncomingPaymentRequestByID retrieves one incoming request detail by id.
+func (s *Service) GetIncomingPaymentRequestByID(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID) (*domain.PaymentRequest, error) {
+	request, err := s.repo.GetIncomingPaymentRequestByID(ctx, requestID, recipientID)
+	if err != nil || request == nil {
+		return request, err
+	}
+	return s.decoratePaymentRequest(request), nil
+}
+
+// PayIncomingPaymentRequest settles an incoming request by initiating a P2P transfer to the creator.
+func (s *Service) PayIncomingPaymentRequest(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID) (*domain.PayIncomingPaymentRequestResult, error) {
+	// Idempotency fast-path: return the already-settled request if client retries.
+	settledResult, err := s.resolveSettledIncomingPaymentRequest(ctx, requestID, recipientID)
+	if err != nil {
+		return nil, err
+	}
+	if settledResult != nil {
+		return settledResult, nil
+	}
+
+	// Reconciliation fast-path: recover processing requests that already initiated transfer.
+	existing, err := s.repo.GetIncomingPaymentRequestByID(ctx, requestID, recipientID)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil && strings.ToLower(existing.Status) == "processing" {
+		reconciledResult, reconcileErr := s.tryReconcileProcessingIncomingRequest(ctx, existing, recipientID)
+		if reconcileErr != nil {
+			return nil, reconcileErr
+		}
+		if reconciledResult != nil {
+			return reconciledResult, nil
+		}
+	}
+
+	request, err := s.repo.ClaimIncomingPaymentRequestForPayment(ctx, requestID, recipientID)
+	if err != nil {
+		if errors.Is(err, store.ErrPaymentRequestNotReady) {
+			settledResult, settledErr := s.resolveSettledIncomingPaymentRequest(ctx, requestID, recipientID)
+			if settledErr != nil {
+				return nil, settledErr
+			}
+			if settledResult != nil {
+				return settledResult, nil
+			}
+
+			existing, lookupErr := s.repo.GetIncomingPaymentRequestByID(ctx, requestID, recipientID)
+			if lookupErr != nil {
+				return nil, lookupErr
+			}
+			if existing == nil {
+				return nil, ErrPaymentRequestNotFound
+			}
+
+			if strings.ToLower(existing.Status) == "processing" {
+				reconciledResult, reconcileErr := s.tryReconcileProcessingIncomingRequest(ctx, existing, recipientID)
+				if reconcileErr != nil {
+					return nil, reconcileErr
+				}
+				if reconciledResult != nil {
+					return reconciledResult, nil
+				}
+			}
+
+			return nil, ErrPaymentRequestNotPending
+		}
+		return nil, err
+	}
+
+	creator, err := s.repo.FindUserByID(ctx, request.CreatorID)
+	if err != nil {
+		_ = s.repo.ReleasePaymentRequestFromProcessing(ctx, requestID, recipientID)
+		if errors.Is(err, store.ErrUserNotFound) {
+			return nil, ErrPaymentRequestNotFound
+		}
+		return nil, err
+	}
+
+	description := buildRequestSettlementDescription(request.Title)
+	txRecord, err := s.ProcessP2PTransfer(ctx, recipientID, domain.P2PTransferRequest{
+		RecipientUsername: creator.Username,
+		Amount:            request.Amount,
+		Description:       description,
+	})
+	if err != nil {
+		_ = s.repo.ReleasePaymentRequestFromProcessing(ctx, requestID, recipientID)
+		return nil, err
+	}
+
+	attachedRequest, err := s.repo.AttachProcessingPaymentRequestSettlementTransaction(ctx, requestID, recipientID, txRecord.ID)
+	if err != nil {
+		if errors.Is(err, store.ErrPaymentRequestNotReady) {
+			settledResult, settledErr := s.resolveSettledIncomingPaymentRequest(ctx, requestID, recipientID)
+			if settledErr != nil {
+				return nil, settledErr
+			}
+			if settledResult != nil {
+				return settledResult, nil
+			}
+		}
+		log.Printf("level=warn component=service flow=payment_request_pay msg=\"failed to attach settlement transaction to processing request\" request_id=%s payer_id=%s tx_id=%s err=%v", requestID, recipientID, txRecord.ID, err)
+		attachedRequest = request
+	}
+
+	return &domain.PayIncomingPaymentRequestResult{
+		Request:     s.decoratePaymentRequest(attachedRequest),
+		Transaction: txRecord,
+	}, nil
+}
+
+func (s *Service) resolveSettledIncomingPaymentRequest(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID) (*domain.PayIncomingPaymentRequestResult, error) {
+	request, err := s.repo.GetIncomingPaymentRequestByID(ctx, requestID, recipientID)
+	if err != nil {
+		return nil, err
+	}
+	if request == nil {
+		return nil, nil
+	}
+	s.decoratePaymentRequest(request)
+
+	status := strings.ToLower(strings.TrimSpace(request.Status))
+	if status != "fulfilled" && status != "paid" {
+		return nil, nil
+	}
+	if request.SettledTxID == nil {
+		return nil, nil
+	}
+
+	txRecord, err := s.repo.FindTransactionByID(ctx, *request.SettledTxID)
+	if err != nil {
+		if errors.Is(err, store.ErrTransactionNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	return &domain.PayIncomingPaymentRequestResult{
+		Request:     request,
+		Transaction: txRecord,
+	}, nil
+}
+
+func (s *Service) tryReconcileProcessingIncomingRequest(ctx context.Context, request *domain.PaymentRequest, recipientID uuid.UUID) (*domain.PayIncomingPaymentRequestResult, error) {
+	if request == nil {
+		return nil, nil
+	}
+	if strings.ToLower(strings.TrimSpace(request.Status)) != "processing" {
+		return nil, nil
+	}
+
+	var txRecord *domain.Transaction
+	if request.SettledTxID != nil {
+		record, err := s.repo.FindTransactionByID(ctx, *request.SettledTxID)
+		if err != nil && !errors.Is(err, store.ErrTransactionNotFound) {
+			return nil, err
+		}
+		txRecord = record
+	} else {
+		since := request.CreatedAt
+		if request.ProcessingStarted != nil && request.ProcessingStarted.After(since) {
+			since = request.ProcessingStarted.Add(-30 * time.Second)
+		}
+
+		description := buildRequestSettlementDescription(request.Title)
+		record, err := s.repo.FindLikelyPaymentRequestSettlementTransaction(
+			ctx,
+			recipientID,
+			request.CreatorID,
+			request.Amount,
+			description,
+			since,
+		)
+		if err != nil {
+			return nil, err
+		}
+		txRecord = record
+	}
+
+	if txRecord == nil {
+		return nil, nil
+	}
+
+	switch strings.ToLower(strings.TrimSpace(txRecord.Status)) {
+	case "failed":
+		if err := s.repo.ReleasePaymentRequestFromProcessingBySettlementTransaction(ctx, txRecord.ID); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	case "completed":
+		// Completed transfer can finalize the request.
+	default:
+		// Transfer still pending; keep request in processing state.
+		return nil, nil
+	}
+
+	fulfilled, err := s.repo.MarkPaymentRequestFulfilled(ctx, request.ID, recipientID, txRecord.ID)
+	if err != nil {
+		if errors.Is(err, store.ErrPaymentRequestNotReady) {
+			return s.resolveSettledIncomingPaymentRequest(ctx, request.ID, recipientID)
+		}
+		return nil, err
+	}
+	s.decoratePaymentRequest(fulfilled)
+	s.publishRequestPaidNotification(ctx, fulfilled, recipientID, txRecord)
+
+	return &domain.PayIncomingPaymentRequestResult{
+		Request:     fulfilled,
+		Transaction: txRecord,
+	}, nil
+}
+
+func (s *Service) publishRequestPaidNotification(ctx context.Context, request *domain.PaymentRequest, payerID uuid.UUID, txRecord *domain.Transaction) {
+	if request == nil || txRecord == nil {
+		return
+	}
+
+	recipientLabel := request.RecipientUsername
+	if recipientLabel == nil || strings.TrimSpace(*recipientLabel) == "" {
+		payerUser, payerErr := s.repo.FindUserByID(ctx, payerID)
+		if payerErr == nil {
+			username := stripUsernamePrefix(payerUser.Username)
+			recipientLabel = &username
+		}
+	}
+
+	body := fmt.Sprintf("Your request \"%s\" has been paid.", request.Title)
+	dedupeKey := fmt.Sprintf("request.paid:%s:%s", request.ID, txRecord.ID)
+	relatedEntityType := "payment_request"
+
+	if err := s.repo.CreateInAppNotification(ctx, domain.InAppNotification{
+		ID:                uuid.New(),
+		UserID:            request.CreatorID,
+		Category:          "request",
+		Type:              "request.paid",
+		Title:             "Request Paid",
+		Body:              &body,
+		Status:            "unread",
+		RelatedEntityType: &relatedEntityType,
+		RelatedEntityID:   &request.ID,
+		DedupeKey:         &dedupeKey,
+		Data: map[string]interface{}{
+			"request_id":        request.ID.String(),
+			"transaction_id":    txRecord.ID.String(),
+			"amount":            request.Amount,
+			"status":            request.Status,
+			"display_status":    request.DisplayStatus,
+			"paid_by_user_id":   payerID.String(),
+			"paid_by_username":  optionalStringValue(recipientLabel),
+			"title":             request.Title,
+			"description":       request.Description,
+			"responded_at":      time.Now().UTC().Format(time.RFC3339),
+			"recipient_user_id": optionalUUIDString(request.RecipientUserID),
+		},
+	}); err != nil {
+		log.Printf("level=warn component=service flow=payment_request_pay msg=\"failed to emit request.paid notification\" request_id=%s payer_id=%s tx_id=%s err=%v", request.ID, payerID, txRecord.ID, err)
+	}
+}
+
+// DeclineIncomingPaymentRequest declines one pending incoming request.
+func (s *Service) DeclineIncomingPaymentRequest(ctx context.Context, requestID uuid.UUID, recipientID uuid.UUID, reason *string) (*domain.PaymentRequest, error) {
+	normalizedReason := normalizeOptionalString(reason)
+	if normalizedReason != nil && len(*normalizedReason) > maxPaymentRequestDeclineLen {
+		return nil, ErrInvalidPaymentRequestDecline
+	}
+
+	request, err := s.repo.DeclineIncomingPaymentRequest(ctx, requestID, recipientID, normalizedReason)
+	if err != nil {
+		if errors.Is(err, store.ErrPaymentRequestNotReady) {
+			existing, lookupErr := s.repo.GetIncomingPaymentRequestByID(ctx, requestID, recipientID)
+			if lookupErr != nil {
+				return nil, lookupErr
+			}
+			if existing == nil {
+				return nil, ErrPaymentRequestNotFound
+			}
+			return nil, ErrPaymentRequestNotPending
+		}
+		return nil, err
+	}
+	s.decoratePaymentRequest(request)
+
+	declinedBy := request.RecipientUsername
+	if declinedBy == nil || strings.TrimSpace(*declinedBy) == "" {
+		payerUser, payerErr := s.repo.FindUserByID(ctx, recipientID)
+		if payerErr == nil {
+			username := stripUsernamePrefix(payerUser.Username)
+			declinedBy = &username
+		}
+	}
+
+	body := fmt.Sprintf("Your request \"%s\" was declined.", request.Title)
+	dedupeKey := fmt.Sprintf("request.declined:%s:%s", request.ID, recipientID)
+	relatedEntityType := "payment_request"
+
+	s.emitInAppNotification(ctx, "decline_payment_request", domain.InAppNotification{
+		ID:                uuid.New(),
+		UserID:            request.CreatorID,
+		Category:          "request",
+		Type:              "request.declined",
+		Title:             "Request Declined",
+		Body:              &body,
+		Status:            "unread",
+		RelatedEntityType: &relatedEntityType,
+		RelatedEntityID:   &request.ID,
+		DedupeKey:         &dedupeKey,
+		Data: map[string]interface{}{
+			"request_id":              request.ID.String(),
+			"amount":                  request.Amount,
+			"title":                   request.Title,
+			"description":             request.Description,
+			"declined_reason":         request.DeclinedReason,
+			"declined_by_user_id":     recipientID.String(),
+			"declined_by_username":    optionalStringValue(declinedBy),
+			"display_status":          request.DisplayStatus,
+			"status":                  request.Status,
+			"recipient_user_id":       optionalUUIDString(request.RecipientUserID),
+			"request_original_status": "pending",
+		},
+	})
+
+	return request, nil
+}
+
+func (s *Service) ListInAppNotifications(ctx context.Context, userID uuid.UUID, opts domain.NotificationListOptions) ([]domain.InAppNotification, error) {
+	return s.repo.ListInAppNotifications(ctx, userID, opts)
+}
+
+func (s *Service) MarkInAppNotificationRead(ctx context.Context, userID uuid.UUID, notificationID uuid.UUID) (bool, error) {
+	return s.repo.MarkInAppNotificationRead(ctx, userID, notificationID)
+}
+
+func (s *Service) MarkAllInAppNotificationsRead(ctx context.Context, userID uuid.UUID, category *string) (int64, error) {
+	return s.repo.MarkAllInAppNotificationsRead(ctx, userID, category)
+}
+
+func (s *Service) GetInAppNotificationUnreadCounts(ctx context.Context, userID uuid.UUID) (*domain.NotificationUnreadCounts, error) {
+	return s.repo.GetInAppNotificationUnreadCounts(ctx, userID)
+}
+
+func (s *Service) emitInAppNotification(ctx context.Context, source string, item domain.InAppNotification) {
+	if err := s.repo.CreateInAppNotification(ctx, item); err != nil {
+		log.Printf(
+			"level=warn component=service flow=notification_emit source=%s type=%s category=%s user_id=%s err=%v",
+			source,
+			item.Type,
+			item.Category,
+			item.UserID,
+			err,
+		)
+	}
+}
+
 func (s *Service) decoratePaymentRequest(req *domain.PaymentRequest) *domain.PaymentRequest {
 	if req == nil {
 		return nil
@@ -1054,6 +1463,8 @@ func (s *Service) decoratePaymentRequest(req *domain.PaymentRequest) *domain.Pay
 		req.DisplayStatus = "paid"
 	case "declined":
 		req.DisplayStatus = "declined"
+	case "processing":
+		req.DisplayStatus = "pending"
 	default:
 		req.DisplayStatus = "pending"
 	}
@@ -1077,6 +1488,51 @@ func normalizeOptionalString(value *string) *string {
 		return nil
 	}
 	return &trimmed
+}
+
+func optionalTrimmedString(value *string) *string {
+	return normalizeOptionalString(value)
+}
+
+func optionalStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
+}
+
+func optionalUUIDString(value *uuid.UUID) string {
+	if value == nil {
+		return ""
+	}
+	return value.String()
+}
+
+func stripUsernamePrefix(username string) string {
+	return strings.TrimLeft(strings.TrimSpace(username), "_")
+}
+
+func buildRequestSettlementDescription(title string) string {
+	base := "Request payment"
+	trimmed := strings.TrimSpace(title)
+	if trimmed == "" {
+		return base
+	}
+
+	candidate := fmt.Sprintf("Request payment: %s", trimmed)
+	if len(candidate) <= 100 {
+		return candidate
+	}
+
+	if len(base) >= 100 {
+		return base[:100]
+	}
+
+	remaining := 100 - len(base) - 2
+	if remaining <= 0 {
+		return base
+	}
+	return fmt.Sprintf("%s: %s", base, trimmed[:remaining])
 }
 
 // collectTransactionFee transfers the transaction fee to the admin account.
@@ -1407,6 +1863,29 @@ func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, drop
 		AmountClaimed:   drop.AmountPerClaim,
 		CreatorUsername: creator.Username,
 	}
+
+	claimBody := fmt.Sprintf("You received %d kobo from a money drop.", drop.AmountPerClaim)
+	claimEntityType := "money_drop"
+	claimDedupe := fmt.Sprintf("money_drop.claim.received:%s:%s", dropID, claimantID)
+	s.emitInAppNotification(ctx, "money_drop_claim", domain.InAppNotification{
+		ID:                uuid.New(),
+		UserID:            claimantID,
+		Category:          "system",
+		Type:              "money_drop.claim.received",
+		Title:             "Money Drop Claimed",
+		Body:              &claimBody,
+		Status:            "unread",
+		RelatedEntityType: &claimEntityType,
+		RelatedEntityID:   &dropID,
+		DedupeKey:         &claimDedupe,
+		Data: map[string]interface{}{
+			"drop_id":            dropID.String(),
+			"amount":             drop.AmountPerClaim,
+			"creator_user_id":    creator.ID.String(),
+			"creator_username":   stripUsernamePrefix(creator.Username),
+			"claimed_by_user_id": claimantID.String(),
+		},
+	})
 
 	log.Printf("level=info component=service flow=money_drop_claim msg=\"claim completed\" money_drop_id=%s claimant_id=%s", dropID, claimantID)
 	return response, nil
