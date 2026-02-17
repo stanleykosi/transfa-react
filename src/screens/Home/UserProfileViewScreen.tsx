@@ -121,7 +121,7 @@ const UserProfileViewScreen = () => {
               style={styles.actionButton}
               activeOpacity={0.9}
               onPress={() =>
-                navigation.navigate('PayUser', { initialRecipient: recipientForActions })
+                navigation.replace('PayUser', { initialRecipient: recipientForActions })
               }
             >
               <Ionicons name="arrow-up-outline" size={17} color="#F2F2F3" />
@@ -132,7 +132,7 @@ const UserProfileViewScreen = () => {
               style={styles.actionButton}
               activeOpacity={0.9}
               onPress={() =>
-                navigation.navigate('CreatePaymentRequest', {
+                navigation.replace('CreatePaymentRequest', {
                   initialRecipient: recipientForActions,
                   forceMode: 'individual',
                 })
