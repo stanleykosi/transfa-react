@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sync"
 	"strings"
 	"time"
 
@@ -80,6 +81,9 @@ type Service struct {
 	adminAccountID     string
 	transactionFeeKobo int64
 	moneyDropFeeKobo   int64
+
+	balanceFetchCircuitMu       sync.Mutex
+	balanceFetchCircuitOpenTill time.Time
 }
 
 func NewService(repo store.Repository, anchor *anchorclient.Client, accountClient *accountclient.Client, producer rmrabbit.Publisher, adminAccountID string, transactionFeeKobo int64, moneyDropFeeKobo int64) *Service {
@@ -826,16 +830,25 @@ func (s *Service) GetAccountBalance(ctx context.Context, userID uuid.UUID) (*dom
 		return nil, err
 	}
 
-	// Fetch the balance from Anchor API
-	anchorBalance, err := s.anchorClient.GetAccountBalance(ctx, account.AnchorAccountID)
+	// Fetch the balance from Anchor API with bounded retries.
+	anchorBalance, err := s.getAnchorBalanceWithRetry(ctx, account.AnchorAccountID, 3)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch balance from Anchor: %w", err)
+		// Anchor can return intermittent 5xx. Serve cached internal balance to avoid
+		// surfacing transient upstream failures to clients.
+		log.Printf("level=warn component=service flow=get_balance msg=\"anchor unavailable; serving cached balance\" user_id=%s err=%v", userID, err)
+		return &domain.AccountBalance{
+			AvailableBalance: account.Balance,
+			LedgerBalance:    account.Balance,
+			Hold:             0,
+			Pending:          0,
+		}, nil
 	}
 
-	// Sync the internal database with the Anchor balance
-	if err := s.syncAccountBalance(ctx, userID); err != nil {
-		log.Printf("level=warn component=service flow=get_balance msg=\"balance sync failed\" user_id=%s err=%v", userID, err)
-		// Continue even if sync fails, but log the warning
+	// Keep cached internal balance in sync using the same Anchor response (avoid a second Anchor call).
+	if account.Balance != anchorBalance.Data.AvailableBalance {
+		if err := s.repo.UpdateAccountBalance(ctx, userID, anchorBalance.Data.AvailableBalance); err != nil {
+			log.Printf("level=warn component=service flow=get_balance msg=\"failed to update cached balance\" user_id=%s err=%v", userID, err)
+		}
 	}
 
 	// Convert Anchor balance to our domain model
@@ -847,6 +860,62 @@ func (s *Service) GetAccountBalance(ctx context.Context, userID uuid.UUID) (*dom
 	}
 
 	return balance, nil
+}
+
+func (s *Service) getAnchorBalanceWithRetry(ctx context.Context, anchorAccountID string, maxAttempts int) (*anchorclient.BalanceResponse, error) {
+	if maxAttempts <= 0 {
+		maxAttempts = 1
+	}
+	if !s.canAttemptAnchorBalanceFetch() {
+		return nil, errors.New("anchor balance fetch cooldown is active")
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		balance, err := s.anchorClient.GetAccountBalance(ctx, anchorAccountID)
+		if err == nil {
+			s.markAnchorBalanceFetchSuccess()
+			return balance, nil
+		}
+		lastErr = err
+
+		if attempt >= maxAttempts {
+			break
+		}
+
+		backoff := time.Duration(attempt*200) * time.Millisecond
+		log.Printf("level=warn component=service flow=get_balance msg=\"anchor balance fetch failed; retrying\" attempt=%d max_attempts=%d err=%v", attempt, maxAttempts, err)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(backoff):
+		}
+	}
+
+	s.markAnchorBalanceFetchFailure(15 * time.Second)
+	return nil, lastErr
+}
+
+func (s *Service) canAttemptAnchorBalanceFetch() bool {
+	s.balanceFetchCircuitMu.Lock()
+	defer s.balanceFetchCircuitMu.Unlock()
+
+	if s.balanceFetchCircuitOpenTill.IsZero() {
+		return true
+	}
+	return time.Now().After(s.balanceFetchCircuitOpenTill)
+}
+
+func (s *Service) markAnchorBalanceFetchFailure(cooldown time.Duration) {
+	s.balanceFetchCircuitMu.Lock()
+	defer s.balanceFetchCircuitMu.Unlock()
+	s.balanceFetchCircuitOpenTill = time.Now().Add(cooldown)
+}
+
+func (s *Service) markAnchorBalanceFetchSuccess() {
+	s.balanceFetchCircuitMu.Lock()
+	defer s.balanceFetchCircuitMu.Unlock()
+	s.balanceFetchCircuitOpenTill = time.Time{}
 }
 
 // GetTransactionHistory retrieves the transaction history for a user.
