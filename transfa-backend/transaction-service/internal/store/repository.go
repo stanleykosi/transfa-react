@@ -84,6 +84,7 @@ type Repository interface {
 
 	// Transaction history methods
 	FindTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]domain.Transaction, error)
+	FindTransactionsBetweenUsers(ctx context.Context, userID uuid.UUID, counterpartyID uuid.UUID, limit int, offset int) ([]domain.Transaction, error)
 	UpdateTransactionDestinations(ctx context.Context, transactionID uuid.UUID, destinationAccountID *uuid.UUID, destinationBeneficiaryID *uuid.UUID) error
 	FindTransactionByID(ctx context.Context, transactionID uuid.UUID) (*domain.Transaction, error)
 	FindLikelyPaymentRequestSettlementTransaction(ctx context.Context, senderID uuid.UUID, recipientID uuid.UUID, amount int64, description string, since time.Time) (*domain.Transaction, error)

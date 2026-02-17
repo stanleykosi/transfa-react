@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -632,6 +633,74 @@ func (h *TransactionHandlers) GetTransactionHistoryHandler(w http.ResponseWriter
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(transactions)
+}
+
+// GetTransactionHistoryWithUserHandler handles requests for bilateral history with one username.
+func (h *TransactionHandlers) GetTransactionHistoryWithUserHandler(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := GetClerkUserID(r.Context())
+	if !ok {
+		h.writeError(w, http.StatusInternalServerError, "Could not get user ID from context")
+		return
+	}
+
+	internalIDStr, err := h.service.ResolveInternalUserID(r.Context(), userIDStr)
+	if err != nil {
+		log.Printf("level=warn component=api endpoint=get_history_with_user outcome=reject reason=user_resolution_failed clerk_user_id=%s err=%v", userIDStr, err)
+		h.writeError(w, http.StatusBadRequest, "User not found")
+		return
+	}
+
+	userID, err := uuid.Parse(internalIDStr)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid user ID format")
+		return
+	}
+
+	username := strings.TrimSpace(chi.URLParam(r, "username"))
+	if username == "" {
+		h.writeError(w, http.StatusBadRequest, "Username is required")
+		return
+	}
+
+	limit, err := parseOptionalInt(r.URL.Query().Get("limit"), 20)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid limit")
+		return
+	}
+	offset, err := parseOptionalInt(r.URL.Query().Get("offset"), 0)
+	if err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid offset")
+		return
+	}
+
+	counterparty, transactions, err := h.service.GetTransactionHistoryWithUser(r.Context(), userID, username, limit, offset)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrUserNotFound):
+			h.writeError(w, http.StatusNotFound, "User not found")
+		case errors.Is(err, app.ErrInvalidRecipient):
+			h.writeError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, app.ErrSelfTransferNotAllowed):
+			h.writeError(w, http.StatusBadRequest, "Cannot view bilateral history with yourself")
+		default:
+			log.Printf("level=error component=api endpoint=get_history_with_user outcome=failed user_id=%s counterparty=%s err=%v", userID, username, err)
+			h.writeError(w, http.StatusInternalServerError, "Internal server error")
+		}
+		return
+	}
+
+	shareableLink := fmt.Sprintf("https://trytransfa.com/%s", strings.TrimLeft(strings.TrimSpace(counterparty.Username), "_"))
+	response := map[string]interface{}{
+		"user": map[string]interface{}{
+			"id":        counterparty.ID.String(),
+			"username":  counterparty.Username,
+			"full_name": counterparty.FullName,
+		},
+		"shareable_link": shareableLink,
+		"transactions":   transactions,
+	}
+
+	h.writeJSON(w, http.StatusOK, response)
 }
 
 // GetTransactionByIDHandler handles requests to fetch an individual transaction by UUID.

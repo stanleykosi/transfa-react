@@ -296,6 +296,8 @@ CREATE INDEX idx_transactions_recipient_id ON public.transactions(recipient_id);
 CREATE INDEX idx_transactions_anchor_transfer_id ON public.transactions(anchor_transfer_id);
 CREATE INDEX idx_transactions_transfer_type ON public.transactions(transfer_type);
 CREATE INDEX idx_transactions_request_settlement_lookup ON public.transactions(sender_id, recipient_id, amount, created_at DESC) WHERE category = 'p2p_transfer';
+CREATE INDEX idx_transactions_sender_recipient_created ON public.transactions(sender_id, recipient_id, created_at DESC);
+CREATE INDEX idx_transactions_recipient_sender_created ON public.transactions(recipient_id, sender_id, created_at DESC);
 
 COMMENT ON TABLE public.transactions IS 'The central log of all money movements and financial events.';
 COMMENT ON COLUMN public.transactions.anchor_transfer_id IS 'Foreign key to the Anchor BaaS transfer resource ID.';

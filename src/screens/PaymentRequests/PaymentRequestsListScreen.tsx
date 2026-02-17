@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   RefreshControl,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -13,6 +15,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
+import QRCode from 'react-native-qrcode-svg';
+import * as Clipboard from 'expo-clipboard';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as MediaLibrary from 'expo-media-library';
 
 import { useAccountBalance, useListPaymentRequests, useUserProfile } from '@/api/transactionApi';
 import { AppStackParamList } from '@/navigation/AppStack';
@@ -113,6 +119,9 @@ const OutgoingRequestCard = ({ item, onPress }: { item: PaymentRequest; onPress:
 
 const PaymentRequestsListScreen = () => {
   const navigation = useNavigation<NavigationProp>();
+  const [activeTab, setActiveTab] = useState<'my_link' | 'request'>('request');
+  const [isDownloadingLinkQR, setIsDownloadingLinkQR] = useState(false);
+  const qrCodeRef = React.useRef<any>(null);
 
   const { data: profile } = useUserProfile();
   const { data: balanceData, isLoading: isLoadingBalance } = useAccountBalance();
@@ -125,8 +134,100 @@ const PaymentRequestsListScreen = () => {
     isRefetching,
   } = useListPaymentRequests({ limit: 3, offset: 0 });
 
-  const username = stripUsernamePrefix(profile?.username);
+  const profileUsername = stripUsernamePrefix(profile?.username || '');
+  const hasProfileUsername = profileUsername.length > 0;
+  const username = hasProfileUsername ? profileUsername : 'new_user';
   const requests = latestRequests ?? [];
+  const shareableLink = hasProfileUsername
+    ? `https://trytransfa.com/${profileUsername.toLowerCase()}`
+    : null;
+
+  const requireShareableLink = () => {
+    if (!shareableLink) {
+      Alert.alert('Profile unavailable', 'Your profile link is still loading. Please try again.');
+      return null;
+    }
+    return shareableLink;
+  };
+
+  const onCopyLink = async () => {
+    const link = requireShareableLink();
+    if (!link) {
+      return;
+    }
+    await Clipboard.setStringAsync(link);
+    Alert.alert('Copied', 'Sharable profile link copied to clipboard.');
+  };
+
+  const onShareLink = async () => {
+    const link = requireShareableLink();
+    if (!link) {
+      return;
+    }
+    try {
+      await Share.share({
+        message: `Connect with me on Transfa: ${link}`,
+        url: link,
+      });
+    } catch {
+      Alert.alert('Share failed', 'Unable to share link right now.');
+    }
+  };
+
+  const onDownloadQRCode = async () => {
+    const link = requireShareableLink();
+    if (!link) {
+      return;
+    }
+
+    try {
+      setIsDownloadingLinkQR(true);
+
+      const permission = await MediaLibrary.requestPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission needed', 'Allow photo access to save the QR image.');
+        return;
+      }
+
+      const qrBase64 = await new Promise<string>((resolve, reject) => {
+        if (!qrCodeRef.current || typeof qrCodeRef.current.toDataURL !== 'function') {
+          reject(new Error('QR image is not ready.'));
+          return;
+        }
+
+        qrCodeRef.current.toDataURL((data: string) => {
+          if (!data) {
+            reject(new Error('Unable to generate QR image.'));
+            return;
+          }
+          resolve(data);
+        });
+      });
+
+      const rootDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+      if (!rootDir) {
+        throw new Error('File storage is unavailable.');
+      }
+
+      const fileUri = `${rootDir}transfa-profile-link-${Date.now()}.png`;
+      await FileSystem.writeAsStringAsync(fileUri, qrBase64, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      const asset = await MediaLibrary.createAssetAsync(fileUri);
+      try {
+        await MediaLibrary.createAlbumAsync('Transfa', asset, false);
+      } catch {
+        // Asset already saved even if album creation fails.
+      }
+
+      Alert.alert('Downloaded', 'QR image saved to your gallery.');
+    } catch (downloadError: any) {
+      Alert.alert('Download failed', downloadError?.message || 'Could not save QR image.');
+    } finally {
+      setIsDownloadingLinkQR(false);
+    }
+  };
 
   return (
     <View style={styles.root}>
@@ -187,70 +288,153 @@ const PaymentRequestsListScreen = () => {
 
           <View style={styles.topSegmentWrap}>
             <TouchableOpacity
-              style={[styles.topSegmentButton, styles.topSegmentInactive]}
+              style={[
+                styles.topSegmentButton,
+                activeTab === 'my_link' ? styles.topSegmentActive : styles.topSegmentInactive,
+              ]}
               activeOpacity={0.9}
+              onPress={() => setActiveTab('my_link')}
             >
-              <Ionicons name="link-outline" size={14} color="#C3C4C7" />
+              <Ionicons
+                name="link-outline"
+                size={14}
+                color={activeTab === 'my_link' ? '#E7E8EA' : '#C3C4C7'}
+              />
               <Text style={styles.topSegmentText}>My Link</Text>
             </TouchableOpacity>
 
-            <View style={[styles.topSegmentButton, styles.topSegmentActive]}>
-              <Ionicons name="receipt-outline" size={14} color="#E7E8EA" />
+            <TouchableOpacity
+              style={[
+                styles.topSegmentButton,
+                activeTab === 'request' ? styles.topSegmentActive : styles.topSegmentInactive,
+              ]}
+              activeOpacity={0.9}
+              onPress={() => setActiveTab('request')}
+            >
+              <Ionicons
+                name="receipt-outline"
+                size={14}
+                color={activeTab === 'request' ? '#E7E8EA' : '#C3C4C7'}
+              />
               <Text style={styles.topSegmentText}>Request</Text>
-            </View>
+            </TouchableOpacity>
           </View>
 
           <View style={styles.divider} />
 
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Outgoing requests</Text>
-            <TouchableOpacity
-              onPress={() => navigation.navigate('PaymentRequestHistory')}
-              style={styles.historyPill}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.historyPillText}>Request History</Text>
-            </TouchableOpacity>
-          </View>
+          {activeTab === 'my_link' ? (
+            <View>
+              <View style={styles.myLinkCard}>
+                <View style={styles.myLinkQrWrap}>
+                  {shareableLink ? (
+                    <>
+                      <QRCode ref={qrCodeRef} value={shareableLink} size={224} />
+                      <View style={styles.myLinkCenterBadge}>
+                        <Ionicons name="paper-plane" size={18} color="#121316" />
+                      </View>
+                    </>
+                  ) : (
+                    <View style={styles.myLinkPlaceholder}>
+                      <ActivityIndicator size="small" color={BRAND_YELLOW} />
+                      <Text style={styles.myLinkPlaceholderText}>Loading your profile link...</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
 
-          {isLoading ? (
-            <View style={styles.stateWrap}>
-              <ActivityIndicator size="small" color={BRAND_YELLOW} />
-            </View>
-          ) : isError && !latestRequests ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyText}>
-                {error?.message || 'Unable to load requests. Pull to refresh and try again.'}
-              </Text>
-            </View>
-          ) : requests.length === 0 ? (
-            <View style={styles.emptyCard}>
-              <Text style={styles.emptyText}>No outgoing requests yet.</Text>
+              <TouchableOpacity
+                style={styles.myLinkActionButton}
+                activeOpacity={0.9}
+                onPress={onDownloadQRCode}
+                disabled={!shareableLink || isDownloadingLinkQR}
+              >
+                {isDownloadingLinkQR ? (
+                  <ActivityIndicator size="small" color="#ECEDEE" />
+                ) : (
+                  <>
+                    <Ionicons name="download-outline" size={16} color="#ECEDEE" />
+                    <Text style={styles.myLinkActionText}>Download</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              <Text style={styles.myLinkSectionLabel}>Sharable Link</Text>
+
+              <TouchableOpacity
+                style={styles.linkRow}
+                activeOpacity={0.85}
+                onPress={onCopyLink}
+                disabled={!shareableLink}
+              >
+                <Ionicons name="link-outline" size={16} color="#BFC1C6" />
+                <Text numberOfLines={1} style={styles.linkText}>
+                  {shareableLink || 'Profile link unavailable'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.myLinkActionButton}
+                activeOpacity={0.9}
+                onPress={onShareLink}
+                disabled={!shareableLink}
+              >
+                <Ionicons name="share-social-outline" size={16} color="#ECEDEE" />
+                <Text style={styles.myLinkActionText}>Share Link</Text>
+              </TouchableOpacity>
             </View>
           ) : (
-            <View style={styles.requestList}>
-              {requests.map((request) => (
-                <OutgoingRequestCard
-                  key={request.id}
-                  item={request}
-                  onPress={() =>
-                    navigation.navigate('PaymentRequestSuccess', { requestId: request.id })
-                  }
-                />
-              ))}
+            <View>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.sectionTitle}>Outgoing requests</Text>
+                <TouchableOpacity
+                  onPress={() => navigation.navigate('PaymentRequestHistory')}
+                  style={styles.historyPill}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.historyPillText}>Request History</Text>
+                </TouchableOpacity>
+              </View>
+
+              {isLoading ? (
+                <View style={styles.stateWrap}>
+                  <ActivityIndicator size="small" color={BRAND_YELLOW} />
+                </View>
+              ) : isError && !latestRequests ? (
+                <View style={styles.emptyCard}>
+                  <Text style={styles.emptyText}>
+                    {error?.message || 'Unable to load requests. Pull to refresh and try again.'}
+                  </Text>
+                </View>
+              ) : requests.length === 0 ? (
+                <View style={styles.emptyCard}>
+                  <Text style={styles.emptyText}>No outgoing requests yet.</Text>
+                </View>
+              ) : (
+                <View style={styles.requestList}>
+                  {requests.map((request) => (
+                    <OutgoingRequestCard
+                      key={request.id}
+                      item={request}
+                      onPress={() =>
+                        navigation.navigate('PaymentRequestSuccess', { requestId: request.id })
+                      }
+                    />
+                  ))}
+                </View>
+              )}
+
+              <View style={[styles.divider, styles.bottomDivider]} />
+
+              <TouchableOpacity
+                style={styles.createRequestButton}
+                activeOpacity={0.9}
+                onPress={() => navigation.navigate('CreatePaymentRequest')}
+              >
+                <Ionicons name="add" size={20} color="#D8D9DC" />
+                <Text style={styles.createRequestText}>Create Request</Text>
+              </TouchableOpacity>
             </View>
           )}
-
-          <View style={[styles.divider, styles.bottomDivider]} />
-
-          <TouchableOpacity
-            style={styles.createRequestButton}
-            activeOpacity={0.9}
-            onPress={() => navigation.navigate('CreatePaymentRequest')}
-          >
-            <Ionicons name="add" size={20} color="#D8D9DC" />
-            <Text style={styles.createRequestText}>Create Request</Text>
-          </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -268,7 +452,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingTop: 8,
-    paddingBottom: 24,
+    paddingBottom: 32,
   },
   backButton: {
     width: 28,
@@ -300,7 +484,7 @@ const styles = StyleSheet.create({
   },
   userName: {
     color: '#EFEFF0',
-    fontSize: 21,
+    fontSize: 18,
     fontWeight: '700',
   },
   userLockBadge: {
@@ -332,7 +516,7 @@ const styles = StyleSheet.create({
   },
   balanceValue: {
     color: '#F5F5F6',
-    fontSize: 44,
+    fontSize: 40,
     fontWeight: '700',
   },
   eyeIcon: {
@@ -364,7 +548,7 @@ const styles = StyleSheet.create({
   },
   topSegmentText: {
     color: '#D6D7DA',
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '500',
   },
   divider: {
@@ -376,6 +560,83 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 16,
   },
+  myLinkCard: {
+    marginTop: 18,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.09)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  myLinkQrWrap: {
+    width: 230,
+    height: 230,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  myLinkCenterBadge: {
+    position: 'absolute',
+    width: 40,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: BRAND_YELLOW,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  myLinkPlaceholder: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  myLinkPlaceholderText: {
+    color: '#C9CBD0',
+    fontSize: 13,
+  },
+  myLinkActionButton: {
+    marginTop: 12,
+    height: 48,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  myLinkActionText: {
+    color: '#ECEDEE',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  myLinkSectionLabel: {
+    marginTop: 14,
+    color: '#D5D7DC',
+    fontSize: 15,
+    fontWeight: '500',
+  },
+  linkRow: {
+    marginTop: 8,
+    height: 44,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  linkText: {
+    flex: 1,
+    color: '#C2C4CA',
+    fontSize: 13,
+    textDecorationLine: 'underline',
+  },
   sectionHeader: {
     marginTop: 18,
     flexDirection: 'row',
@@ -384,7 +645,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: '#E9E9EB',
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: '500',
   },
   historyPill: {
@@ -423,7 +684,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   requestCard: {
-    minHeight: 88,
+    minHeight: 82,
     borderRadius: 10,
     backgroundColor: '#F7F7F8',
     paddingHorizontal: 12,
@@ -468,7 +729,7 @@ const styles = StyleSheet.create({
   },
   requestTitle: {
     color: '#111214',
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: '700',
   },
   lockBadge: {
@@ -481,7 +742,7 @@ const styles = StyleSheet.create({
   },
   requestAmount: {
     color: '#17181A',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '500',
     marginTop: 2,
   },
@@ -514,7 +775,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   createRequestButton: {
-    height: 52,
+    height: 48,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.25)',
@@ -526,7 +787,7 @@ const styles = StyleSheet.create({
   },
   createRequestText: {
     color: '#D7D8DB',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '500',
   },
 });

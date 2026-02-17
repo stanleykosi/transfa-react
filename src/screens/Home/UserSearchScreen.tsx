@@ -65,7 +65,7 @@ const UserSearchScreen = () => {
               <UserResultCard
                 key={user.id}
                 user={user}
-                onPress={() => navigation.navigate('PayUser', { initialRecipient: user })}
+                onPress={() => navigation.navigate('UserProfileView', { user })}
               />
             ))}
           </View>

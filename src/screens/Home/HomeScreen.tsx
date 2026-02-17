@@ -253,7 +253,7 @@ const HomeScreen = () => {
                     key={user.id}
                     user={user}
                     color={avatarPalette[index % avatarPalette.length]}
-                    onPress={() => navigation.navigate('PayUser', { initialRecipient: user })}
+                    onPress={() => navigation.navigate('UserProfileView', { user })}
                   />
                 ))}
           </ScrollView>

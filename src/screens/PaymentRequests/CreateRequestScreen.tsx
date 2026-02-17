@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'react-native-image-picker';
@@ -29,12 +29,14 @@ import { nairaToKobo, formatCurrency } from '@/utils/formatCurrency';
 const BRAND_YELLOW = '#FFD300';
 
 type NavigationProp = NativeStackNavigationProp<AppStackParamList>;
+type CreateRequestRoute = RouteProp<AppStackParamList, 'CreatePaymentRequest'>;
 type RequestMode = 'general' | 'individual';
 
 const stripUsernamePrefix = (value?: string | null) => (value || 'new_user').replace(/^_+/, '');
 
 const CreateRequestScreen = () => {
   const navigation = useNavigation<NavigationProp>();
+  const route = useRoute<CreateRequestRoute>();
 
   const { data: profile } = useUserProfile();
   const { data: balanceData, isLoading: isLoadingBalance } = useAccountBalance();
@@ -47,6 +49,20 @@ const CreateRequestScreen = () => {
   const [description, setDescription] = useState('');
   const [image, setImage] = useState<ImagePicker.Asset | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+
+  useEffect(() => {
+    const forcedMode = route.params?.forceMode;
+    const initialRecipient = route.params?.initialRecipient;
+
+    if (forcedMode) {
+      setMode(forcedMode);
+    }
+    if (initialRecipient) {
+      setMode('individual');
+      setSelectedRecipient(initialRecipient);
+      setUsername(stripUsernamePrefix(initialRecipient.username));
+    }
+  }, [route.params?.forceMode, route.params?.initialRecipient]);
 
   const normalizedQuery = useMemo(() => username.trim(), [username]);
   const searchQuery = mode === 'individual' && !selectedRecipient ? normalizedQuery : '';

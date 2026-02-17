@@ -272,6 +272,18 @@ export interface TransactionHistoryItem {
   updated_at: string;
 }
 
+export interface UserProfileSummary {
+  id: string;
+  username: string;
+  full_name?: string | null;
+}
+
+export interface BilateralTransactionHistoryResponse {
+  user: UserProfileSummary;
+  shareable_link: string;
+  transactions: TransactionHistoryItem[];
+}
+
 // User's receiving preference for incoming transfers
 export interface ReceivingPreference {
   user_id: string;

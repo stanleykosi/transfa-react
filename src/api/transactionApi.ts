@@ -31,6 +31,7 @@ import {
   TransactionResponse,
   TransactionStatusResponse,
   TransactionHistoryItem,
+  BilateralTransactionHistoryResponse,
   Beneficiary,
   ReceivingPreference,
   UpdateReceivingPreferencePayload,
@@ -58,6 +59,7 @@ const TRANSACTION_SERVICE_URL =
 
 // Define query keys for cache invalidation
 const TRANSACTIONS_QUERY_KEY = 'transactions';
+const TRANSACTIONS_WITH_USER_QUERY_KEY = 'transactions-with-user';
 const BENEFICIARIES_QUERY_KEY = 'beneficiaries';
 const RECEIVING_PREFERENCE_QUERY_KEY = 'receiving-preference';
 const DEFAULT_BENEFICIARY_QUERY_KEY = 'default-beneficiary';
@@ -357,6 +359,29 @@ export const useTransactionHistory = () => {
     refetchOnMount: true, // Refetch when component mounts
     retry: 3, // Retry failed requests 3 times
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000), // Exponential backoff
+  });
+};
+
+export const useTransactionHistoryWithUser = (username?: string, limit = 20, offset = 0) => {
+  const normalizedUsername = (username || '').trim();
+
+  const fetchHistory = async (): Promise<BilateralTransactionHistoryResponse> => {
+    const { data } = await apiClient.get<BilateralTransactionHistoryResponse>(
+      `/transactions/transactions/with/${encodeURIComponent(normalizedUsername)}`,
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+        params: { limit, offset },
+      }
+    );
+    return data;
+  };
+
+  return useQuery<BilateralTransactionHistoryResponse, Error>({
+    queryKey: [TRANSACTIONS_WITH_USER_QUERY_KEY, normalizedUsername, limit, offset],
+    queryFn: fetchHistory,
+    enabled: normalizedUsername.length > 0,
+    staleTime: 1000 * 15,
+    refetchOnWindowFocus: true,
   });
 };
 

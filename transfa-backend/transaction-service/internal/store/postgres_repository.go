@@ -241,6 +241,74 @@ func (r *PostgresRepository) FindTransactionsByUserID(ctx context.Context, userI
 	return transactions, nil
 }
 
+// FindTransactionsBetweenUsers retrieves transactions where user and counterparty are the two parties.
+func (r *PostgresRepository) FindTransactionsBetweenUsers(ctx context.Context, userID uuid.UUID, counterpartyID uuid.UUID, limit int, offset int) ([]domain.Transaction, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var transactions []domain.Transaction
+	query := `
+		SELECT id, anchor_transfer_id, sender_id, recipient_id, source_account_id, destination_account_id,
+		       destination_beneficiary_id, type, COALESCE(category, '') AS category, status, amount, fee,
+		       COALESCE(description, '') AS description, COALESCE(transfer_type, '') AS transfer_type,
+		       failure_reason, anchor_session_id, anchor_reason, created_at, updated_at
+		FROM transactions
+		WHERE
+		  (
+		    sender_id = $1 AND recipient_id = $2
+		  )
+		  OR
+		  (
+		    sender_id = $2 AND recipient_id = $1
+		  )
+		ORDER BY created_at DESC
+		LIMIT $3 OFFSET $4
+	`
+	rows, err := r.db.Query(ctx, query, userID, counterpartyID, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var tx domain.Transaction
+		err := rows.Scan(
+			&tx.ID,
+			&tx.AnchorTransferID,
+			&tx.SenderID,
+			&tx.RecipientID,
+			&tx.SourceAccountID,
+			&tx.DestinationAccountID,
+			&tx.DestinationBeneficiaryID,
+			&tx.Type,
+			&tx.Category,
+			&tx.Status,
+			&tx.Amount,
+			&tx.Fee,
+			&tx.Description,
+			&tx.TransferType,
+			&tx.FailureReason,
+			&tx.AnchorSessionID,
+			&tx.AnchorReason,
+			&tx.CreatedAt,
+			&tx.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		transactions = append(transactions, tx)
+	}
+
+	return transactions, nil
+}
+
 // FindBeneficiaryByID retrieves a specific beneficiary owned by a user.
 func (r *PostgresRepository) FindBeneficiaryByID(ctx context.Context, beneficiaryID uuid.UUID, userID uuid.UUID) (*domain.Beneficiary, error) {
 	var beneficiary domain.Beneficiary

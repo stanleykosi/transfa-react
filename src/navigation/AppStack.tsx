@@ -33,6 +33,7 @@ import CreateUsernameScreen from '@/screens/Onboarding/CreateUsernameScreen';
 import CreatePinScreen from '@/screens/Onboarding/CreatePinScreen';
 import ConfirmPinScreen from '@/screens/Onboarding/ConfirmPinScreen';
 import UserSearchScreen from '@/screens/Home/UserSearchScreen';
+import UserProfileViewScreen from '@/screens/Home/UserProfileViewScreen';
 import PayUserScreen from '@/screens/PaymentFlow/PayUserScreen';
 import SelfTransferScreen from '@/screens/PaymentFlow/SelfTransferScreen';
 import TransferStatusScreen from '@/screens/PaymentFlow/TransferStatusScreen';
@@ -105,7 +106,15 @@ export type AppStackParamList = {
   };
   PaymentRequestsList: undefined; // New screen for viewing payment request history
   PaymentRequestHistory: undefined;
-  CreatePaymentRequest: undefined;
+  CreatePaymentRequest:
+    | {
+        initialRecipient?: UserDiscoveryResult;
+        forceMode?: 'general' | 'individual';
+      }
+    | undefined;
+  UserProfileView: {
+    user: UserDiscoveryResult;
+  };
   PaymentRequestSuccess: { requestId: string };
   NotificationCenter: undefined;
   IncomingRequests: undefined;
@@ -245,6 +254,11 @@ const AppStack = () => {
         name="UserSearch"
         component={UserSearchScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="UserProfileView"
+        component={UserProfileViewScreen}
+        options={{ headerShown: false, presentation: 'transparentModal' }}
       />
       <Stack.Screen name="PayUser" component={PayUserScreen} options={{ headerShown: false }} />
       <Stack.Screen

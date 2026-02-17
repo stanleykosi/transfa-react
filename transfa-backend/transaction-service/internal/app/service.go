@@ -854,6 +854,29 @@ func (s *Service) GetTransactionHistory(ctx context.Context, userID uuid.UUID) (
 	return s.repo.FindTransactionsByUserID(ctx, userID)
 }
 
+// GetTransactionHistoryWithUser retrieves transactions between the authenticated user and one counterparty.
+func (s *Service) GetTransactionHistoryWithUser(ctx context.Context, userID uuid.UUID, counterpartyUsername string, limit int, offset int) (*domain.User, []domain.Transaction, error) {
+	normalized := strings.TrimSpace(counterpartyUsername)
+	if normalized == "" {
+		return nil, nil, ErrInvalidRecipient
+	}
+
+	counterparty, err := s.repo.FindUserByUsername(ctx, normalized)
+	if err != nil {
+		return nil, nil, err
+	}
+	if counterparty.ID == userID {
+		return nil, nil, ErrSelfTransferNotAllowed
+	}
+
+	transactions, err := s.repo.FindTransactionsBetweenUsers(ctx, userID, counterparty.ID, limit, offset)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return counterparty, transactions, nil
+}
+
 // GetTransactionByID retrieves a single transaction by its ID, ensuring it belongs to the requester.
 func (s *Service) GetTransactionByID(ctx context.Context, userID uuid.UUID, transactionID uuid.UUID) (*domain.Transaction, error) {
 	tx, err := s.repo.FindTransactionByID(ctx, transactionID)

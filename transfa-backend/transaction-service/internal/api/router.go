@@ -59,6 +59,7 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 
 		// Transaction history endpoint
 		r.Get("/transactions", h.GetTransactionHistoryHandler)
+		r.Get("/transactions/with/{username}", h.GetTransactionHistoryWithUserHandler)
 		r.Get("/transactions/{id}", h.GetTransactionByIDHandler)
 
 		// Payment Request routes
