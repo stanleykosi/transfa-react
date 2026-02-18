@@ -233,7 +233,7 @@ const HomeScreen = () => {
             <TouchableOpacity
               activeOpacity={0.8}
               style={styles.listChip}
-              onPress={() => navigation.navigate('UserSearch')}
+              onPress={() => navigation.navigate('TransferLists')}
             >
               <View style={styles.listChipIconWrap}>
                 <Ionicons name="list-outline" size={16} color="#F4F4F4" />

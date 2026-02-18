@@ -24,8 +24,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"sync"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,6 +42,9 @@ const (
 	pinMaxAttempts                  = 5
 	pinLockoutSeconds               = 900
 	maxBulkP2PTransfers             = 10
+	maxTransferListMembers          = 10
+	minTransferListNameLen          = 1
+	maxTransferListNameLen          = 80
 	maxPaymentRequestTitleLen       = 80
 	maxPaymentRequestDescriptionLen = 500
 	maxPaymentRequestDeclineLen     = 240
@@ -61,6 +64,13 @@ var (
 	ErrBulkTransferEmpty                = errors.New("at least one transfer item is required")
 	ErrBulkTransferLimit                = errors.New("bulk transfer supports a maximum of 10 recipients")
 	ErrDuplicateRecipient               = errors.New("duplicate recipient in bulk transfer request")
+	ErrTransferListNameRequired         = errors.New("list name is required")
+	ErrTransferListNameLength           = errors.New("list name must be between 1 and 80 characters")
+	ErrTransferListEmpty                = errors.New("at least one user is required in the list")
+	ErrTransferListMemberLimit          = errors.New("a transfer list supports a maximum of 10 users")
+	ErrTransferListDuplicateMember      = errors.New("duplicate user in transfer list")
+	ErrTransferListSelfMember           = errors.New("you cannot add yourself to a transfer list")
+	ErrTransferListNotFound             = errors.New("transfer list not found")
 	ErrInvalidPaymentRequestType        = errors.New("request type must be general or individual")
 	ErrInvalidPaymentRequestTitle       = errors.New("request title must be between 3 and 80 characters")
 	ErrInvalidPaymentRequestDescription = errors.New("request description cannot exceed 500 characters")
@@ -2088,4 +2098,186 @@ func (s *Service) RefundMoneyDrop(ctx context.Context, dropID uuid.UUID, creator
 
 	log.Printf("level=info component=service flow=money_drop_refund msg=\"refund completed\" money_drop_id=%s creator_id=%s", dropID, creatorID)
 	return nil
+}
+
+func normalizeTransferListName(raw string) string {
+	return strings.TrimSpace(raw)
+}
+
+func validateTransferListName(name string) error {
+	length := len(name)
+	if length == 0 {
+		return ErrTransferListNameRequired
+	}
+	if length < minTransferListNameLen || length > maxTransferListNameLen {
+		return ErrTransferListNameLength
+	}
+	return nil
+}
+
+func (s *Service) resolveTransferListMemberIDs(ctx context.Context, ownerID uuid.UUID, usernames []string) ([]uuid.UUID, error) {
+	if len(usernames) == 0 {
+		return nil, ErrTransferListEmpty
+	}
+	if len(usernames) > maxTransferListMembers {
+		return nil, ErrTransferListMemberLimit
+	}
+
+	seen := make(map[string]struct{}, len(usernames))
+	memberIDs := make([]uuid.UUID, 0, len(usernames))
+	for _, rawUsername := range usernames {
+		username := strings.TrimSpace(rawUsername)
+		if username == "" {
+			return nil, ErrInvalidRecipient
+		}
+
+		normalized := strings.ToLower(username)
+		if _, exists := seen[normalized]; exists {
+			return nil, ErrTransferListDuplicateMember
+		}
+		seen[normalized] = struct{}{}
+
+		user, err := s.repo.FindUserByUsername(ctx, username)
+		if err != nil {
+			return nil, err
+		}
+		if user.ID == ownerID {
+			return nil, ErrTransferListSelfMember
+		}
+		memberIDs = append(memberIDs, user.ID)
+	}
+
+	return memberIDs, nil
+}
+
+func (s *Service) ListTransferLists(ctx context.Context, ownerID uuid.UUID, opts domain.TransferListListOptions) ([]domain.TransferListSummary, error) {
+	return s.repo.ListTransferListsByOwner(ctx, ownerID, opts)
+}
+
+func (s *Service) GetTransferListByID(ctx context.Context, ownerID uuid.UUID, listID uuid.UUID) (*domain.TransferList, error) {
+	list, err := s.repo.GetTransferListByID(ctx, ownerID, listID)
+	if err != nil {
+		if errors.Is(err, store.ErrTransferListNotFound) {
+			return nil, ErrTransferListNotFound
+		}
+		return nil, err
+	}
+	return list, nil
+}
+
+func (s *Service) CreateTransferList(ctx context.Context, ownerID uuid.UUID, payload domain.CreateTransferListPayload) (*domain.TransferList, error) {
+	name := normalizeTransferListName(payload.Name)
+	if err := validateTransferListName(name); err != nil {
+		return nil, err
+	}
+
+	memberIDs, err := s.resolveTransferListMemberIDs(ctx, ownerID, payload.MemberUsernames)
+	if err != nil {
+		return nil, err
+	}
+
+	list := &domain.TransferList{
+		ID:      uuid.New(),
+		OwnerID: ownerID,
+		Name:    name,
+	}
+	created, err := s.repo.CreateTransferList(ctx, list, memberIDs)
+	if err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+func (s *Service) UpdateTransferList(ctx context.Context, ownerID uuid.UUID, listID uuid.UUID, payload domain.UpdateTransferListPayload) (*domain.TransferList, error) {
+	name := normalizeTransferListName(payload.Name)
+	if err := validateTransferListName(name); err != nil {
+		return nil, err
+	}
+
+	memberIDs, err := s.resolveTransferListMemberIDs(ctx, ownerID, payload.MemberUsernames)
+	if err != nil {
+		return nil, err
+	}
+
+	updated, err := s.repo.UpdateTransferList(ctx, ownerID, listID, name, memberIDs)
+	if err != nil {
+		if errors.Is(err, store.ErrTransferListNotFound) {
+			return nil, ErrTransferListNotFound
+		}
+		return nil, err
+	}
+	return updated, nil
+}
+
+func (s *Service) DeleteTransferList(ctx context.Context, ownerID uuid.UUID, listID uuid.UUID) (bool, error) {
+	return s.repo.DeleteTransferList(ctx, ownerID, listID)
+}
+
+func (s *Service) ToggleTransferListMember(ctx context.Context, ownerID uuid.UUID, listID uuid.UUID, username string) (*domain.ToggleTransferListMemberResult, error) {
+	trimmedUsername := strings.TrimSpace(username)
+	if trimmedUsername == "" {
+		return nil, ErrInvalidRecipient
+	}
+
+	list, err := s.repo.GetTransferListByID(ctx, ownerID, listID)
+	if err != nil {
+		if errors.Is(err, store.ErrTransferListNotFound) {
+			return nil, ErrTransferListNotFound
+		}
+		return nil, err
+	}
+
+	memberUser, err := s.repo.FindUserByUsername(ctx, trimmedUsername)
+	if err != nil {
+		return nil, err
+	}
+	if memberUser.ID == ownerID {
+		return nil, ErrTransferListSelfMember
+	}
+
+	memberIDs := make([]uuid.UUID, 0, len(list.Members))
+	existing := false
+	for _, member := range list.Members {
+		if member.UserID == memberUser.ID {
+			existing = true
+			continue
+		}
+		memberIDs = append(memberIDs, member.UserID)
+	}
+
+	result := &domain.ToggleTransferListMemberResult{
+		Username: memberUser.Username,
+	}
+	if existing {
+		result.InList = false
+		result.Removed = true
+	} else {
+		if len(list.Members) >= maxTransferListMembers {
+			return nil, ErrTransferListMemberLimit
+		}
+		memberIDs = append(memberIDs, memberUser.ID)
+		result.InList = true
+		result.Added = true
+	}
+
+	updatedList, err := s.repo.UpdateTransferList(ctx, ownerID, listID, list.Name, memberIDs)
+	if err != nil {
+		if errors.Is(err, store.ErrTransferListNotFound) {
+			return nil, ErrTransferListNotFound
+		}
+		return nil, err
+	}
+
+	result.List = updatedList
+	if result.InList {
+		for _, member := range updatedList.Members {
+			if member.UserID == memberUser.ID {
+				memberCopy := member
+				result.Member = &memberCopy
+				break
+			}
+		}
+	}
+
+	return result, nil
 }

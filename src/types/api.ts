@@ -406,6 +406,62 @@ export interface PayIncomingPaymentRequestResponse {
   transaction: TransactionResponse;
 }
 
+export interface TransferListMember {
+  user_id: string;
+  username: string;
+  full_name?: string | null;
+  created_at: string;
+}
+
+export interface TransferListSummary {
+  id: string;
+  owner_id: string;
+  name: string;
+  member_count: number;
+  member_usernames: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TransferList {
+  id: string;
+  owner_id: string;
+  name: string;
+  member_count: number;
+  members: TransferListMember[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ListTransferListsParams {
+  limit?: number;
+  offset?: number;
+  q?: string;
+}
+
+export interface CreateTransferListPayload {
+  name: string;
+  member_usernames: string[];
+}
+
+export interface UpdateTransferListPayload {
+  name: string;
+  member_usernames: string[];
+}
+
+export interface ToggleTransferListMemberPayload {
+  username: string;
+}
+
+export interface ToggleTransferListMemberResponse {
+  list: TransferList;
+  member?: TransferListMember;
+  in_list: boolean;
+  added: boolean;
+  removed: boolean;
+  username: string;
+}
+
 export interface NotificationListParams {
   limit?: number;
   offset?: number;

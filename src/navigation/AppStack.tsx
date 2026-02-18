@@ -50,6 +50,10 @@ import RequestPaymentAuthScreen from '@/screens/Notifications/RequestPaymentAuth
 import CreateDropWizardScreen from '@/screens/MoneyDrop/CreateDropWizardScreen';
 import MoneyDropSuccessScreen from '@/screens/MoneyDrop/MoneyDropSuccessScreen';
 import ClaimDropScreen from '@/screens/MoneyDrop/ClaimDropScreen';
+import TransferListsScreen from '@/screens/List/TransferListsScreen';
+import CreateTransferListScreen from '@/screens/List/CreateTransferListScreen';
+import TransferListDetailScreen from '@/screens/List/TransferListDetailScreen';
+import PayTransferListScreen from '@/screens/List/PayTransferListScreen';
 import { fetchAuthSession } from '@/api/authApi';
 import { theme } from '@/constants/theme';
 
@@ -121,6 +125,10 @@ export type AppStackParamList = {
   IncomingRequestDetail: { requestId: string; notificationId?: string };
   RequestPaymentSummary: { requestId: string };
   RequestPaymentAuth: { requestId: string };
+  TransferLists: undefined;
+  TransferListCreate: undefined;
+  TransferListDetail: { listId: string };
+  PayTransferList: { listId: string };
   // Money Drop Screens
   CreateDropWizard: undefined;
   MoneyDropSuccess: { dropDetails: import('@/types/api').MoneyDropResponse };
@@ -319,6 +327,26 @@ const AppStack = () => {
       <Stack.Screen
         name="RequestPaymentAuth"
         component={RequestPaymentAuthScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="TransferLists"
+        component={TransferListsScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="TransferListCreate"
+        component={CreateTransferListScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="TransferListDetail"
+        component={TransferListDetailScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PayTransferList"
+        component={PayTransferListScreen}
         options={{ headerShown: false }}
       />
       {/* Money Drop Screens */}

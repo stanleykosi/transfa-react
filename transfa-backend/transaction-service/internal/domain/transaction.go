@@ -173,6 +173,62 @@ type AccountBalance struct {
 	Pending          int64 `json:"pending"`           // in kobo
 }
 
+type TransferListMember struct {
+	UserID    uuid.UUID `json:"user_id"`
+	Username  string    `json:"username"`
+	FullName  *string   `json:"full_name,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type TransferList struct {
+	ID          uuid.UUID            `json:"id"`
+	OwnerID     uuid.UUID            `json:"owner_id"`
+	Name        string               `json:"name"`
+	MemberCount int                  `json:"member_count"`
+	Members     []TransferListMember `json:"members"`
+	CreatedAt   time.Time            `json:"created_at"`
+	UpdatedAt   time.Time            `json:"updated_at"`
+}
+
+type TransferListSummary struct {
+	ID              uuid.UUID `json:"id"`
+	OwnerID         uuid.UUID `json:"owner_id"`
+	Name            string    `json:"name"`
+	MemberCount     int       `json:"member_count"`
+	MemberUsernames []string  `json:"member_usernames"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+type TransferListListOptions struct {
+	Limit  int
+	Offset int
+	Search string
+}
+
+type CreateTransferListPayload struct {
+	Name            string   `json:"name"`
+	MemberUsernames []string `json:"member_usernames"`
+}
+
+type UpdateTransferListPayload struct {
+	Name            string   `json:"name"`
+	MemberUsernames []string `json:"member_usernames"`
+}
+
+type ToggleTransferListMemberPayload struct {
+	Username string `json:"username"`
+}
+
+type ToggleTransferListMemberResult struct {
+	List     *TransferList       `json:"list"`
+	Member   *TransferListMember `json:"member,omitempty"`
+	InList   bool                `json:"in_list"`
+	Added    bool                `json:"added"`
+	Removed  bool                `json:"removed"`
+	Username string              `json:"username"`
+}
+
 // PaymentRequest represents a payment request record in the database.
 // It aligns with the `payment_requests` table schema.
 type PaymentRequest struct {

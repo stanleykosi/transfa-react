@@ -82,6 +82,13 @@ type Repository interface {
 	MarkAllInAppNotificationsRead(ctx context.Context, userID uuid.UUID, category *string) (int64, error)
 	GetInAppNotificationUnreadCounts(ctx context.Context, userID uuid.UUID) (*domain.NotificationUnreadCounts, error)
 
+	// Transfer list methods
+	CreateTransferList(ctx context.Context, list *domain.TransferList, memberIDs []uuid.UUID) (*domain.TransferList, error)
+	ListTransferListsByOwner(ctx context.Context, ownerID uuid.UUID, opts domain.TransferListListOptions) ([]domain.TransferListSummary, error)
+	GetTransferListByID(ctx context.Context, ownerID uuid.UUID, listID uuid.UUID) (*domain.TransferList, error)
+	UpdateTransferList(ctx context.Context, ownerID uuid.UUID, listID uuid.UUID, name string, memberIDs []uuid.UUID) (*domain.TransferList, error)
+	DeleteTransferList(ctx context.Context, ownerID uuid.UUID, listID uuid.UUID) (bool, error)
+
 	// Transaction history methods
 	FindTransactionsByUserID(ctx context.Context, userID uuid.UUID) ([]domain.Transaction, error)
 	FindTransactionsBetweenUsers(ctx context.Context, userID uuid.UUID, counterpartyID uuid.UUID, limit int, offset int) ([]domain.Transaction, error)

@@ -51,6 +51,13 @@ import {
   MoneyDropResponse,
   ClaimMoneyDropResponse,
   MoneyDropDetails,
+  TransferListSummary,
+  TransferList,
+  ListTransferListsParams,
+  CreateTransferListPayload,
+  UpdateTransferListPayload,
+  ToggleTransferListMemberPayload,
+  ToggleTransferListMemberResponse,
 } from '@/types/api';
 
 // Transaction service URL from environment variables with fallback
@@ -71,6 +78,7 @@ const NOTIFICATION_UNREAD_COUNTS_QUERY_KEY = 'notificationUnreadCounts';
 const USER_PROFILE_QUERY_KEY = 'user-profile';
 const PRIMARY_ACCOUNT_QUERY_KEY = 'primary-account';
 const MONEY_DROP_QUERY_KEY = 'moneyDrop';
+const TRANSFER_LISTS_QUERY_KEY = 'transferLists';
 
 const toReadableError = (error: unknown): Error => {
   if (axios.isAxiosError(error)) {
@@ -768,6 +776,172 @@ export const useMarkAllNotificationsRead = (
       queryClient.invalidateQueries({ queryKey: [NOTIFICATION_UNREAD_COUNTS_QUERY_KEY] });
     },
     ...options,
+  });
+};
+
+export const useListTransferLists = (params?: ListTransferListsParams) => {
+  const fetchTransferLists = async (): Promise<TransferListSummary[]> => {
+    const { data } = await apiClient.get<TransferListSummary[]>('/transactions/transfer-lists', {
+      baseURL: TRANSACTION_SERVICE_URL,
+      params,
+    });
+    return data ?? [];
+  };
+
+  return useQuery<TransferListSummary[], Error>({
+    queryKey: [
+      TRANSFER_LISTS_QUERY_KEY,
+      'list',
+      params?.limit ?? null,
+      params?.offset ?? null,
+      params?.q ?? '',
+    ],
+    queryFn: fetchTransferLists,
+    staleTime: 1000 * 15,
+  });
+};
+
+export const useGetTransferList = (listId?: string) => {
+  const fetchTransferList = async (): Promise<TransferList> => {
+    const { data } = await apiClient.get<TransferList>(`/transactions/transfer-lists/${listId}`, {
+      baseURL: TRANSACTION_SERVICE_URL,
+    });
+    return data;
+  };
+
+  return useQuery<TransferList, Error>({
+    queryKey: [TRANSFER_LISTS_QUERY_KEY, 'detail', listId ?? ''],
+    queryFn: fetchTransferList,
+    enabled: !!listId,
+  });
+};
+
+export const useCreateTransferList = (
+  options?: UseMutationOptions<TransferList, Error, CreateTransferListPayload>
+) => {
+  const queryClient = useQueryClient();
+  const { onSuccess, ...restOptions } = options ?? {};
+
+  const mutationFn = async (payload: CreateTransferListPayload): Promise<TransferList> => {
+    const { data } = await apiClient.post<TransferList>('/transactions/transfer-lists', payload, {
+      baseURL: TRANSACTION_SERVICE_URL,
+    });
+    return data;
+  };
+
+  return useMutation<TransferList, Error, CreateTransferListPayload>({
+    ...restOptions,
+    mutationFn,
+    onSuccess: (created, variables, context) => {
+      queryClient.invalidateQueries({ queryKey: [TRANSFER_LISTS_QUERY_KEY] });
+      queryClient.setQueryData([TRANSFER_LISTS_QUERY_KEY, 'detail', created.id], created);
+      onSuccess?.(created, variables, context);
+    },
+  });
+};
+
+export const useUpdateTransferList = (
+  options?: UseMutationOptions<
+    TransferList,
+    Error,
+    { listId: string; payload: UpdateTransferListPayload }
+  >
+) => {
+  const queryClient = useQueryClient();
+  const { onSuccess, ...restOptions } = options ?? {};
+
+  const mutationFn = async ({
+    listId,
+    payload,
+  }: {
+    listId: string;
+    payload: UpdateTransferListPayload;
+  }): Promise<TransferList> => {
+    const { data } = await apiClient.put<TransferList>(
+      `/transactions/transfer-lists/${listId}`,
+      payload,
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
+    return data;
+  };
+
+  return useMutation<TransferList, Error, { listId: string; payload: UpdateTransferListPayload }>({
+    ...restOptions,
+    mutationFn,
+    onSuccess: (updated, variables, context) => {
+      queryClient.invalidateQueries({ queryKey: [TRANSFER_LISTS_QUERY_KEY] });
+      queryClient.setQueryData([TRANSFER_LISTS_QUERY_KEY, 'detail', updated.id], updated);
+      onSuccess?.(updated, variables, context);
+    },
+  });
+};
+
+export const useDeleteTransferList = (
+  options?: UseMutationOptions<void, Error, { listId: string }>
+) => {
+  const queryClient = useQueryClient();
+  const { onSuccess, ...restOptions } = options ?? {};
+
+  const mutationFn = async ({ listId }: { listId: string }): Promise<void> => {
+    await apiClient.delete(`/transactions/transfer-lists/${listId}`, {
+      baseURL: TRANSACTION_SERVICE_URL,
+    });
+  };
+
+  return useMutation<void, Error, { listId: string }>({
+    ...restOptions,
+    mutationFn,
+    onSuccess: (data, variables, context) => {
+      queryClient.invalidateQueries({ queryKey: [TRANSFER_LISTS_QUERY_KEY] });
+      queryClient.removeQueries({
+        queryKey: [TRANSFER_LISTS_QUERY_KEY, 'detail', variables.listId],
+      });
+      onSuccess?.(data, variables, context);
+    },
+  });
+};
+
+export const useToggleTransferListMember = (
+  options?: UseMutationOptions<
+    ToggleTransferListMemberResponse,
+    Error,
+    { listId: string; payload: ToggleTransferListMemberPayload }
+  >
+) => {
+  const queryClient = useQueryClient();
+  const { onSuccess, ...restOptions } = options ?? {};
+
+  const mutationFn = async ({
+    listId,
+    payload,
+  }: {
+    listId: string;
+    payload: ToggleTransferListMemberPayload;
+  }): Promise<ToggleTransferListMemberResponse> => {
+    const { data } = await apiClient.post<ToggleTransferListMemberResponse>(
+      `/transactions/transfer-lists/${listId}/members/toggle`,
+      payload,
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
+    return data;
+  };
+
+  return useMutation<
+    ToggleTransferListMemberResponse,
+    Error,
+    { listId: string; payload: ToggleTransferListMemberPayload }
+  >({
+    ...restOptions,
+    mutationFn,
+    onSuccess: (result, variables, context) => {
+      queryClient.invalidateQueries({ queryKey: [TRANSFER_LISTS_QUERY_KEY] });
+      queryClient.setQueryData([TRANSFER_LISTS_QUERY_KEY, 'detail', variables.listId], result.list);
+      onSuccess?.(result, variables, context);
+    },
   });
 };
 

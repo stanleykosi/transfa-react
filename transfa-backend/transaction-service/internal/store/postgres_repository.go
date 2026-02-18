@@ -37,6 +37,7 @@ var (
 	ErrTransactionPINNotSet   = errors.New("transaction pin not set")
 	ErrPaymentRequestNotFound = errors.New("payment request not found")
 	ErrPaymentRequestNotReady = errors.New("payment request is not payable")
+	ErrTransferListNotFound   = errors.New("transfer list not found")
 )
 
 // PostgresRepository is a concrete implementation of the Repository interface for PostgreSQL.
@@ -2417,4 +2418,207 @@ func (r *PostgresRepository) UpdateMoneyDropAccountBalance(ctx context.Context, 
 	}
 
 	return nil
+}
+
+func (r *PostgresRepository) CreateTransferList(ctx context.Context, list *domain.TransferList, memberIDs []uuid.UUID) (*domain.TransferList, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	insertListQuery := `
+		INSERT INTO transfer_lists (id, owner_id, name)
+		VALUES ($1, $2, $3)
+		RETURNING created_at, updated_at
+	`
+	if err := tx.QueryRow(ctx, insertListQuery, list.ID, list.OwnerID, list.Name).Scan(&list.CreatedAt, &list.UpdatedAt); err != nil {
+		return nil, err
+	}
+
+	if len(memberIDs) > 0 {
+		insertMemberQuery := `
+			INSERT INTO transfer_list_members (list_id, member_user_id)
+			VALUES ($1, $2)
+		`
+		for _, memberID := range memberIDs {
+			if _, err := tx.Exec(ctx, insertMemberQuery, list.ID, memberID); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	return r.GetTransferListByID(ctx, list.OwnerID, list.ID)
+}
+
+func (r *PostgresRepository) ListTransferListsByOwner(ctx context.Context, ownerID uuid.UUID, opts domain.TransferListListOptions) ([]domain.TransferListSummary, error) {
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 30
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := opts.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := `
+		SELECT
+			l.id,
+			l.owner_id,
+			l.name,
+			COUNT(m.member_user_id)::int AS member_count,
+			COALESCE(
+				array_remove(array_agg(u.username ORDER BY lower(u.username)), NULL),
+				ARRAY[]::text[]
+			) AS member_usernames,
+			l.created_at,
+			l.updated_at
+		FROM transfer_lists l
+		LEFT JOIN transfer_list_members m ON m.list_id = l.id
+		LEFT JOIN users u ON u.id = m.member_user_id
+		WHERE l.owner_id = $1
+		  AND l.deleted_at IS NULL
+		  AND ($2 = '' OR lower(l.name) LIKE '%' || lower($2) || '%')
+		GROUP BY l.id
+		ORDER BY l.updated_at DESC
+		LIMIT $3 OFFSET $4
+	`
+
+	rows, err := r.db.Query(ctx, query, ownerID, strings.TrimSpace(opts.Search), limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	results := make([]domain.TransferListSummary, 0, limit)
+	for rows.Next() {
+		var item domain.TransferListSummary
+		if err := rows.Scan(
+			&item.ID,
+			&item.OwnerID,
+			&item.Name,
+			&item.MemberCount,
+			&item.MemberUsernames,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+func (r *PostgresRepository) GetTransferListByID(ctx context.Context, ownerID uuid.UUID, listID uuid.UUID) (*domain.TransferList, error) {
+	query := `
+		SELECT id, owner_id, name, created_at, updated_at
+		FROM transfer_lists
+		WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL
+	`
+
+	var result domain.TransferList
+	if err := r.db.QueryRow(ctx, query, listID, ownerID).Scan(
+		&result.ID,
+		&result.OwnerID,
+		&result.Name,
+		&result.CreatedAt,
+		&result.UpdatedAt,
+	); err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrTransferListNotFound
+		}
+		return nil, err
+	}
+
+	memberQuery := `
+		SELECT u.id, u.username, u.full_name, m.created_at
+		FROM transfer_list_members m
+		JOIN users u ON u.id = m.member_user_id
+		WHERE m.list_id = $1
+		ORDER BY lower(u.username) ASC
+	`
+	rows, err := r.db.Query(ctx, memberQuery, listID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	members := make([]domain.TransferListMember, 0, 10)
+	for rows.Next() {
+		var item domain.TransferListMember
+		if err := rows.Scan(&item.UserID, &item.Username, &item.FullName, &item.CreatedAt); err != nil {
+			return nil, err
+		}
+		members = append(members, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	result.Members = members
+	result.MemberCount = len(members)
+	return &result, nil
+}
+
+func (r *PostgresRepository) UpdateTransferList(ctx context.Context, ownerID uuid.UUID, listID uuid.UUID, name string, memberIDs []uuid.UUID) (*domain.TransferList, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	updateListQuery := `
+		UPDATE transfer_lists
+		SET name = $1, updated_at = NOW()
+		WHERE id = $2 AND owner_id = $3 AND deleted_at IS NULL
+	`
+	updateResult, err := tx.Exec(ctx, updateListQuery, name, listID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	if updateResult.RowsAffected() == 0 {
+		return nil, ErrTransferListNotFound
+	}
+
+	if _, err := tx.Exec(ctx, `DELETE FROM transfer_list_members WHERE list_id = $1`, listID); err != nil {
+		return nil, err
+	}
+
+	if len(memberIDs) > 0 {
+		insertMemberQuery := `
+			INSERT INTO transfer_list_members (list_id, member_user_id)
+			VALUES ($1, $2)
+		`
+		for _, memberID := range memberIDs {
+			if _, err := tx.Exec(ctx, insertMemberQuery, listID, memberID); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	return r.GetTransferListByID(ctx, ownerID, listID)
+}
+
+func (r *PostgresRepository) DeleteTransferList(ctx context.Context, ownerID uuid.UUID, listID uuid.UUID) (bool, error) {
+	query := `
+		UPDATE transfer_lists
+		SET deleted_at = NOW(), updated_at = NOW()
+		WHERE id = $1 AND owner_id = $2 AND deleted_at IS NULL
+	`
+	result, err := r.db.Exec(ctx, query, listID, ownerID)
+	if err != nil {
+		return false, err
+	}
+	return result.RowsAffected() > 0, nil
 }

@@ -85,6 +85,16 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 			r.Post("/{id}/read", h.MarkInAppNotificationReadHandler)
 		})
 
+		// Transfer list routes
+		r.Route("/transfer-lists", func(r chi.Router) {
+			r.Get("/", h.ListTransferListsHandler)
+			r.Post("/", h.CreateTransferListHandler)
+			r.Get("/{id}", h.GetTransferListByIDHandler)
+			r.Put("/{id}", h.UpdateTransferListHandler)
+			r.Delete("/{id}", h.DeleteTransferListHandler)
+			r.Post("/{id}/members/toggle", h.ToggleTransferListMemberHandler)
+		})
+
 		// Money Drop routes
 		r.Route("/money-drops", func(r chi.Router) {
 			r.Post("/", h.CreateMoneyDropHandler)                     // Create a new money drop
