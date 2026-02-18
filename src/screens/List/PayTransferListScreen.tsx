@@ -30,14 +30,26 @@ import type { AppStackParamList } from '@/navigation/AppStack';
 import type { BulkP2PTransferResponse } from '@/types/api';
 import { useSecurityStore } from '@/store/useSecurityStore';
 import { formatCurrency, nairaToKobo } from '@/utils/formatCurrency';
+import { normalizeUsername, usernameKey } from '@/utils/username';
 
 const BRAND_YELLOW = '#FFD300';
 const BG_BOTTOM = '#050607';
 const rnBiometrics = new ReactNativeBiometrics();
 
 type ScreenRoute = RouteProp<AppStackParamList, 'PayTransferList'>;
-
-const stripUsernamePrefix = (username?: string | null) => (username ?? '').replace(/^_+/, '');
+type ListTransferResultState = {
+  type: 'success' | 'partial' | 'failure';
+  title: string;
+  message: string;
+  receipts: Array<{
+    transactionId: string;
+    amount: number;
+    fee: number;
+    description: string;
+    recipientUsername: string;
+  }>;
+  failures: BulkP2PTransferResponse['failed_transfers'];
+};
 
 const parseAmountInputToKobo = (value: string): number => {
   const normalized = value.replace(/,/g, '').trim();
@@ -86,6 +98,7 @@ const PayTransferListScreen = () => {
   const [authError, setAuthError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [isProcessingVisible, setProcessingVisible] = useState(false);
+  const [resultState, setResultState] = useState<ListTransferResultState | null>(null);
 
   const pinInputRef = useRef<TextInput | null>(null);
 
@@ -183,13 +196,11 @@ const PayTransferListScreen = () => {
     transferPayload: ReturnType<typeof buildTransfersPayload>
   ) => {
     const failedSet = new Set(
-      response.failed_transfers.map((failure) =>
-        stripUsernamePrefix(failure.recipient_username).toLowerCase()
-      )
+      response.failed_transfers.map((failure) => usernameKey(failure.recipient_username))
     );
 
     const successfulPayloadItems = transferPayload.filter(
-      (item) => !failedSet.has(stripUsernamePrefix(item.member.username).toLowerCase())
+      (item) => !failedSet.has(usernameKey(item.member.username))
     );
 
     return response.successful_transfers.map((transaction, index) => {
@@ -199,7 +210,7 @@ const PayTransferListScreen = () => {
         amount: transaction.amount ?? item?.amount ?? 0,
         fee: transaction.fee ?? feePerTransfer,
         description: item?.description ?? '',
-        recipientUsername: stripUsernamePrefix(item?.member.username ?? ''),
+        recipientUsername: normalizeUsername(item?.member.username ?? ''),
       };
     });
   };
@@ -231,7 +242,7 @@ const PayTransferListScreen = () => {
       const response = await bulkTransferMutation.mutateAsync({
         transaction_pin: pin,
         transfers: transferPayload.map((item) => ({
-          recipient_username: stripUsernamePrefix(item.member.username),
+          recipient_username: normalizeUsername(item.member.username),
           amount: item.amount,
           description: item.description,
         })),
@@ -241,8 +252,35 @@ const PayTransferListScreen = () => {
 
       setAuthVisible(false);
       setPinValue('');
+      setAuthMode('pin');
 
-      navigation.replace('MultiTransferReceipts', {
+      if (response.status === 'completed') {
+        setResultState({
+          type: 'success',
+          title: 'Success!',
+          message: 'Your transaction was successful.',
+          receipts,
+          failures: response.failed_transfers,
+        });
+        return;
+      }
+
+      if (response.status === 'partial_failed') {
+        setResultState({
+          type: 'partial',
+          title: 'Partially Completed',
+          message: 'Some transfers failed. Review receipts for details.',
+          receipts,
+          failures: response.failed_transfers,
+        });
+        return;
+      }
+
+      setResultState({
+        type: 'failure',
+        title: 'Transfer Failed',
+        message:
+          response.failed_transfers[0]?.error || response.message || 'No transfer succeeded.',
         receipts,
         failures: response.failed_transfers,
       });
@@ -257,6 +295,7 @@ const PayTransferListScreen = () => {
         setAuthError(message);
       }
     } finally {
+      await new Promise((resolve) => setTimeout(resolve, 800));
       setProcessingVisible(false);
     }
   };
@@ -323,7 +362,7 @@ const PayTransferListScreen = () => {
 
         <View style={styles.headerRow}>
           <View>
-            <Text style={styles.username}>{stripUsernamePrefix(profile?.username || 'user')}</Text>
+            <Text style={styles.username}>{normalizeUsername(profile?.username || 'user')}</Text>
             <Text style={styles.balanceLabel}>AVAILABLE BALANCE</Text>
             <Text style={styles.balanceAmount}>
               {formatCurrency(balance?.available_balance ?? 0)}
@@ -370,7 +409,7 @@ const PayTransferListScreen = () => {
             <ActivityIndicator size="small" color={BRAND_YELLOW} />
           ) : (
             members.map((member) => {
-              const clean = stripUsernamePrefix(member.username);
+              const clean = normalizeUsername(member.username);
               const amount = memberAmounts[member.user_id] ?? 0;
               return (
                 <TouchableOpacity
@@ -476,13 +515,13 @@ const PayTransferListScreen = () => {
               <View style={styles.authUserNode}>
                 <View style={styles.authUserAvatar}>
                   <Text style={styles.authUserInitial}>
-                    {stripUsernamePrefix(profile?.username || 'u')
+                    {normalizeUsername(profile?.username || 'u')
                       .slice(0, 1)
                       .toUpperCase()}
                   </Text>
                 </View>
                 <Text style={styles.authUserLabel}>
-                  {stripUsernamePrefix(profile?.username || 'you')}
+                  {normalizeUsername(profile?.username || 'you')}
                 </Text>
               </View>
 
@@ -562,6 +601,67 @@ const PayTransferListScreen = () => {
             <ActivityIndicator size="large" color={BRAND_YELLOW} />
             <Text style={styles.processingTitle}>Processing</Text>
             <Text style={styles.processingText}>Your transfer is processing</Text>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={!!resultState}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setResultState(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.resultCard}>
+            <View style={styles.resultIconWrap}>
+              <Ionicons
+                name={resultState?.type === 'failure' ? 'close-circle' : 'checkmark-circle'}
+                size={62}
+                color={resultState?.type === 'failure' ? '#EA5959' : BRAND_YELLOW}
+              />
+            </View>
+
+            <Text style={styles.resultTitle}>{resultState?.title ?? 'Success!'}</Text>
+            <Text style={styles.resultMessage}>
+              {resultState?.message ?? 'Your transaction was successful.'}
+            </Text>
+
+            <TouchableOpacity
+              style={styles.resultDoneButton}
+              onPress={() => {
+                setResultState(null);
+                navigation.navigate('AppTabs', { screen: 'Home' });
+              }}
+            >
+              <Text style={styles.resultDoneButtonText}>Done</Text>
+            </TouchableOpacity>
+
+            {(resultState?.receipts.length ?? 0) > 0 || (resultState?.failures.length ?? 0) > 0 ? (
+              <TouchableOpacity
+                onPress={() => {
+                  if (!resultState) {
+                    return;
+                  }
+                  setResultState(null);
+                  navigation.navigate('MultiTransferReceipts', {
+                    receipts: resultState.receipts,
+                    failures: resultState.failures,
+                  });
+                }}
+              >
+                <Text style={styles.viewReceiptsText}>
+                  {resultState
+                    ? resultState.receipts.length > 1
+                      ? 'View Receipts'
+                      : resultState.receipts.length === 1
+                        ? 'View Receipt'
+                        : resultState.failures.length > 1
+                          ? 'View Failures'
+                          : 'View Failure'
+                    : 'View Details'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -947,6 +1047,51 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: '#666A71',
     fontSize: 16,
+  },
+  resultCard: {
+    width: '86%',
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    alignItems: 'center',
+  },
+  resultIconWrap: {
+    marginTop: 4,
+  },
+  resultTitle: {
+    marginTop: 12,
+    color: '#121315',
+    fontSize: 26,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  resultMessage: {
+    marginTop: 6,
+    color: '#5E6168',
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  resultDoneButton: {
+    marginTop: 14,
+    width: '72%',
+    height: 46,
+    borderRadius: 10,
+    backgroundColor: '#0C0D10',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resultDoneButtonText: {
+    color: '#FFFFFF',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  viewReceiptsText: {
+    marginTop: 12,
+    color: '#111214',
+    fontSize: 16,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 });
 

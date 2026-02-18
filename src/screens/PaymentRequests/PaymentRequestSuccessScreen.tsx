@@ -23,13 +23,14 @@ import * as MediaLibrary from 'expo-media-library';
 import { useDeletePaymentRequest, useGetPaymentRequest } from '@/api/transactionApi';
 import { AppStackParamList } from '@/navigation/AppStack';
 import { formatCurrency } from '@/utils/formatCurrency';
+import { normalizeUsername } from '@/utils/username';
 
 const BRAND_YELLOW = '#FFD300';
 
 type RouteProps = RouteProp<AppStackParamList, 'PaymentRequestSuccess'>;
 type NavigationProp = NativeStackNavigationProp<AppStackParamList>;
 
-const stripUsernamePrefix = (value?: string | null) => (value || 'unknown').replace(/^_+/, '');
+const stripUsernamePrefix = (value?: string | null) => normalizeUsername(value || 'unknown');
 
 const mapStatus = (status: string) => {
   const normalized = status.toLowerCase();

@@ -19,12 +19,13 @@ import { useListPaymentRequests } from '@/api/transactionApi';
 import { AppStackParamList } from '@/navigation/AppStack';
 import type { PaymentRequest } from '@/types/api';
 import { formatCurrency } from '@/utils/formatCurrency';
+import { normalizeUsername } from '@/utils/username';
 
 const BRAND_YELLOW = '#FFD300';
 
 type NavigationProp = NativeStackNavigationProp<AppStackParamList>;
 
-const stripUsernamePrefix = (value?: string | null) => (value || 'unknown').replace(/^_+/, '');
+const stripUsernamePrefix = (value?: string | null) => normalizeUsername(value || 'unknown');
 
 const normalizeStatus = (status: PaymentRequest['display_status']) => {
   if (status === 'paid') {

@@ -18,18 +18,23 @@ import { useNavigation } from '@react-navigation/native';
 import { useCreateTransferList } from '@/api/transactionApi';
 import { useFrequentUsers, useUserSearch } from '@/api/userDiscoveryApi';
 import type { AppNavigationProp } from '@/types/navigation';
+import { normalizeUsername, usernameKey } from '@/utils/username';
 
 const BRAND_YELLOW = '#FFD300';
 const BG_BOTTOM = '#050607';
-
-const stripUsernamePrefix = (username?: string | null) => (username ?? '').replace(/^_+/, '');
 
 const CreateTransferListScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selected, setSelected] = useState<
-    Record<string, { username: string; fullName?: string | null }>
+    Record<
+      string,
+      {
+        username: string;
+        fullName?: string | null;
+      }
+    >
   >({});
   const [listName, setListName] = useState('');
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -56,7 +61,7 @@ const CreateTransferListScreen = () => {
     const unique = [] as typeof source;
 
     source.forEach((user) => {
-      const key = stripUsernamePrefix(user.username).toLowerCase();
+      const key = usernameKey(user.username);
       if (!key || seen.has(key)) {
         return;
       }
@@ -71,8 +76,8 @@ const CreateTransferListScreen = () => {
     const byLetter = new Map<string, typeof suggestions>();
 
     suggestions.forEach((user) => {
-      const clean = stripUsernamePrefix(user.username);
-      const letter = clean.slice(0, 1).toUpperCase() || '#';
+      const normalized = normalizeUsername(user.username);
+      const letter = normalized.slice(0, 1).toUpperCase() || '#';
       const bucket = byLetter.get(letter) ?? [];
       bucket.push(user);
       byLetter.set(letter, bucket);
@@ -83,17 +88,20 @@ const CreateTransferListScreen = () => {
       .map(([letter, users]) => ({
         letter,
         users: users.sort((a, b) =>
-          stripUsernamePrefix(a.username).localeCompare(stripUsernamePrefix(b.username))
+          normalizeUsername(a.username).localeCompare(normalizeUsername(b.username))
         ),
       }));
   }, [suggestions]);
 
   const selectedCount = Object.keys(selected).length;
 
-  const toggleUser = (username: string, fullName?: string | null) => {
-    const clean = stripUsernamePrefix(username);
-    const key = clean.toLowerCase();
+  const toggleUser = (rawUsername: string, fullName?: string | null) => {
+    const username = rawUsername.trim();
+    if (!username) {
+      return;
+    }
 
+    const key = usernameKey(username);
     setSelected((prev) => {
       if (prev[key]) {
         const next = { ...prev };
@@ -109,7 +117,7 @@ const CreateTransferListScreen = () => {
       return {
         ...prev,
         [key]: {
-          username: clean,
+          username,
           fullName,
         },
       };
@@ -135,7 +143,9 @@ const CreateTransferListScreen = () => {
 
     await createMutation.mutateAsync({
       name: trimmedName,
-      member_usernames: Object.values(selected).map((entry) => entry.username),
+      member_usernames: Object.values(selected)
+        .map((entry) => normalizeUsername(entry.username))
+        .filter(Boolean),
     });
   };
 
@@ -216,27 +226,26 @@ const CreateTransferListScreen = () => {
                 <Text style={styles.groupLetter}>{group.letter}</Text>
 
                 {group.users.map((user) => {
-                  const clean = stripUsernamePrefix(user.username);
-                  const key = clean.toLowerCase();
-                  const isSelected = !!selected[key];
+                  const displayUsername = normalizeUsername(user.username);
+                  const isSelected = !!selected[usernameKey(user.username)];
 
                   return (
                     <View key={user.id} style={styles.userCard}>
                       <View style={styles.userInfo}>
                         <View style={styles.userAvatar}>
                           <Text style={styles.userAvatarInitial}>
-                            {clean.slice(0, 1).toUpperCase()}
+                            {displayUsername.slice(0, 1).toUpperCase()}
                           </Text>
                         </View>
                         <View style={styles.userTextWrap}>
-                          <Text style={styles.username}>{clean}</Text>
+                          <Text style={styles.username}>{displayUsername}</Text>
                           <Text style={styles.fullName}>{user.full_name || 'Transfa User'}</Text>
                         </View>
                       </View>
 
                       <TouchableOpacity
                         style={[styles.toggleCircle, isSelected && styles.toggleCircleActive]}
-                        onPress={() => toggleUser(clean, user.full_name)}
+                        onPress={() => toggleUser(user.username, user.full_name)}
                       />
                     </View>
                   );

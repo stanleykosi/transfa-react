@@ -610,23 +610,23 @@ func parsePositiveBoundedInt(raw string, fallback int, max int) int {
 func searchUsersByQuery(ctx context.Context, dbpool *pgxpool.Pool, requesterID string, query string, limit int) ([]userDiscoveryResult, error) {
 	rows, err := dbpool.Query(
 		ctx,
-		`SELECT id, username, full_name
+		`SELECT id, btrim(username) AS username, full_name
 		   FROM users
 		  WHERE id <> $1
 		    AND username IS NOT NULL
 		    AND btrim(username) <> ''
 		    AND (
-		      username ILIKE '%' || $2 || '%'
+		      btrim(username) ILIKE '%' || $2 || '%'
 		      OR COALESCE(full_name, '') ILIKE '%' || $2 || '%'
 		    )
 		  ORDER BY
 		    CASE
-		      WHEN lower(username) = lower($2) THEN 0
-		      WHEN lower(username) LIKE lower($2) || '%' THEN 1
+		      WHEN lower(btrim(username)) = lower($2) THEN 0
+		      WHEN lower(btrim(username)) LIKE lower($2) || '%' THEN 1
 		      WHEN lower(COALESCE(full_name, '')) LIKE lower($2) || '%' THEN 2
 		      ELSE 3
 		    END,
-		    username ASC
+		    btrim(username) ASC
 		  LIMIT $3`,
 		requesterID,
 		query,
@@ -652,7 +652,7 @@ func searchUsersByQuery(ctx context.Context, dbpool *pgxpool.Pool, requesterID s
 func listFrequentUsers(ctx context.Context, dbpool *pgxpool.Pool, requesterID string, limit int) ([]userDiscoveryResult, error) {
 	rows, err := dbpool.Query(
 		ctx,
-		`SELECT u.id, u.username, u.full_name
+		`SELECT u.id, btrim(u.username) AS username, u.full_name
 		   FROM transactions t
 		   JOIN users u ON u.id = t.recipient_id
 		  WHERE t.sender_id = $1
@@ -660,7 +660,7 @@ func listFrequentUsers(ctx context.Context, dbpool *pgxpool.Pool, requesterID st
 		    AND t.status = 'completed'
 		    AND u.username IS NOT NULL
 		    AND btrim(u.username) <> ''
-		  GROUP BY u.id, u.username, u.full_name
+		  GROUP BY u.id, btrim(u.username), u.full_name
 		  ORDER BY COUNT(*) DESC, MAX(t.created_at) DESC
 		  LIMIT $2`,
 		requesterID,
@@ -692,7 +692,7 @@ func listFrequentUsers(ctx context.Context, dbpool *pgxpool.Pool, requesterID st
 	remaining := limit - len(results)
 	fallbackRows, err := dbpool.Query(
 		ctx,
-		`SELECT id, username, full_name
+		`SELECT id, btrim(username) AS username, full_name
 		   FROM users
 		  WHERE id <> $1
 		    AND username IS NOT NULL

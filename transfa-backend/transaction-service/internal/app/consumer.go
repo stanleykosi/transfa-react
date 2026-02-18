@@ -212,7 +212,7 @@ func (c *TransferStatusConsumer) handleSuccess(ctx context.Context, tx *domain.T
 
 	senderUsername := ""
 	if sender != nil {
-		senderUsername = strings.TrimLeft(strings.TrimSpace(sender.Username), "_")
+		senderUsername = strings.TrimSpace(sender.Username)
 	}
 
 	if settledRequest != nil {

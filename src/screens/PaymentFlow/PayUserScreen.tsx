@@ -28,6 +28,7 @@ import {
 } from '@/api/transactionApi';
 import { useSecurityStore } from '@/store/useSecurityStore';
 import { formatCurrency, nairaToKobo } from '@/utils/formatCurrency';
+import { normalizeUsername, usernameKey, usernamesEqual } from '@/utils/username';
 import type {
   BulkP2PTransferFailure,
   BulkP2PTransferResponse,
@@ -68,9 +69,6 @@ const NARRATION_SUGGESTIONS = ['Gift', 'Payment', 'Refund', 'Rent', 'School Fees
 
 const rnBiometrics = new ReactNativeBiometrics();
 
-const stripUsernamePrefix = (username?: string | null): string =>
-  (username ?? '').replace(/^_+/, '');
-
 const parseAmountInputToKobo = (value: string): number => {
   const normalized = value.replace(/,/g, '').trim();
   if (!normalized) {
@@ -97,8 +95,7 @@ const isValidNarration = (value: string) => {
   return length >= 3 && length <= 100;
 };
 
-const usernamesMatch = (a: string, b: string) =>
-  stripUsernamePrefix(a).toLowerCase() === stripUsernamePrefix(b).toLowerCase();
+const usernamesMatch = (a: string, b: string) => usernamesEqual(a, b);
 
 const PayUserScreen = () => {
   const route = useRoute<PayUserRoute>();
@@ -146,7 +143,7 @@ const PayUserScreen = () => {
     if (route.params?.initialRecipient) {
       const initial = route.params.initialRecipient;
       setSelectedUser(initial);
-      setSearchQuery(stripUsernamePrefix(initial.username));
+      setSearchQuery(normalizeUsername(initial.username));
     }
   }, [route.params?.initialRecipient]);
 
@@ -231,7 +228,7 @@ const PayUserScreen = () => {
     if (existingIndex >= 0) {
       const existing = savedTransfers[existingIndex];
       setSelectedUser(existing.recipient);
-      setSearchQuery(stripUsernamePrefix(existing.recipient.username));
+      setSearchQuery(normalizeUsername(existing.recipient.username));
       setAmountInput(amountInputFromKobo(existing.amountKobo));
       setNarrationInput(existing.narration);
       setEditingIndex(existingIndex);
@@ -240,7 +237,7 @@ const PayUserScreen = () => {
     }
 
     setSelectedUser(recipient);
-    setSearchQuery(stripUsernamePrefix(recipient.username));
+    setSearchQuery(normalizeUsername(recipient.username));
     setAmountInput('');
     setNarrationInput('');
     setEditingIndex(null);
@@ -305,7 +302,7 @@ const PayUserScreen = () => {
     }
 
     setSelectedUser(item.recipient);
-    setSearchQuery(stripUsernamePrefix(item.recipient.username));
+    setSearchQuery(normalizeUsername(item.recipient.username));
     setAmountInput(amountInputFromKobo(item.amountKobo));
     setNarrationInput(item.narration);
     setEditingIndex(index);
@@ -328,13 +325,11 @@ const PayUserScreen = () => {
     response: BulkP2PTransferResponse
   ): ResultState['receipts'] => {
     const failedUsernames = new Set(
-      response.failed_transfers.map((entry) =>
-        stripUsernamePrefix(entry.recipient_username).toLowerCase()
-      )
+      response.failed_transfers.map((entry) => usernameKey(entry.recipient_username))
     );
 
     const successfulDrafts = pending.filter(
-      (entry) => !failedUsernames.has(stripUsernamePrefix(entry.recipient.username).toLowerCase())
+      (entry) => !failedUsernames.has(usernameKey(entry.recipient.username))
     );
 
     return response.successful_transfers.map((transfer, index) => {
@@ -345,7 +340,7 @@ const PayUserScreen = () => {
         amount: transfer.amount ?? draft?.amountKobo ?? 0,
         fee: transfer.fee ?? transferFeeKobo,
         description: draft?.narration ?? '',
-        recipientUsername: stripUsernamePrefix(draft?.recipient.username ?? ''),
+        recipientUsername: normalizeUsername(draft?.recipient.username ?? ''),
       };
     });
   };
@@ -372,7 +367,7 @@ const PayUserScreen = () => {
       if (transfers.length === 1) {
         const entry = transfers[0];
         const response = await p2pTransfer.mutateAsync({
-          recipient_username: stripUsernamePrefix(entry.recipient.username),
+          recipient_username: normalizeUsername(entry.recipient.username),
           amount: entry.amountKobo,
           description: entry.narration,
           transaction_pin: transactionPin,
@@ -393,7 +388,7 @@ const PayUserScreen = () => {
               amount: response.amount ?? entry.amountKobo,
               fee: response.fee ?? transferFeeKobo,
               description: entry.narration,
-              recipientUsername: stripUsernamePrefix(entry.recipient.username),
+              recipientUsername: normalizeUsername(entry.recipient.username),
             },
           ],
         });
@@ -403,7 +398,7 @@ const PayUserScreen = () => {
 
       const bulkResponse = await bulkP2PTransfer.mutateAsync({
         transfers: transfers.map((entry) => ({
-          recipient_username: stripUsernamePrefix(entry.recipient.username),
+          recipient_username: normalizeUsername(entry.recipient.username),
           amount: entry.amountKobo,
           description: entry.narration,
         })),
@@ -431,10 +426,10 @@ const PayUserScreen = () => {
       if (bulkResponse.status === 'partial_failed') {
         // Keep failed recipients in composer for quick retry.
         const failedSet = new Set(
-          failures.map((failure) => stripUsernamePrefix(failure.recipient_username).toLowerCase())
+          failures.map((failure) => usernameKey(failure.recipient_username))
         );
         const failedDrafts = transfers.filter((entry) =>
-          failedSet.has(stripUsernamePrefix(entry.recipient.username).toLowerCase())
+          failedSet.has(usernameKey(entry.recipient.username))
         );
         setSavedTransfers(failedDrafts);
         clearComposer();
@@ -502,9 +497,9 @@ const PayUserScreen = () => {
       return;
     }
 
-    const currentUsername = stripUsernamePrefix(userProfile?.username).toLowerCase();
+    const currentUsername = usernameKey(userProfile?.username);
     const containsSelf = effectiveTransfers.some(
-      (entry) => stripUsernamePrefix(entry.recipient.username).toLowerCase() === currentUsername
+      (entry) => usernameKey(entry.recipient.username) === currentUsername
     );
     if (containsSelf) {
       setFormError('You cannot transfer to your own username from this flow.');
@@ -576,14 +571,14 @@ const PayUserScreen = () => {
 
   const activeSearchResults = searchData?.users ?? [];
 
-  const currentUserDisplay = stripUsernamePrefix(userProfile?.username) || 'you';
+  const currentUserDisplay = normalizeUsername(userProfile?.username) || 'you';
   const recipientDisplay =
     pendingTransfers.length === 1
-      ? stripUsernamePrefix(pendingTransfers[0].recipient.username)
+      ? normalizeUsername(pendingTransfers[0].recipient.username)
       : pendingTransfers.length > 1
-        ? `${stripUsernamePrefix(pendingTransfers[0].recipient.username)}+${pendingTransfers.length - 1} users`
+        ? `${normalizeUsername(pendingTransfers[0].recipient.username)}+${pendingTransfers.length - 1} users`
         : selectedUser
-          ? stripUsernamePrefix(selectedUser.username)
+          ? normalizeUsername(selectedUser.username)
           : 'Recipient';
 
   const hasAtLeastOneTransfer = effectiveTransfers.length > 0;
@@ -720,13 +715,13 @@ const PayUserScreen = () => {
                         <Text style={styles.searchResultAvatarInitial}>
                           {(
                             user.full_name?.slice(0, 1) ||
-                            stripUsernamePrefix(user.username).slice(0, 1)
+                            normalizeUsername(user.username).slice(0, 1)
                           ).toUpperCase()}
                         </Text>
                       </View>
                       <View style={styles.searchResultTextWrap}>
                         <Text style={styles.searchResultUsername}>
-                          {stripUsernamePrefix(user.username)}
+                          {normalizeUsername(user.username)}
                         </Text>
                         <Text style={styles.searchResultFullName} numberOfLines={1}>
                           {user.full_name || 'Transfa User'}
@@ -746,13 +741,13 @@ const PayUserScreen = () => {
                       <Text style={styles.selectedAvatarInitial}>
                         {(
                           selectedUser.full_name?.slice(0, 1) ||
-                          stripUsernamePrefix(selectedUser.username).slice(0, 1)
+                          normalizeUsername(selectedUser.username).slice(0, 1)
                         ).toUpperCase()}
                       </Text>
                     </View>
                     <View>
                       <Text style={styles.selectedUsername}>
-                        {stripUsernamePrefix(selectedUser.username)}
+                        {normalizeUsername(selectedUser.username)}
                       </Text>
                       <Text style={styles.selectedFullName} numberOfLines={1}>
                         {selectedUser.full_name || 'Transfa User'}
@@ -871,13 +866,13 @@ const PayUserScreen = () => {
                           <Text style={styles.outgoingAvatarInitial}>
                             {(
                               item.recipient.full_name?.slice(0, 1) ||
-                              stripUsernamePrefix(item.recipient.username).slice(0, 1)
+                              normalizeUsername(item.recipient.username).slice(0, 1)
                             ).toUpperCase()}
                           </Text>
                         </View>
                         <View style={styles.outgoingTextWrap}>
                           <Text style={styles.outgoingUsername}>
-                            {stripUsernamePrefix(item.recipient.username)}
+                            {normalizeUsername(item.recipient.username)}
                           </Text>
                           <Text style={styles.outgoingFullName} numberOfLines={1}>
                             {item.recipient.full_name || 'Transfa User'}
@@ -1136,7 +1131,7 @@ const PayUserScreen = () => {
                     style={styles.failureListText}
                     numberOfLines={2}
                   >
-                    • {stripUsernamePrefix(failure.recipient_username)}: {failure.error}
+                    • {normalizeUsername(failure.recipient_username)}: {failure.error}
                   </Text>
                 ))}
               </View>

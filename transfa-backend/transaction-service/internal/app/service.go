@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -79,6 +80,7 @@ var (
 	ErrPaymentRequestNotFound           = errors.New("payment request not found")
 	ErrPaymentRequestNotPending         = errors.New("payment request is not pending")
 	ErrInvalidPaymentRequestDecline     = errors.New("decline reason cannot exceed 240 characters")
+	usernamePattern                     = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._]{1,18}[a-z0-9])?$`)
 )
 
 // Service provides the core business logic for transactions.
@@ -185,11 +187,12 @@ func (s *Service) VerifyTransactionPIN(ctx context.Context, userID uuid.UUID, pi
 
 // ProcessP2PTransfer handles the logic for a peer-to-peer transfer.
 func (s *Service) ProcessP2PTransfer(ctx context.Context, senderID uuid.UUID, req domain.P2PTransferRequest) (*domain.Transaction, error) {
-	req.RecipientUsername = strings.TrimSpace(req.RecipientUsername)
-	req.Description = strings.TrimSpace(req.Description)
-	if req.RecipientUsername == "" {
-		return nil, ErrInvalidRecipient
+	normalizedRecipient, err := normalizeAndValidateUsernameInput(req.RecipientUsername)
+	if err != nil {
+		return nil, err
 	}
+	req.RecipientUsername = normalizedRecipient
+	req.Description = strings.TrimSpace(req.Description)
 	if req.Amount <= 0 {
 		return nil, ErrInvalidTransferAmount
 	}
@@ -431,11 +434,11 @@ func (s *Service) ProcessBulkP2PTransfer(ctx context.Context, senderID uuid.UUID
 	var estimatedTotalDebit int64
 
 	for _, item := range items {
-		recipient := strings.TrimSpace(item.RecipientUsername)
-		description := strings.TrimSpace(item.Description)
-		if recipient == "" {
-			return nil, ErrInvalidRecipient
+		recipient, normalizeErr := normalizeAndValidateUsernameInput(item.RecipientUsername)
+		if normalizeErr != nil {
+			return nil, normalizeErr
 		}
+		description := strings.TrimSpace(item.Description)
 		if item.Amount <= 0 {
 			return nil, ErrInvalidTransferAmount
 		}
@@ -443,11 +446,10 @@ func (s *Service) ProcessBulkP2PTransfer(ctx context.Context, senderID uuid.UUID
 			return nil, ErrInvalidDescription
 		}
 
-		normalized := strings.ToLower(recipient)
-		if _, exists := seenRecipients[normalized]; exists {
+		if _, exists := seenRecipients[recipient]; exists {
 			return nil, ErrDuplicateRecipient
 		}
-		seenRecipients[normalized] = struct{}{}
+		seenRecipients[recipient] = struct{}{}
 
 		estimatedTotalDebit += item.Amount + s.transactionFeeKobo
 		requests = append(requests, domain.P2PTransferRequest{
@@ -935,9 +937,9 @@ func (s *Service) GetTransactionHistory(ctx context.Context, userID uuid.UUID) (
 
 // GetTransactionHistoryWithUser retrieves transactions between the authenticated user and one counterparty.
 func (s *Service) GetTransactionHistoryWithUser(ctx context.Context, userID uuid.UUID, counterpartyUsername string, limit int, offset int) (*domain.User, []domain.Transaction, error) {
-	normalized := strings.TrimSpace(counterpartyUsername)
-	if normalized == "" {
-		return nil, nil, ErrInvalidRecipient
+	normalized, err := normalizeAndValidateUsernameInput(counterpartyUsername)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	counterparty, err := s.repo.FindUserByUsername(ctx, normalized)
@@ -1082,7 +1084,10 @@ func (s *Service) CreatePaymentRequest(ctx context.Context, creatorID uuid.UUID,
 			return nil, ErrInvalidPaymentRequestRecipient
 		}
 
-		recipientLookup := strings.ToLower(strings.TrimSpace(*payload.RecipientUsername))
+		recipientLookup, normalizeErr := normalizeAndValidateUsernameInput(*payload.RecipientUsername)
+		if normalizeErr != nil {
+			return nil, ErrInvalidPaymentRequestRecipient
+		}
 		recipient, err := s.repo.FindUserByUsername(ctx, recipientLookup)
 		if err != nil {
 			return nil, err
@@ -1610,8 +1615,25 @@ func optionalUUIDString(value *uuid.UUID) string {
 	return value.String()
 }
 
+func normalizeUsernameInput(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+func normalizeAndValidateUsernameInput(raw string) (string, error) {
+	username := normalizeUsernameInput(raw)
+	if username == "" {
+		return "", ErrInvalidRecipient
+	}
+	if !usernamePattern.MatchString(username) {
+		return "", ErrInvalidRecipient
+	}
+	return username, nil
+}
+
+// Legacy name kept because notification payloads already depend on this function.
+// It now only trims whitespace and does not remove underscore prefixes.
 func stripUsernamePrefix(username string) string {
-	return strings.TrimLeft(strings.TrimSpace(username), "_")
+	return strings.TrimSpace(username)
 }
 
 func buildRequestSettlementDescription(title string) string {
@@ -2126,16 +2148,15 @@ func (s *Service) resolveTransferListMemberIDs(ctx context.Context, ownerID uuid
 	seen := make(map[string]struct{}, len(usernames))
 	memberIDs := make([]uuid.UUID, 0, len(usernames))
 	for _, rawUsername := range usernames {
-		username := strings.TrimSpace(rawUsername)
-		if username == "" {
-			return nil, ErrInvalidRecipient
+		username, normalizeErr := normalizeAndValidateUsernameInput(rawUsername)
+		if normalizeErr != nil {
+			return nil, normalizeErr
 		}
 
-		normalized := strings.ToLower(username)
-		if _, exists := seen[normalized]; exists {
+		if _, exists := seen[username]; exists {
 			return nil, ErrTransferListDuplicateMember
 		}
-		seen[normalized] = struct{}{}
+		seen[username] = struct{}{}
 
 		user, err := s.repo.FindUserByUsername(ctx, username)
 		if err != nil {
@@ -2214,9 +2235,9 @@ func (s *Service) DeleteTransferList(ctx context.Context, ownerID uuid.UUID, lis
 }
 
 func (s *Service) ToggleTransferListMember(ctx context.Context, ownerID uuid.UUID, listID uuid.UUID, username string) (*domain.ToggleTransferListMemberResult, error) {
-	trimmedUsername := strings.TrimSpace(username)
-	if trimmedUsername == "" {
-		return nil, ErrInvalidRecipient
+	trimmedUsername, err := normalizeAndValidateUsernameInput(username)
+	if err != nil {
+		return nil, err
 	}
 
 	list, err := s.repo.GetTransferListByID(ctx, ownerID, listID)

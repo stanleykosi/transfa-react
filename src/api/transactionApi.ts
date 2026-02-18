@@ -59,6 +59,7 @@ import {
   ToggleTransferListMemberPayload,
   ToggleTransferListMemberResponse,
 } from '@/types/api';
+import { normalizeUsername } from '@/utils/username';
 
 // Transaction service URL from environment variables with fallback
 const TRANSACTION_SERVICE_URL =
@@ -371,7 +372,7 @@ export const useTransactionHistory = () => {
 };
 
 export const useTransactionHistoryWithUser = (username?: string, limit = 20, offset = 0) => {
-  const normalizedUsername = (username || '').trim();
+  const normalizedUsername = normalizeUsername(username);
 
   const fetchHistory = async (): Promise<BilateralTransactionHistoryResponse> => {
     const { data } = await apiClient.get<BilateralTransactionHistoryResponse>(
@@ -832,10 +833,10 @@ export const useCreateTransferList = (
   return useMutation<TransferList, Error, CreateTransferListPayload>({
     ...restOptions,
     mutationFn,
-    onSuccess: (created, variables, context) => {
+    onSuccess: (created, variables, onMutateResult, context) => {
       queryClient.invalidateQueries({ queryKey: [TRANSFER_LISTS_QUERY_KEY] });
       queryClient.setQueryData([TRANSFER_LISTS_QUERY_KEY, 'detail', created.id], created);
-      onSuccess?.(created, variables, context);
+      onSuccess?.(created, variables, onMutateResult, context);
     },
   });
 };
@@ -870,10 +871,10 @@ export const useUpdateTransferList = (
   return useMutation<TransferList, Error, { listId: string; payload: UpdateTransferListPayload }>({
     ...restOptions,
     mutationFn,
-    onSuccess: (updated, variables, context) => {
+    onSuccess: (updated, variables, onMutateResult, context) => {
       queryClient.invalidateQueries({ queryKey: [TRANSFER_LISTS_QUERY_KEY] });
       queryClient.setQueryData([TRANSFER_LISTS_QUERY_KEY, 'detail', updated.id], updated);
-      onSuccess?.(updated, variables, context);
+      onSuccess?.(updated, variables, onMutateResult, context);
     },
   });
 };
@@ -893,12 +894,12 @@ export const useDeleteTransferList = (
   return useMutation<void, Error, { listId: string }>({
     ...restOptions,
     mutationFn,
-    onSuccess: (data, variables, context) => {
+    onSuccess: (data, variables, onMutateResult, context) => {
       queryClient.invalidateQueries({ queryKey: [TRANSFER_LISTS_QUERY_KEY] });
       queryClient.removeQueries({
         queryKey: [TRANSFER_LISTS_QUERY_KEY, 'detail', variables.listId],
       });
-      onSuccess?.(data, variables, context);
+      onSuccess?.(data, variables, onMutateResult, context);
     },
   });
 };
@@ -937,10 +938,10 @@ export const useToggleTransferListMember = (
   >({
     ...restOptions,
     mutationFn,
-    onSuccess: (result, variables, context) => {
+    onSuccess: (result, variables, onMutateResult, context) => {
       queryClient.invalidateQueries({ queryKey: [TRANSFER_LISTS_QUERY_KEY] });
       queryClient.setQueryData([TRANSFER_LISTS_QUERY_KEY, 'detail', variables.listId], result.list);
-      onSuccess?.(result, variables, context);
+      onSuccess?.(result, variables, onMutateResult, context);
     },
   });
 };

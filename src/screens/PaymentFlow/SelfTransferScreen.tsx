@@ -29,6 +29,7 @@ import type { Beneficiary } from '@/types/api';
 import type { AppNavigationProp } from '@/types/navigation';
 import { useSecurityStore } from '@/store/useSecurityStore';
 import { formatCurrency, nairaToKobo } from '@/utils/formatCurrency';
+import { normalizeUsername } from '@/utils/username';
 
 const BRAND_YELLOW = '#FFD300';
 const BG_BOTTOM = '#050607';
@@ -47,8 +48,7 @@ type ResultState = {
   description?: string;
 };
 
-const stripUsernamePrefix = (username?: string | null): string =>
-  (username ?? '').replace(/^_+/, '');
+const stripUsernamePrefix = (username?: string | null): string => normalizeUsername(username);
 
 const parseAmountInputToKobo = (value: string): number => {
   const normalized = value.replace(/,/g, '').trim();

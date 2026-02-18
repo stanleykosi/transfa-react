@@ -18,6 +18,7 @@ import { useGetTransferList, useToggleTransferListMember } from '@/api/transacti
 import { useUserSearch } from '@/api/userDiscoveryApi';
 import type { AppNavigationProp } from '@/types/navigation';
 import type { AppStackParamList } from '@/navigation/AppStack';
+import { normalizeUsername, usernameKey } from '@/utils/username';
 
 const BRAND_YELLOW = '#FFD300';
 const BG_BOTTOM = '#050607';
@@ -28,8 +29,6 @@ type GroupedMember = {
   letter: string;
   users: Array<{ user_id: string; username: string; full_name?: string | null }>;
 };
-
-const stripUsernamePrefix = (username?: string | null) => (username ?? '').replace(/^_+/, '');
 
 const TransferListDetailScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
@@ -51,17 +50,15 @@ const TransferListDetailScreen = () => {
 
   const memberUsernameSet = useMemo(() => {
     const values = new Set<string>();
-    (list?.members ?? []).forEach((member) =>
-      values.add(stripUsernamePrefix(member.username).toLowerCase())
-    );
+    (list?.members ?? []).forEach((member) => values.add(usernameKey(member.username)));
     return values;
   }, [list?.members]);
 
   const groupedMembers = useMemo<GroupedMember[]>(() => {
     const byLetter = new Map<string, GroupedMember['users']>();
     (list?.members ?? []).forEach((member) => {
-      const cleanUsername = stripUsernamePrefix(member.username);
-      const letter = cleanUsername.slice(0, 1).toUpperCase() || '#';
+      const displayUsername = normalizeUsername(member.username);
+      const letter = displayUsername.slice(0, 1).toUpperCase() || '#';
       const group = byLetter.get(letter) ?? [];
       group.push(member);
       byLetter.set(letter, group);
@@ -72,18 +69,18 @@ const TransferListDetailScreen = () => {
       .map(([letter, users]) => ({
         letter,
         users: users.sort((a, b) =>
-          stripUsernamePrefix(a.username).localeCompare(stripUsernamePrefix(b.username))
+          normalizeUsername(a.username).localeCompare(normalizeUsername(b.username))
         ),
       }));
   }, [list?.members]);
 
   const handleToggleUser = async (username: string) => {
-    const cleanUsername = stripUsernamePrefix(username);
-    setPendingUsername(cleanUsername.toLowerCase());
+    const normalizedUsername = usernameKey(username);
+    setPendingUsername(normalizedUsername);
     try {
       await toggleMutation.mutateAsync({
         listId,
-        payload: { username: cleanUsername },
+        payload: { username: normalizeUsername(username) },
       });
       await refetch();
     } finally {
@@ -143,27 +140,28 @@ const TransferListDetailScreen = () => {
                   <ActivityIndicator size="small" color={BRAND_YELLOW} />
                 ) : (
                   (searchData?.users ?? []).map((user) => {
-                    const clean = stripUsernamePrefix(user.username);
-                    const inList = memberUsernameSet.has(clean.toLowerCase());
-                    const pending = pendingUsername === clean.toLowerCase();
+                    const displayUsername = normalizeUsername(user.username);
+                    const normalizedUsername = usernameKey(user.username);
+                    const inList = memberUsernameSet.has(normalizedUsername);
+                    const pending = pendingUsername === normalizedUsername;
 
                     return (
                       <View key={user.id} style={styles.userCard}>
                         <View style={styles.userInfo}>
                           <View style={styles.userAvatar}>
                             <Text style={styles.userAvatarInitial}>
-                              {clean.slice(0, 1).toUpperCase()}
+                              {displayUsername.slice(0, 1).toUpperCase()}
                             </Text>
                           </View>
                           <View style={styles.userTextWrap}>
-                            <Text style={styles.username}>{clean}</Text>
+                            <Text style={styles.username}>{displayUsername}</Text>
                             <Text style={styles.fullName}>{user.full_name || 'Transfa User'}</Text>
                           </View>
                         </View>
 
                         <TouchableOpacity
                           style={[styles.toggleCircle, inList && styles.toggleCircleActive]}
-                          onPress={() => handleToggleUser(clean)}
+                          onPress={() => handleToggleUser(user.username)}
                           disabled={pending}
                         >
                           {pending ? (
@@ -189,18 +187,18 @@ const TransferListDetailScreen = () => {
                 <View key={group.letter}>
                   <Text style={styles.groupLetter}>{group.letter}</Text>
                   {group.users.map((member) => {
-                    const clean = stripUsernamePrefix(member.username);
-                    const pending = pendingUsername === clean.toLowerCase();
+                    const displayUsername = normalizeUsername(member.username);
+                    const pending = pendingUsername === usernameKey(member.username);
                     return (
                       <View key={member.user_id} style={styles.userCard}>
                         <View style={styles.userInfo}>
                           <View style={styles.userAvatar}>
                             <Text style={styles.userAvatarInitial}>
-                              {clean.slice(0, 1).toUpperCase()}
+                              {displayUsername.slice(0, 1).toUpperCase()}
                             </Text>
                           </View>
                           <View style={styles.userTextWrap}>
-                            <Text style={styles.username}>{clean}</Text>
+                            <Text style={styles.username}>{displayUsername}</Text>
                             <Text style={styles.fullName}>
                               {member.full_name || 'Transfa User'}
                             </Text>
@@ -209,7 +207,7 @@ const TransferListDetailScreen = () => {
 
                         <TouchableOpacity
                           style={[styles.toggleCircle, styles.toggleCircleActive]}
-                          onPress={() => handleToggleUser(clean)}
+                          onPress={() => handleToggleUser(member.username)}
                           disabled={pending}
                         >
                           {pending ? <ActivityIndicator size="small" color="#0F1012" /> : null}

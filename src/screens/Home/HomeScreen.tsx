@@ -24,6 +24,7 @@ import {
 import TopUpAccountModal from '@/components/TopUpAccountModal';
 import { useFrequentUsers } from '@/api/userDiscoveryApi';
 import { formatCurrency } from '@/utils/formatCurrency';
+import { normalizeUsername } from '@/utils/username';
 import type { TransactionHistoryItem, UserDiscoveryResult } from '@/types/api';
 import type { AppNavigationProp } from '@/types/navigation';
 
@@ -35,7 +36,7 @@ const CARD_BORDER = 'rgba(255,255,255,0.06)';
 const avatarPalette = ['#ABABFD', '#A8E6B5', '#F4CE9B', '#F3ABA7', '#BDE3FF', '#FFDCC0'];
 
 const stripUsernamePrefix = (username?: string | null): string =>
-  (username ?? 'new_user').replace(/^_+/, '');
+  normalizeUsername(username ?? 'new_user');
 
 const HomeScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();

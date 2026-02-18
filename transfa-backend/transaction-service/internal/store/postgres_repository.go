@@ -68,7 +68,7 @@ func (r *PostgresRepository) FindUserIDByClerkUserID(ctx context.Context, clerkU
 // FindUserByUsername retrieves a user from the database by their username.
 func (r *PostgresRepository) FindUserByUsername(ctx context.Context, username string) (*domain.User, error) {
 	var user domain.User
-	query := `SELECT id, username, full_name, allow_sending, anchor_customer_id FROM users WHERE lower(username) = lower($1)`
+	query := `SELECT id, btrim(username), full_name, allow_sending, anchor_customer_id FROM users WHERE lower(btrim(username)) = lower(btrim($1))`
 	err := r.db.QueryRow(ctx, query, username).Scan(&user.ID, &user.Username, &user.FullName, &user.AllowSending, &user.AnchorCustomerID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -82,7 +82,7 @@ func (r *PostgresRepository) FindUserByUsername(ctx context.Context, username st
 // FindUserByID retrieves a user from the database by their ID.
 func (r *PostgresRepository) FindUserByID(ctx context.Context, userID uuid.UUID) (*domain.User, error) {
 	var user domain.User
-	query := `SELECT id, username, full_name, allow_sending, anchor_customer_id FROM users WHERE id = $1`
+	query := `SELECT id, btrim(username), full_name, allow_sending, anchor_customer_id FROM users WHERE id = $1`
 	err := r.db.QueryRow(ctx, query, userID).Scan(&user.ID, &user.Username, &user.FullName, &user.AllowSending, &user.AnchorCustomerID)
 	if err != nil {
 		if err == pgx.ErrNoRows {
@@ -1193,13 +1193,13 @@ func (r *PostgresRepository) ListPaymentRequestsByCreator(ctx context.Context, c
         SELECT
             pr.id,
             pr.creator_id,
-            cu.username AS creator_username,
+            btrim(cu.username) AS creator_username,
             cu.full_name AS creator_full_name,
             pr.status,
             pr.request_type,
             pr.title,
             pr.recipient_user_id,
-            COALESCE(pr.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(NULLIF(btrim(pr.recipient_username_snapshot), ''), btrim(ru.username)) AS recipient_username,
             COALESCE(pr.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
             pr.amount,
             pr.description,
@@ -1224,7 +1224,7 @@ func (r *PostgresRepository) ListPaymentRequestsByCreator(ctx context.Context, c
 	if opts.Search != "" {
 		query += fmt.Sprintf(`
           AND (
-            COALESCE(pr.recipient_username_snapshot, ru.username, '') ILIKE '%%' || $%d || '%%'
+            COALESCE(NULLIF(btrim(pr.recipient_username_snapshot), ''), btrim(ru.username), '') ILIKE '%%' || $%d || '%%'
             OR COALESCE(pr.recipient_full_name_snapshot, ru.full_name, '') ILIKE '%%' || $%d || '%%'
             OR pr.title ILIKE '%%' || $%d || '%%'
           )
@@ -1286,13 +1286,13 @@ func (r *PostgresRepository) GetPaymentRequestByID(ctx context.Context, requestI
         SELECT
             pr.id,
             pr.creator_id,
-            cu.username AS creator_username,
+            btrim(cu.username) AS creator_username,
             cu.full_name AS creator_full_name,
             pr.status,
             pr.request_type,
             pr.title,
             pr.recipient_user_id,
-            COALESCE(pr.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(NULLIF(btrim(pr.recipient_username_snapshot), ''), btrim(ru.username)) AS recipient_username,
             COALESCE(pr.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
             pr.amount,
             pr.description,
@@ -1379,13 +1379,13 @@ func (r *PostgresRepository) ListIncomingPaymentRequests(ctx context.Context, re
         SELECT
             pr.id,
             pr.creator_id,
-            cu.username AS creator_username,
+            btrim(cu.username) AS creator_username,
             cu.full_name AS creator_full_name,
             pr.status,
             pr.request_type,
             pr.title,
             pr.recipient_user_id,
-            COALESCE(pr.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(NULLIF(btrim(pr.recipient_username_snapshot), ''), btrim(ru.username)) AS recipient_username,
             COALESCE(pr.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
             pr.amount,
             pr.description,
@@ -1418,7 +1418,7 @@ func (r *PostgresRepository) ListIncomingPaymentRequests(ctx context.Context, re
 	if search := strings.TrimSpace(opts.Search); search != "" {
 		query += fmt.Sprintf(`
           AND (
-            COALESCE(cu.username, '') ILIKE '%%' || $%d || '%%'
+            COALESCE(btrim(cu.username), '') ILIKE '%%' || $%d || '%%'
             OR COALESCE(cu.full_name, '') ILIKE '%%' || $%d || '%%'
             OR pr.title ILIKE '%%' || $%d || '%%'
           )
@@ -1478,13 +1478,13 @@ func (r *PostgresRepository) GetIncomingPaymentRequestByID(ctx context.Context, 
         SELECT
             pr.id,
             pr.creator_id,
-            cu.username AS creator_username,
+            btrim(cu.username) AS creator_username,
             cu.full_name AS creator_full_name,
             pr.status,
             pr.request_type,
             pr.title,
             pr.recipient_user_id,
-            COALESCE(pr.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(NULLIF(btrim(pr.recipient_username_snapshot), ''), btrim(ru.username)) AS recipient_username,
             COALESCE(pr.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
             pr.amount,
             pr.description,
@@ -1561,13 +1561,13 @@ func (r *PostgresRepository) ClaimIncomingPaymentRequestForPayment(ctx context.C
         SELECT
             c.id,
             c.creator_id,
-            cu.username AS creator_username,
+            btrim(cu.username) AS creator_username,
             cu.full_name AS creator_full_name,
             c.status,
             c.request_type,
             c.title,
             c.recipient_user_id,
-            COALESCE(c.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(NULLIF(btrim(c.recipient_username_snapshot), ''), btrim(ru.username)) AS recipient_username,
             COALESCE(c.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
             c.amount,
             c.description,
@@ -1636,13 +1636,13 @@ func (r *PostgresRepository) AttachProcessingPaymentRequestSettlementTransaction
         SELECT
             u.id,
             u.creator_id,
-            cu.username AS creator_username,
+            btrim(cu.username) AS creator_username,
             cu.full_name AS creator_full_name,
             u.status,
             u.request_type,
             u.title,
             u.recipient_user_id,
-            COALESCE(u.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(NULLIF(btrim(u.recipient_username_snapshot), ''), btrim(ru.username)) AS recipient_username,
             COALESCE(u.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
             u.amount,
             u.description,
@@ -1716,13 +1716,13 @@ func (r *PostgresRepository) MarkPaymentRequestFulfilled(ctx context.Context, re
         SELECT
             u.id,
             u.creator_id,
-            cu.username AS creator_username,
+            btrim(cu.username) AS creator_username,
             cu.full_name AS creator_full_name,
             u.status,
             u.request_type,
             u.title,
             u.recipient_user_id,
-            COALESCE(u.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(NULLIF(btrim(u.recipient_username_snapshot), ''), btrim(ru.username)) AS recipient_username,
             COALESCE(u.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
             u.amount,
             u.description,
@@ -1794,13 +1794,13 @@ func (r *PostgresRepository) MarkPaymentRequestFulfilledBySettlementTransaction(
         SELECT
             u.id,
             u.creator_id,
-            cu.username AS creator_username,
+            btrim(cu.username) AS creator_username,
             cu.full_name AS creator_full_name,
             u.status,
             u.request_type,
             u.title,
             u.recipient_user_id,
-            COALESCE(u.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(NULLIF(btrim(u.recipient_username_snapshot), ''), btrim(ru.username)) AS recipient_username,
             COALESCE(u.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
             u.amount,
             u.description,
@@ -1905,13 +1905,13 @@ func (r *PostgresRepository) DeclineIncomingPaymentRequest(ctx context.Context, 
         SELECT
             u.id,
             u.creator_id,
-            cu.username AS creator_username,
+            btrim(cu.username) AS creator_username,
             cu.full_name AS creator_full_name,
             u.status,
             u.request_type,
             u.title,
             u.recipient_user_id,
-            COALESCE(u.recipient_username_snapshot, ru.username) AS recipient_username,
+            COALESCE(NULLIF(btrim(u.recipient_username_snapshot), ''), btrim(ru.username)) AS recipient_username,
             COALESCE(u.recipient_full_name_snapshot, ru.full_name) AS recipient_full_name,
             u.amount,
             u.description,
@@ -2261,7 +2261,7 @@ func (r *PostgresRepository) FindMoneyDropByID(ctx context.Context, dropID uuid.
 func (r *PostgresRepository) FindMoneyDropCreatorByDropID(ctx context.Context, dropID uuid.UUID) (*domain.User, error) {
 	var user domain.User
 	query := `
-		SELECT u.id, u.username, u.allow_sending, u.anchor_customer_id
+		SELECT u.id, btrim(u.username) AS username, u.allow_sending, u.anchor_customer_id
 		FROM users u
 		INNER JOIN money_drops md ON u.id = md.creator_id
 		WHERE md.id = $1
@@ -2475,7 +2475,7 @@ func (r *PostgresRepository) ListTransferListsByOwner(ctx context.Context, owner
 			l.name,
 			COUNT(m.member_user_id)::int AS member_count,
 			COALESCE(
-				array_remove(array_agg(u.username ORDER BY lower(u.username)), NULL),
+				array_remove(array_agg(btrim(u.username) ORDER BY lower(btrim(u.username))), NULL),
 				ARRAY[]::text[]
 			) AS member_usernames,
 			l.created_at,
@@ -2538,11 +2538,11 @@ func (r *PostgresRepository) GetTransferListByID(ctx context.Context, ownerID uu
 	}
 
 	memberQuery := `
-		SELECT u.id, u.username, u.full_name, m.created_at
+		SELECT u.id, btrim(u.username) AS username, u.full_name, m.created_at
 		FROM transfer_list_members m
 		JOIN users u ON u.id = m.member_user_id
 		WHERE m.list_id = $1
-		ORDER BY lower(u.username) ASC
+		ORDER BY lower(btrim(u.username)) ASC
 	`
 	rows, err := r.db.Query(ctx, memberQuery, listID)
 	if err != nil {

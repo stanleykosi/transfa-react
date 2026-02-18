@@ -34,6 +34,7 @@ import {
   UserDiscoveryResponse,
 } from '@/types/api';
 import { useAuth, useUser } from '@clerk/clerk-expo';
+import { normalizeUsername } from '@/utils/username';
 
 export const submitOnboarding = async (payload: OnboardingPayload): Promise<OnboardingResponse> => {
   const body = {
@@ -160,8 +161,9 @@ export const fetchAccountTypeOptions = async (): Promise<AccountTypeOptionsRespo
 };
 
 export const searchUsers = async (query: string, limit = 10): Promise<UserDiscoveryResponse> => {
+  const normalizedQuery = normalizeUsername(query);
   const { data } = await apiClient.get<UserDiscoveryResponse>('/users/search', {
-    params: { q: query, limit },
+    params: { q: normalizedQuery, limit },
   });
   return data;
 };

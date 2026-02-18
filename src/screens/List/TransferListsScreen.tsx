@@ -15,11 +15,12 @@ import { useNavigation } from '@react-navigation/native';
 
 import { useListTransferLists } from '@/api/transactionApi';
 import type { AppNavigationProp } from '@/types/navigation';
+import { normalizeUsername } from '@/utils/username';
 
 const BRAND_YELLOW = '#FFD300';
 const BG_BOTTOM = '#050607';
 
-const stripUsernamePrefix = (username: string) => username.replace(/^_+/, '');
+const stripUsernamePrefix = (username: string) => normalizeUsername(username);
 
 const TransferListsScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();

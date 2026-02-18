@@ -23,6 +23,7 @@ import { useClaimMoneyDrop, useMoneyDropDetails } from '@/api/transactionApi';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { AppNavigationProp } from '@/types/navigation';
 import { Ionicons } from '@expo/vector-icons';
+import { normalizeUsername } from '@/utils/username';
 
 type ClaimDropScreenRouteProp = RouteProp<AppStackParamList, 'ClaimDrop'>;
 
@@ -40,15 +41,16 @@ const ClaimDropScreen = () => {
     isLoading: isLoadingDetails,
     error: detailsError,
   } = useMoneyDropDetails(dropId);
+  const creatorUsername = normalizeUsername(dropDetails?.creator_username || 'sender');
 
   const { mutate: claimDrop, isPending: isClaiming } = useClaimMoneyDrop({
     onSuccess: (data) => {
       setClaimResult({ success: true, message: data.message });
       Alert.alert(
         'Success!',
-        `You've successfully claimed ${formatCurrency(data.amount_claimed)} from ${
+        `You've successfully claimed ${formatCurrency(data.amount_claimed)} from ${normalizeUsername(
           data.creator_username
-        }.`
+        )}.`
       );
     },
     onError: (error) => {
@@ -106,8 +108,7 @@ const ClaimDropScreen = () => {
       <>
         <Text style={styles.title}>You're Invited!</Text>
         <Text style={styles.subtitle}>
-          <Text style={styles.creatorName}>{dropDetails.creator_username}</Text> has sent you a
-          money drop.
+          <Text style={styles.creatorName}>{creatorUsername}</Text> has sent you a money drop.
         </Text>
         <Card style={styles.claimCard}>
           <Text style={styles.amountLabel}>You will receive</Text>

@@ -16,6 +16,7 @@ import { useTransactionStatus } from '@/api/transactionStatusHooks';
 import type { AppNavigationProp } from '@/types/navigation';
 import type { AppStackParamList } from '@/navigation/AppStack';
 import { formatCurrency } from '@/utils/formatCurrency';
+import { normalizeUsername } from '@/utils/username';
 
 type MultiReceiptRoute = RouteProp<AppStackParamList, 'MultiTransferReceipts'>;
 
@@ -35,7 +36,7 @@ const normalizeStatusLabel = (status?: string) => {
   return { label: 'Processing', color: '#9EA0A6' };
 };
 
-const stripUsernamePrefix = (username: string) => username.replace(/^_+/, '');
+const stripUsernamePrefix = (username: string) => normalizeUsername(username);
 
 const ReceiptStatusCard = ({ receipt }: { receipt: Receipt }) => {
   const navigation = useNavigation<AppNavigationProp>();

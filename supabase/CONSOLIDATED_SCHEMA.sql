@@ -62,6 +62,21 @@ CREATE TABLE public.users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE public.users
+  ADD CONSTRAINT chk_users_username_not_blank
+  CHECK (username IS NULL OR btrim(username) <> '');
+
+ALTER TABLE public.users
+  ADD CONSTRAINT chk_users_username_canonical
+  CHECK (username IS NULL OR username = lower(btrim(username)));
+
+ALTER TABLE public.users
+  ADD CONSTRAINT chk_users_username_format
+  CHECK (
+    username IS NULL OR
+    username ~ '^[a-z0-9](?:[a-z0-9._]{1,18}[a-z0-9])?$'
+  );
+
 COMMENT ON TABLE public.users IS 'Stores user profile information, linking Clerk auth to internal and BaaS IDs.';
 COMMENT ON COLUMN public.users.id IS 'Internal unique identifier for the user (UUID).';
 COMMENT ON COLUMN public.users.clerk_user_id IS 'Foreign key to the Clerk user ID. Used for RLS policies.';
@@ -69,6 +84,9 @@ COMMENT ON COLUMN public.users.anchor_customer_id IS 'Foreign key to the Anchor 
 COMMENT ON COLUMN public.users.username IS 'Unique, user-chosen, and searchable username.';
 COMMENT ON COLUMN public.users.user_type IS 'Type of user account: personal or merchant.';
 COMMENT ON COLUMN public.users.allow_sending IS 'Flag to control sending capabilities, primarily for merchants.';
+
+CREATE INDEX idx_users_username_canonical_lookup
+  ON public.users ((lower(btrim(username))));
 
 CREATE TRIGGER set_users_updated_at
 BEFORE UPDATE ON public.users

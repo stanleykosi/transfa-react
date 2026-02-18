@@ -689,7 +689,7 @@ func (h *TransactionHandlers) GetTransactionHistoryWithUserHandler(w http.Respon
 		return
 	}
 
-	shareableLink := fmt.Sprintf("https://trytransfa.com/%s", strings.TrimLeft(strings.TrimSpace(counterparty.Username), "_"))
+	shareableLink := fmt.Sprintf("https://trytransfa.com/%s", strings.TrimSpace(counterparty.Username))
 	response := map[string]interface{}{
 		"user": map[string]interface{}{
 			"id":        counterparty.ID.String(),

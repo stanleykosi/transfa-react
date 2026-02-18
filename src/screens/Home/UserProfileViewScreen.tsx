@@ -20,12 +20,13 @@ import type { TransactionHistoryItem, UserDiscoveryResult } from '@/types/api';
 import type { AppNavigationProp } from '@/types/navigation';
 import type { AppStackParamList } from '@/navigation/AppStack';
 import { formatCurrency } from '@/utils/formatCurrency';
+import { normalizeUsername } from '@/utils/username';
 
 type UserProfileViewRoute = RouteProp<AppStackParamList, 'UserProfileView'>;
 
 const BRAND_YELLOW = '#FFD300';
 
-const stripUsernamePrefix = (value?: string | null) => (value || '').replace(/^_+/, '');
+const stripUsernamePrefix = (value?: string | null) => normalizeUsername(value || '');
 
 const UserProfileViewScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();

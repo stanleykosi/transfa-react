@@ -79,7 +79,7 @@ func (r *PostgresUserRepository) CreateUser(ctx context.Context, user *domain.Us
 // FindByClerkUserID retrieves a user by their Clerk User ID.
 func (r *PostgresUserRepository) FindByClerkUserID(ctx context.Context, clerkUserID string) (*domain.User, error) {
 	query := `
-		SELECT id, clerk_user_id, anchor_customer_id, username, email, phone_number, full_name, user_type, allow_sending, created_at, updated_at
+		SELECT id, clerk_user_id, anchor_customer_id, btrim(username) AS username, email, phone_number, full_name, user_type, allow_sending, created_at, updated_at
 		FROM users WHERE clerk_user_id = $1 LIMIT 1
 	`
 	var u domain.User
@@ -116,7 +116,7 @@ func (r *PostgresUserRepository) FindByClerkUserID(ctx context.Context, clerkUse
 // FindByEmail retrieves a user by their email address.
 func (r *PostgresUserRepository) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
 	query := `
-		SELECT id, clerk_user_id, anchor_customer_id, username, email, phone_number, full_name, user_type, allow_sending, created_at, updated_at
+		SELECT id, clerk_user_id, anchor_customer_id, btrim(username) AS username, email, phone_number, full_name, user_type, allow_sending, created_at, updated_at
 		FROM users WHERE email = $1 LIMIT 1
 	`
 	var u domain.User

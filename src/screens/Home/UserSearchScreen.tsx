@@ -14,8 +14,9 @@ import { useNavigation } from '@react-navigation/native';
 import { useUserSearch } from '@/api/userDiscoveryApi';
 import type { UserDiscoveryResult } from '@/types/api';
 import type { AppNavigationProp } from '@/types/navigation';
+import { normalizeUsername } from '@/utils/username';
 
-const cleanUsername = (value: string) => value.replace(/^_+/, '');
+const cleanUsername = (value: string) => normalizeUsername(value);
 
 const UserSearchScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();

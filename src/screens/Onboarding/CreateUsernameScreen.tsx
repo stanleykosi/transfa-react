@@ -18,10 +18,9 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { AppStackParamList } from '@/navigation/AppStack';
 import { submitUsernameSetup } from '@/api/authApi';
+import { USERNAME_REGEX, normalizeUsername } from '@/utils/username';
 
 type Navigation = NativeStackNavigationProp<AppStackParamList, 'CreateUsername'>;
-
-const USERNAME_REGEX = /^[a-z0-9](?:[a-z0-9._]{1,18}[a-z0-9])?$/;
 
 const TransfaMark = () => {
   return (
@@ -39,8 +38,7 @@ const CreateUsernameScreen = () => {
 
   const normalizedUsername = useMemo(
     () =>
-      username
-        .trim()
+      normalizeUsername(username)
         .toLowerCase()
         .replace(/[^a-z0-9._]/g, ''),
     [username]

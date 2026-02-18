@@ -25,6 +25,7 @@ import { uploadImage } from '@/api/supabaseClient';
 import { AppStackParamList } from '@/navigation/AppStack';
 import type { UserDiscoveryResult } from '@/types/api';
 import { nairaToKobo, formatCurrency } from '@/utils/formatCurrency';
+import { normalizeUsername, usernameKey } from '@/utils/username';
 
 const BRAND_YELLOW = '#FFD300';
 
@@ -32,7 +33,7 @@ type NavigationProp = NativeStackNavigationProp<AppStackParamList>;
 type CreateRequestRoute = RouteProp<AppStackParamList, 'CreatePaymentRequest'>;
 type RequestMode = 'general' | 'individual';
 
-const stripUsernamePrefix = (value?: string | null) => (value || 'new_user').replace(/^_+/, '');
+const stripUsernamePrefix = (value?: string | null) => normalizeUsername(value || 'new_user');
 
 const CreateRequestScreen = () => {
   const navigation = useNavigation<NavigationProp>();
@@ -60,7 +61,7 @@ const CreateRequestScreen = () => {
     if (initialRecipient) {
       setMode('individual');
       setSelectedRecipient(initialRecipient);
-      setUsername(stripUsernamePrefix(initialRecipient.username));
+      setUsername(normalizeUsername(initialRecipient.username));
     }
   }, [route.params?.forceMode, route.params?.initialRecipient]);
 
@@ -124,14 +125,14 @@ const CreateRequestScreen = () => {
 
     const trimmedDescription = description.trim();
 
-    const trimmedUsername = username.trim();
+    const trimmedUsername = normalizeUsername(username);
     if (mode === 'individual' && trimmedUsername.length === 0) {
       Alert.alert('Recipient required', 'Enter the username for this individual request.');
       return;
     }
 
     const recipientUsername = selectedRecipient
-      ? stripUsernamePrefix(selectedRecipient.username)
+      ? normalizeUsername(selectedRecipient.username)
       : trimmedUsername;
     if (mode === 'individual' && !selectedRecipient) {
       Alert.alert('Select recipient', 'Select a user from search results to continue.');
@@ -139,7 +140,7 @@ const CreateRequestScreen = () => {
     }
     if (
       mode === 'individual' &&
-      stripUsernamePrefix(profile?.username).toLowerCase() === recipientUsername.toLowerCase()
+      usernameKey(profile?.username) === usernameKey(recipientUsername)
     ) {
       Alert.alert('Invalid recipient', 'You cannot create an individual request for yourself.');
       return;
@@ -179,7 +180,7 @@ const CreateRequestScreen = () => {
 
   const handleSelectRecipient = (user: UserDiscoveryResult) => {
     setSelectedRecipient(user);
-    setUsername(stripUsernamePrefix(user.username));
+    setUsername(normalizeUsername(user.username));
   };
 
   const clearRecipient = () => {
@@ -187,7 +188,7 @@ const CreateRequestScreen = () => {
     setUsername('');
   };
 
-  const usernameDisplay = stripUsernamePrefix(profile?.username);
+  const usernameDisplay = normalizeUsername(profile?.username);
   const activeSearchResults = searchData?.users ?? [];
 
   return (

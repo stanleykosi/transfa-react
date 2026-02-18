@@ -24,12 +24,13 @@ import { useAccountBalance, useListPaymentRequests, useUserProfile } from '@/api
 import { AppStackParamList } from '@/navigation/AppStack';
 import type { PaymentRequest } from '@/types/api';
 import { formatCurrency } from '@/utils/formatCurrency';
+import { normalizeUsername } from '@/utils/username';
 
 const BRAND_YELLOW = '#FFD300';
 
 type NavigationProp = NativeStackNavigationProp<AppStackParamList>;
 
-const stripUsernamePrefix = (value?: string | null) => (value || 'new_user').replace(/^_+/, '');
+const stripUsernamePrefix = (value?: string | null) => normalizeUsername(value || 'new_user');
 
 const formatRequestDate = (isoDate: string) =>
   new Date(isoDate).toLocaleDateString('en-US', {
