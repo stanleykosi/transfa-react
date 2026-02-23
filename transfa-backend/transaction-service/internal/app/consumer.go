@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/transfa/transaction-service/internal/domain"
 	"github.com/transfa/transaction-service/internal/store"
 )
@@ -77,13 +78,20 @@ func (c *TransferStatusConsumer) HandleMessage(body []byte) bool {
 }
 
 func (c *TransferStatusConsumer) processEvent(ctx context.Context, event domain.TransferStatusEvent) error {
-	tx, err := c.repo.FindTransactionByAnchorTransferID(ctx, event.AnchorTransferID)
+	tx, err := c.findTransactionForEvent(ctx, event)
 	if err != nil {
 		return fmt.Errorf("lookup transaction: %w", err)
 	}
 
 	status := normalizeStatus(event.Status)
 	transferType := normalizeTransferType(event.TransferType)
+
+	// Completed money-drop claims are terminal. Ignore late/replayed failed events
+	// before persisting metadata so we do not regress status back to failed.
+	if tx.Type == "money_drop_claim" && status == "failed" && tx.Status == "completed" {
+		log.Printf("level=info component=transfer_consumer msg=\"ignoring failed event for completed money-drop claim\" transaction_id=%s status=%s anchor_transfer_id=%s", tx.ID, tx.Status, event.AnchorTransferID)
+		return nil
+	}
 
 	metadata := store.UpdateTransactionMetadataParams{
 		Status:           optionalString(status),
@@ -92,6 +100,11 @@ func (c *TransferStatusConsumer) processEvent(ctx context.Context, event domain.
 		FailureReason:    optionalString(event.Reason),
 		AnchorSessionID:  optionalString(event.SessionID),
 		AnchorReason:     optionalString(event.Reason),
+	}
+	// money_drop_claim uses anchor_reason as a deterministic state token (`md_drop:<id>;state:<...>`).
+	// Do not overwrite it with provider webhook free-text reasons.
+	if tx.Type == "money_drop_claim" {
+		metadata.AnchorReason = nil
 	}
 
 	if err := c.repo.UpdateTransactionMetadata(ctx, tx.ID, metadata); err != nil {
@@ -108,7 +121,93 @@ func (c *TransferStatusConsumer) processEvent(ctx context.Context, event domain.
 	}
 }
 
+func (c *TransferStatusConsumer) findTransactionForEvent(ctx context.Context, event domain.TransferStatusEvent) (*domain.Transaction, error) {
+	tx, err := c.repo.FindTransactionByAnchorTransferID(ctx, event.AnchorTransferID)
+	if err == nil {
+		return tx, nil
+	}
+	if !errors.Is(err, store.ErrTransactionNotFound) {
+		return nil, err
+	}
+
+	if claimTxID, ok := extractMoneyDropClaimTransactionIDFromReason(event.Reason); ok {
+		fallbackTx, fallbackErr := c.repo.FindTransactionByID(ctx, claimTxID)
+		if fallbackErr != nil {
+			if !errors.Is(fallbackErr, store.ErrTransactionNotFound) {
+				return nil, fallbackErr
+			}
+		} else if isValidMoneyDropClaimReasonTokenTransaction(fallbackTx, event) {
+			log.Printf("level=info component=transfer_consumer msg=\"resolved transaction via money-drop claim reason token\" transaction_id=%s anchor_transfer_id=%s", fallbackTx.ID, event.AnchorTransferID)
+			return fallbackTx, nil
+		}
+	}
+
+	fallbackTx, fallbackErr := c.repo.FindPendingMoneyDropClaimByAnchorParticipantsAndAmount(
+		ctx,
+		event.AnchorAccountID,
+		event.CounterpartyID,
+		event.Amount,
+	)
+	if fallbackErr != nil {
+		if errors.Is(fallbackErr, store.ErrTransactionNotFound) {
+			return nil, store.ErrTransactionNotFound
+		}
+		return nil, fallbackErr
+	}
+	if !isValidMoneyDropClaimParticipantFallbackTransaction(fallbackTx, event) {
+		return nil, store.ErrTransactionNotFound
+	}
+
+	log.Printf("level=info component=transfer_consumer msg=\"resolved transaction via money-drop claim account-participant fallback\" transaction_id=%s anchor_transfer_id=%s", fallbackTx.ID, event.AnchorTransferID)
+	return fallbackTx, nil
+}
+
+func isValidMoneyDropClaimReasonTokenTransaction(tx *domain.Transaction, event domain.TransferStatusEvent) bool {
+	if !isValidMoneyDropClaimFallbackBase(tx, event) {
+		return false
+	}
+
+	switch tx.Status {
+	case "pending", "failed", "completed":
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidMoneyDropClaimParticipantFallbackTransaction(tx *domain.Transaction, event domain.TransferStatusEvent) bool {
+	if !isValidMoneyDropClaimFallbackBase(tx, event) {
+		return false
+	}
+	return tx.Status == "pending"
+}
+
+func isValidMoneyDropClaimFallbackBase(tx *domain.Transaction, event domain.TransferStatusEvent) bool {
+	if tx == nil {
+		return false
+	}
+	if tx.Type != "money_drop_claim" {
+		return false
+	}
+	if tx.AnchorTransferID != nil && strings.TrimSpace(*tx.AnchorTransferID) != "" {
+		return false
+	}
+	if event.Amount > 0 && tx.Amount != event.Amount {
+		return false
+	}
+	return true
+}
+
 func (c *TransferStatusConsumer) handleFailure(ctx context.Context, tx *domain.Transaction, event domain.TransferStatusEvent) error {
+	if tx.Type == "money_drop_claim" {
+		// Completed claims are terminal and must never be compensated.
+		if tx.Status == "completed" {
+			log.Printf("level=info component=transfer_consumer msg=\"ignoring failed event for completed money-drop claim\" transaction_id=%s status=%s anchor_transfer_id=%s", tx.ID, tx.Status, event.AnchorTransferID)
+			return nil
+		}
+		return c.handleMoneyDropClaimFailure(ctx, tx, event)
+	}
+
 	if tx.Status == "failed" {
 		return nil
 	}
@@ -154,6 +253,89 @@ func (c *TransferStatusConsumer) handleFailure(ctx context.Context, tx *domain.T
 	})
 
 	return nil
+}
+
+func (c *TransferStatusConsumer) handleMoneyDropClaimFailure(ctx context.Context, tx *domain.Transaction, event domain.TransferStatusEvent) error {
+	dropID, hasDropID := extractMoneyDropDropIDFromAnchorReason(tx.AnchorReason)
+	if !hasDropID {
+		resolvedDropID, err := c.repo.FindMoneyDropClaimDropIDByTransactionID(ctx, tx.ID)
+		if err != nil {
+			if isRetryableMoneyDropClaimCompensationError(err) {
+				return fmt.Errorf("resolve money-drop claim drop id: %w", err)
+			}
+			log.Printf("level=warn component=transfer_consumer msg=\"unable to resolve drop id for failed money-drop claim; using generic retry marker\" transaction_id=%s err=%v", tx.ID, err)
+		} else {
+			dropID = resolvedDropID
+			hasDropID = true
+		}
+	}
+
+	retryReason := buildGenericMoneyDropClaimAnchorReason(moneyDropClaimStateRetryRequested)
+	if hasDropID {
+		retryReason = buildMoneyDropClaimAnchorReason(dropID, moneyDropClaimStateRetryRequested)
+	}
+	failureReason := strings.TrimSpace(event.Reason)
+
+	markedForRetry, err := c.repo.MarkMoneyDropClaimReconcileRequested(ctx, tx.ID, retryReason, failureReason)
+	if err != nil {
+		if isRetryableMoneyDropClaimCompensationError(err) {
+			return fmt.Errorf("mark money-drop claim retry-requested: %w", err)
+		}
+		return c.markMoneyDropClaimAsFailedWithoutRevert(ctx, tx, event, fmt.Sprintf("failed to mark claim for reconciliation retry: %v", err))
+	}
+	if !markedForRetry {
+		log.Printf("level=info component=transfer_consumer msg=\"skip failed money-drop claim retry mark; transaction no longer eligible\" transaction_id=%s anchor_transfer_id=%s", tx.ID, event.AnchorTransferID)
+		return nil
+	}
+
+	log.Printf(
+		"level=warn component=transfer_consumer msg=\"failed money-drop claim marked for reconciliation retry\" transaction_id=%s anchor_transfer_id=%s anchor_reason=%q",
+		tx.ID,
+		event.AnchorTransferID,
+		retryReason,
+	)
+	return nil
+}
+
+func (c *TransferStatusConsumer) markMoneyDropClaimAsFailedWithoutRevert(ctx context.Context, tx *domain.Transaction, event domain.TransferStatusEvent, detail string) error {
+	combinedReason := strings.TrimSpace(event.Reason)
+	if combinedReason == "" {
+		combinedReason = "money_drop_claim_failed"
+	}
+	combinedReason = fmt.Sprintf("%s; %s", combinedReason, detail)
+
+	if err := c.repo.MarkTransactionAsFailed(ctx, tx.ID, event.AnchorTransferID, combinedReason); err != nil {
+		return fmt.Errorf("mark failed money_drop_claim: %w", err)
+	}
+
+	log.Printf("level=error component=transfer_consumer msg=\"money-drop claim transfer failed without claim revert; manual intervention required\" transaction_id=%s anchor_transfer_id=%s detail=%q", tx.ID, event.AnchorTransferID, detail)
+	return nil
+}
+
+func isRetryableMoneyDropClaimCompensationError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if errors.Is(err, store.ErrMoneyDropNotFound) || errors.Is(err, store.ErrTransactionNotFound) {
+		return false
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		code := strings.TrimSpace(pgErr.Code)
+		if strings.HasPrefix(code, "08") || strings.HasPrefix(code, "40") || strings.HasPrefix(code, "53") || code == "55P03" || code == "57014" {
+			return true
+		}
+		if strings.HasPrefix(code, "22") || strings.HasPrefix(code, "23") || strings.HasPrefix(code, "42") {
+			return false
+		}
+	}
+
+	return false
 }
 
 func (c *TransferStatusConsumer) handleSuccess(ctx context.Context, tx *domain.Transaction, event domain.TransferStatusEvent) error {

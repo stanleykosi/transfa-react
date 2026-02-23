@@ -324,16 +324,26 @@ type NotificationUnreadCounts struct {
 
 // MoneyDrop represents the state of a money drop in the database.
 type MoneyDrop struct {
-	ID                     uuid.UUID `json:"id" db:"id"`
-	CreatorID              uuid.UUID `json:"creator_id" db:"creator_id"`
-	Status                 string    `json:"status" db:"status"`
-	AmountPerClaim         int64     `json:"amount_per_claim" db:"amount_per_claim"`
-	TotalClaimsAllowed     int       `json:"total_claims_allowed" db:"total_claims_allowed"`
-	ClaimsMadeCount        int       `json:"claims_made_count" db:"claims_made_count"`
-	ExpiryTimestamp        time.Time `json:"expiry_timestamp" db:"expiry_timestamp"`
-	FundingSourceAccountID uuid.UUID `json:"funding_source_account_id" db:"funding_source_account_id"`
-	MoneyDropAccountID     uuid.UUID `json:"money_drop_account_id" db:"money_drop_account_id"`
-	CreatedAt              time.Time `json:"created_at" db:"created_at"`
+	ID                     uuid.UUID  `json:"id" db:"id"`
+	CreatorID              uuid.UUID  `json:"creator_id" db:"creator_id"`
+	Title                  string     `json:"title" db:"title"`
+	Status                 string     `json:"status" db:"status"`
+	TotalAmount            int64      `json:"total_amount" db:"total_amount"`
+	RefundedAmount         int64      `json:"refunded_amount" db:"refunded_amount"`
+	AmountPerClaim         int64      `json:"amount_per_claim" db:"amount_per_claim"`
+	TotalClaimsAllowed     int        `json:"total_claims_allowed" db:"total_claims_allowed"`
+	ClaimsMadeCount        int        `json:"claims_made_count" db:"claims_made_count"`
+	ExpiryTimestamp        time.Time  `json:"expiry_timestamp" db:"expiry_timestamp"`
+	LockEnabled            bool       `json:"lock_enabled" db:"lock_enabled"`
+	LockPasswordHash       *string    `json:"-" db:"lock_password_hash"`
+	LockPasswordEncrypted  *string    `json:"-" db:"lock_password_encrypted"`
+	FeeAmount              int64      `json:"fee_amount" db:"fee_amount"`
+	FeePercentage          float64    `json:"fee_percentage" db:"fee_percentage"`
+	EndedAt                *time.Time `json:"ended_at,omitempty" db:"ended_at"`
+	EndedReason            *string    `json:"ended_reason,omitempty" db:"ended_reason"`
+	FundingSourceAccountID uuid.UUID  `json:"funding_source_account_id" db:"funding_source_account_id"`
+	MoneyDropAccountID     uuid.UUID  `json:"money_drop_account_id" db:"money_drop_account_id"`
+	CreatedAt              time.Time  `json:"created_at" db:"created_at"`
 }
 
 // MoneyDropClaim represents a single claim made against a money drop.
@@ -346,9 +356,12 @@ type MoneyDropClaim struct {
 
 // CreateMoneyDropRequest defines the payload for creating a new money drop.
 type CreateMoneyDropRequest struct {
-	AmountPerClaim  int64  `json:"amount_per_claim" binding:"required,gt=0"`
+	Title           string `json:"title"`
+	TotalAmount     int64  `json:"total_amount" binding:"required,gt=0"`
 	NumberOfPeople  int    `json:"number_of_people" binding:"required,gt=0"`
 	ExpiryInMinutes int    `json:"expiry_in_minutes" binding:"required,gt=0"`
+	LockDrop        bool   `json:"lock_drop"`
+	LockPassword    string `json:"lock_password"`
 	TransactionPIN  string `json:"transaction_pin"`
 }
 
@@ -363,13 +376,21 @@ type UserSecurityCredential struct {
 // CreateMoneyDropResponse is the successful response after creating a money drop.
 type CreateMoneyDropResponse struct {
 	MoneyDropID     string    `json:"money_drop_id"`
+	Title           string    `json:"title"`
 	QRCodeContent   string    `json:"qr_code_content"`
 	ShareableLink   string    `json:"shareable_link"`
 	TotalAmount     int64     `json:"total_amount"`
 	AmountPerClaim  int64     `json:"amount_per_claim"`
 	NumberOfPeople  int       `json:"number_of_people"`
 	Fee             int64     `json:"fee"` // Fee charged for creating the money drop
+	FeePercentage   float64   `json:"fee_percentage"`
+	LockEnabled     bool      `json:"lock_enabled"`
 	ExpiryTimestamp time.Time `json:"expiry_timestamp"`
+}
+
+// ClaimMoneyDropRequest defines claim payload. Lock password is required for password-protected drops.
+type ClaimMoneyDropRequest struct {
+	LockPassword string `json:"lock_password"`
 }
 
 // ClaimMoneyDropResponse is the successful response after claiming a money drop.
@@ -379,12 +400,121 @@ type ClaimMoneyDropResponse struct {
 	CreatorUsername string `json:"creator_username"`
 }
 
+type RevealMoneyDropPasswordRequest struct {
+	TransactionPIN string `json:"transaction_pin"`
+}
+
+type RevealMoneyDropPasswordResponse struct {
+	LockPassword string `json:"lock_password"`
+}
+
 // MoneyDropDetails represents the details of a money drop for display.
 type MoneyDropDetails struct {
-	ID              uuid.UUID `json:"id"`
+	ID               uuid.UUID `json:"id"`
+	Title            string    `json:"title"`
+	CreatorUsername  string    `json:"creator_username"`
+	TotalAmount      int64     `json:"total_amount"`
+	AmountPerClaim   int64     `json:"amount_per_claim"`
+	Status           string    `json:"status"`
+	IsClaimable      bool      `json:"is_claimable"`
+	RequiresPassword bool      `json:"requires_password"`
+	Message          string    `json:"message"`
+}
+
+type MoneyDropDashboardItem struct {
+	ID                 uuid.UUID `json:"id"`
+	Title              string    `json:"title"`
+	Status             string    `json:"status"`
+	TotalAmount        int64     `json:"total_amount"`
+	AmountPerPerson    int64     `json:"amount_per_person"`
+	NumberOfPeople     int       `json:"number_of_people"`
+	ClaimsMadeCount    int       `json:"claims_made_count"`
+	TimeLeftLabel      string    `json:"time_left_label"`
+	UsersClaimedLabel  string    `json:"users_claimed_label"`
+	ExpiryTimestamp    time.Time `json:"expiry_timestamp"`
+	CreatedDateLabel   string    `json:"created_date_label"`
+	Ended              bool      `json:"ended"`
+	EndedDisplayStatus string    `json:"ended_display_status"`
+}
+
+type MoneyDropDashboardResponse struct {
+	CurrentBalance int64                    `json:"current_balance"`
+	ActiveDrops    []MoneyDropDashboardItem `json:"active_drops"`
+	DropHistory    []MoneyDropDashboardItem `json:"drop_history"`
+}
+
+type MoneyDropClaimer struct {
+	UserID            uuid.UUID `json:"user_id"`
+	Username          string    `json:"username"`
+	FullName          *string   `json:"full_name,omitempty"`
+	ProfilePictureURL *string   `json:"profile_picture_url,omitempty"`
+	AmountClaimed     int64     `json:"amount_claimed"`
+	ClaimedAt         time.Time `json:"claimed_at"`
+}
+
+type MoneyDropOwnerDetails struct {
+	ID                 uuid.UUID          `json:"id"`
+	Title              string             `json:"title"`
+	Status             string             `json:"status"`
+	StatusLabel        string             `json:"status_label"`
+	TotalAmount        int64              `json:"total_amount"`
+	AmountPerPerson    int64              `json:"amount_per_person"`
+	NumberOfPeople     int                `json:"number_of_people"`
+	ClaimsMadeCount    int                `json:"claims_made_count"`
+	ExpiryTimestamp    time.Time          `json:"expiry_timestamp"`
+	LockEnabled        bool               `json:"lock_enabled"`
+	LockPasswordMasked string             `json:"lock_password_masked,omitempty"`
+	LockPassword       *string            `json:"lock_password,omitempty"`
+	ShareableLink      string             `json:"shareable_link"`
+	QRCodeContent      string             `json:"qr_code_content"`
+	Claimers           []MoneyDropClaimer `json:"claimers"`
+	CanEndDrop         bool               `json:"can_end_drop"`
+	EndedAt            *time.Time         `json:"ended_at,omitempty"`
+	EndedReason        *string            `json:"ended_reason,omitempty"`
+}
+
+type MoneyDropClaimersResponse struct {
+	DropID   uuid.UUID          `json:"drop_id"`
+	Title    string             `json:"title"`
+	Claimers []MoneyDropClaimer `json:"claimers"`
+	Total    int                `json:"total"`
+	HasMore  bool               `json:"has_more"`
+}
+
+type EndMoneyDropResponse struct {
+	DropID           uuid.UUID `json:"drop_id"`
+	Status           string    `json:"status"`
+	RefundedAmount   int64     `json:"refunded_amount"`
+	RemainingBalance int64     `json:"remaining_balance"`
+	Message          string    `json:"message"`
+}
+
+type ClaimedMoneyDropHistoryItem struct {
+	DropID          uuid.UUID `json:"drop_id"`
+	Title           string    `json:"title"`
 	CreatorUsername string    `json:"creator_username"`
-	AmountPerClaim  int64     `json:"amount_per_claim"`
-	Status          string    `json:"status"`
-	IsClaimable     bool      `json:"is_claimable"`
-	Message         string    `json:"message"`
+	AmountClaimed   int64     `json:"amount_claimed"`
+	ClaimedAt       time.Time `json:"claimed_at"`
+}
+
+type ClaimedMoneyDropHistoryResponse struct {
+	Items []ClaimedMoneyDropHistoryItem `json:"items"`
+}
+
+// PendingMoneyDropClaimReconciliationCandidate describes a pending claim transaction
+// that has no Anchor transfer ID and is eligible for reconciliation retry.
+type PendingMoneyDropClaimReconciliationCandidate struct {
+	TransactionID              uuid.UUID
+	SourceAnchorAccountID      string
+	DestinationAnchorAccountID string
+	Amount                     int64
+}
+
+// MoneyDropClaimReconcileResponse summarizes an internal reconciliation run.
+type MoneyDropClaimReconcileResponse struct {
+	Processed             int `json:"processed"`
+	Retried               int `json:"retried"`
+	RetryFailed           int `json:"retry_failed"`
+	ExplicitAnchorRejects int `json:"explicit_anchor_rejects"`
+	AmbiguousFailures     int `json:"ambiguous_failures"`
 }

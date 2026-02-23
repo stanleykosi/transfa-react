@@ -15,12 +15,12 @@ import (
 // Repository defines database operations needed by the jobs.
 type Repository interface {
 	GetExpiredAndCompletedMoneyDrops(ctx context.Context) ([]domain.MoneyDrop, error)
-	UpdateMoneyDropStatus(ctx context.Context, dropID string, status string) error
 }
 
 // TransactionClient defines the interface for communicating with the transaction service.
 type TransactionClient interface {
 	RefundMoneyDrop(ctx context.Context, dropID, creatorID string, amount int64) error
+	ReconcileMoneyDropClaims(ctx context.Context, limit int) error
 }
 
 // PlatformFeeClient defines the interface for platform fee operations.
@@ -32,11 +32,11 @@ type PlatformFeeClient interface {
 
 // Jobs contains the logic for all scheduled tasks.
 type Jobs struct {
-	repo           Repository
-	txClient       TransactionClient
-	feeClient      PlatformFeeClient
-	logger         *slog.Logger
-	config         config.Config
+	repo      Repository
+	txClient  TransactionClient
+	feeClient PlatformFeeClient
+	logger    *slog.Logger
+	config    config.Config
 }
 
 // NewJobs creates a new Jobs runner.
@@ -45,8 +45,8 @@ func NewJobs(repo Repository, txClient TransactionClient, feeClient PlatformFeeC
 		repo:      repo,
 		txClient:  txClient,
 		feeClient: feeClient,
-		logger:   logger,
-		config:   cfg,
+		logger:    logger,
+		config:    cfg,
 	}
 }
 
@@ -110,10 +110,13 @@ func (j *Jobs) ProcessMoneyDropExpiry() {
 	for _, drop := range drops {
 		j.logger.Info("processing money drop", "drop_id", drop.ID, "creator_id", drop.CreatorID)
 
-		totalAmount := drop.AmountPerClaim * int64(drop.TotalClaimsAllowed)
+		totalAmount := drop.TotalAmount
+		if totalAmount <= 0 {
+			// Backward-compatible fallback for legacy rows without total_amount.
+			totalAmount = drop.AmountPerClaim * int64(drop.TotalClaimsAllowed)
+		}
 		claimedAmount := drop.AmountPerClaim * int64(drop.ClaimsMadeCount)
 		remainingBalance := totalAmount - claimedAmount
-
 		if remainingBalance > 0 {
 			j.logger.Info("refunding remaining balance", "drop_id", drop.ID, "creator_id", drop.CreatorID, "amount", remainingBalance)
 
@@ -122,14 +125,29 @@ func (j *Jobs) ProcessMoneyDropExpiry() {
 				continue
 			}
 			j.logger.Info("successfully refunded money drop", "drop_id", drop.ID, "amount", remainingBalance)
+		} else {
+			if err := j.txClient.RefundMoneyDrop(ctx, drop.ID, drop.CreatorID, 0); err != nil {
+				j.logger.Error("failed to finalize fully-claimed money drop", "drop_id", drop.ID, "creator_id", drop.CreatorID, "error", err)
+				continue
+			}
 		}
 
-		if err := j.repo.UpdateMoneyDropStatus(ctx, drop.ID, "expired_and_refunded"); err != nil {
-			j.logger.Error("failed to update money drop status", "drop_id", drop.ID, "error", err)
-		} else {
-			j.logger.Info("successfully processed money drop", "drop_id", drop.ID)
-		}
+		j.logger.Info("successfully processed money drop", "drop_id", drop.ID)
 	}
 
 	j.logger.Info("money drop expiry job finished")
+}
+
+// ProcessMoneyDropClaimReconciliation retries stale pending claim payouts in transaction-service.
+func (j *Jobs) ProcessMoneyDropClaimReconciliation() {
+	j.logger.Info("starting money drop claim reconciliation job")
+	ctx := context.Background()
+
+	const limit = 100
+	if err := j.txClient.ReconcileMoneyDropClaims(ctx, limit); err != nil {
+		j.logger.Error("failed to reconcile money drop claims", "error", err)
+		return
+	}
+
+	j.logger.Info("money drop claim reconciliation job finished")
 }

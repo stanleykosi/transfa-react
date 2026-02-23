@@ -508,21 +508,32 @@ export interface TransactionStatusResponse {
 // =================================================================
 
 export interface CreateMoneyDropPayload {
-  amount_per_claim: number; // in kobo
+  title: string;
+  total_amount: number; // in kobo
   number_of_people: number;
   expiry_in_minutes: number;
+  lock_drop: boolean;
+  lock_password?: string;
   transaction_pin: string;
 }
 
 export interface MoneyDropResponse {
   money_drop_id: string;
+  title: string;
   qr_code_content: string;
   shareable_link: string;
   total_amount: number;
   amount_per_claim: number;
   number_of_people: number;
   fee: number; // Fee charged for creating the money drop (in kobo)
+  fee_percentage: number;
+  lock_enabled: boolean;
   expiry_timestamp: string;
+}
+
+export interface ClaimMoneyDropPayload {
+  dropId: string;
+  lockPassword?: string;
 }
 
 export interface ClaimMoneyDropResponse {
@@ -531,11 +542,103 @@ export interface ClaimMoneyDropResponse {
   creator_username: string;
 }
 
+export interface RevealMoneyDropPasswordPayload {
+  dropId: string;
+  transactionPin: string;
+}
+
+export interface RevealMoneyDropPasswordResponse {
+  lock_password: string;
+}
+
 export interface MoneyDropDetails {
   id: string;
+  title: string;
   creator_username: string;
+  total_amount: number;
   amount_per_claim: number;
   status: 'active' | 'completed' | 'expired_and_refunded';
   is_claimable: boolean;
+  requires_password: boolean;
   message: string;
+}
+
+export interface MoneyDropDashboardItem {
+  id: string;
+  title: string;
+  status: 'active' | 'completed' | 'expired_and_refunded';
+  total_amount: number;
+  amount_per_person: number;
+  number_of_people: number;
+  claims_made_count: number;
+  time_left_label: string;
+  users_claimed_label: string;
+  expiry_timestamp: string;
+  created_date_label: string;
+  ended: boolean;
+  ended_display_status: string;
+}
+
+export interface MoneyDropDashboardResponse {
+  current_balance: number;
+  active_drops: MoneyDropDashboardItem[];
+  drop_history: MoneyDropDashboardItem[];
+}
+
+export interface MoneyDropClaimer {
+  user_id: string;
+  username: string;
+  full_name?: string;
+  profile_picture_url?: string;
+  amount_claimed: number;
+  claimed_at: string;
+}
+
+export interface MoneyDropOwnerDetails {
+  id: string;
+  title: string;
+  status: 'active' | 'completed' | 'expired_and_refunded';
+  status_label: string;
+  total_amount: number;
+  amount_per_person: number;
+  number_of_people: number;
+  claims_made_count: number;
+  expiry_timestamp: string;
+  lock_enabled: boolean;
+  lock_password_masked?: string;
+  lock_password?: string;
+  shareable_link: string;
+  qr_code_content: string;
+  claimers: MoneyDropClaimer[];
+  can_end_drop: boolean;
+  ended_at?: string;
+  ended_reason?: string;
+}
+
+export interface MoneyDropClaimersResponse {
+  drop_id: string;
+  title: string;
+  claimers: MoneyDropClaimer[];
+  total: number;
+  has_more: boolean;
+}
+
+export interface EndMoneyDropResponse {
+  drop_id: string;
+  status: 'completed' | 'expired_and_refunded' | 'refund_processing';
+  refunded_amount: number;
+  remaining_balance: number;
+  message: string;
+}
+
+export interface ClaimedMoneyDropHistoryItem {
+  drop_id: string;
+  title: string;
+  creator_username: string;
+  amount_claimed: number;
+  claimed_at: string;
+}
+
+export interface ClaimedMoneyDropHistoryResponse {
+  items: ClaimedMoneyDropHistoryItem[];
 }

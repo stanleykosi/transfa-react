@@ -415,24 +415,56 @@ COMMENT ON TABLE public.platform_fee_attempts IS 'Audit log of platform fee char
 CREATE TABLE public.money_drops (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     creator_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
     status public.money_drop_status NOT NULL DEFAULT 'active',
+    total_amount BIGINT NOT NULL,
+    refunded_amount BIGINT NOT NULL DEFAULT 0,
     amount_per_claim BIGINT NOT NULL,
     total_claims_allowed INTEGER NOT NULL,
     claims_made_count INTEGER NOT NULL DEFAULT 0,
     expiry_timestamp TIMESTAMPTZ NOT NULL,
+    lock_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    lock_password_hash TEXT,
+    lock_password_encrypted TEXT,
+    fee_amount BIGINT NOT NULL DEFAULT 0,
+    fee_percentage NUMERIC(10,6) NOT NULL DEFAULT 0,
+    ended_at TIMESTAMPTZ,
+    ended_reason TEXT,
     funding_source_account_id UUID REFERENCES public.accounts(id) ON DELETE SET NULL,
     money_drop_account_id UUID REFERENCES public.accounts(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_money_drops_total_amount_positive CHECK (total_amount > 0),
+    CONSTRAINT chk_money_drops_total_amount_consistency CHECK (total_amount = amount_per_claim * total_claims_allowed),
+    CONSTRAINT chk_money_drops_refunded_amount_non_negative CHECK (refunded_amount >= 0),
+    CONSTRAINT chk_money_drops_refunded_amount_within_total CHECK (refunded_amount <= total_amount),
+    CONSTRAINT chk_money_drops_fee_amount_non_negative CHECK (fee_amount >= 0),
+    CONSTRAINT chk_money_drops_fee_percentage_non_negative CHECK (fee_percentage >= 0),
+    CONSTRAINT chk_money_drops_password_when_locked CHECK (
+        (lock_enabled = FALSE AND lock_password_hash IS NULL)
+        OR (lock_enabled = TRUE AND lock_password_hash IS NOT NULL)
+    )
 );
 
 CREATE INDEX idx_money_drops_funding_source_account_id ON public.money_drops(funding_source_account_id);
 CREATE INDEX idx_money_drops_money_drop_account_id ON public.money_drops(money_drop_account_id);
+CREATE INDEX idx_money_drops_creator_status_created_at ON public.money_drops(creator_id, status, created_at DESC);
+CREATE INDEX idx_money_drops_status_expiry_timestamp ON public.money_drops(status, expiry_timestamp);
 
 COMMENT ON TABLE public.money_drops IS 'Stores instances of Money Drops, which are pools of funds to be claimed.';
 COMMENT ON COLUMN public.money_drops.creator_id IS 'The user who created and funded the Money Drop.';
+COMMENT ON COLUMN public.money_drops.title IS 'Creator-defined display title for the money drop.';
+COMMENT ON COLUMN public.money_drops.total_amount IS 'Total amount allocated to this drop in kobo.';
+COMMENT ON COLUMN public.money_drops.refunded_amount IS 'Cumulative amount already refunded to creator for this drop in kobo.';
 COMMENT ON COLUMN public.money_drops.amount_per_claim IS 'The amount in kobo each user can claim.';
 COMMENT ON COLUMN public.money_drops.expiry_timestamp IS 'The time at which the drop becomes inactive.';
+COMMENT ON COLUMN public.money_drops.lock_enabled IS 'Whether claiming this drop requires a password.';
+COMMENT ON COLUMN public.money_drops.lock_password_hash IS 'bcrypt hash used to verify claim password for locked drops.';
+COMMENT ON COLUMN public.money_drops.lock_password_encrypted IS 'Encrypted lock password for owner-only reveal workflow.';
+COMMENT ON COLUMN public.money_drops.fee_amount IS 'Absolute fee amount charged at creation in kobo.';
+COMMENT ON COLUMN public.money_drops.fee_percentage IS 'Fee percentage configured when this drop was created.';
+COMMENT ON COLUMN public.money_drops.ended_at IS 'Timestamp this drop transitioned out of active state.';
+COMMENT ON COLUMN public.money_drops.ended_reason IS 'Reason code for ending (completed, expired, manual_end, refund_processing, refund_retry_pending, refund_payout_inflight, refund_persistence_failed).';
 COMMENT ON COLUMN public.money_drops.funding_source_account_id IS 'The primary account from which funds were debited to create this money drop.';
 COMMENT ON COLUMN public.money_drops.money_drop_account_id IS 'The money_drop account type that holds the locked funds for this drop.';
 
@@ -451,6 +483,7 @@ CREATE TABLE public.money_drop_claims (
 
 CREATE INDEX idx_money_drop_claims_drop_id ON public.money_drop_claims(drop_id);
 CREATE INDEX idx_money_drop_claims_claimant_id ON public.money_drop_claims(claimant_id);
+CREATE INDEX idx_money_drop_claims_drop_claimed_at ON public.money_drop_claims(drop_id, claimed_at DESC);
 
 COMMENT ON TABLE public.money_drop_claims IS 'A ledger of successful claims for a Money Drop, ensuring one claim per person.';
 COMMENT ON COLUMN public.money_drop_claims.claimant_id IS 'The user who successfully claimed from the drop.';

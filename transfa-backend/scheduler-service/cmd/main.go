@@ -41,16 +41,16 @@ func main() {
 		logger.Error("unable to parse database URL", "error", err)
 		os.Exit(1)
 	}
-	
+
 	// Configure connection pool for high-traffic scenarios
 	config.MaxConns = 100
 	config.MinConns = 20
 	config.MaxConnLifetime = 30 * time.Minute
 	config.MaxConnIdleTime = 5 * time.Minute
-	
+
 	// Disable prepared statement caching to prevent conflicts
 	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
-	
+
 	dbpool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		logger.Error("unable to connect to database", "error", err)
@@ -61,7 +61,7 @@ func main() {
 
 	// Initialize dependencies
 	repository := store.NewRepository(dbpool)
-	txClient := transactionclient.NewClient(cfg.TransactionServiceURL)
+	txClient := transactionclient.NewClient(cfg.TransactionServiceURL, cfg.TransactionServiceInternalAPIKey)
 	feeClient := platformfeeclient.NewClient(cfg.PlatformFeeServiceURL, cfg.PlatformFeeInternalAPIKey)
 	jobs := app.NewJobs(repository, txClient, feeClient, logger, *cfg)
 	scheduler := app.NewScheduler(jobs, logger, *cfg)

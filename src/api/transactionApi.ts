@@ -49,8 +49,16 @@ import {
   NotificationUnreadCounts,
   CreateMoneyDropPayload,
   MoneyDropResponse,
+  ClaimMoneyDropPayload,
   ClaimMoneyDropResponse,
+  RevealMoneyDropPasswordPayload,
+  RevealMoneyDropPasswordResponse,
   MoneyDropDetails,
+  MoneyDropDashboardResponse,
+  MoneyDropOwnerDetails,
+  MoneyDropClaimersResponse,
+  EndMoneyDropResponse,
+  ClaimedMoneyDropHistoryResponse,
   TransferListSummary,
   TransferList,
   ListTransferListsParams,
@@ -79,6 +87,8 @@ const NOTIFICATION_UNREAD_COUNTS_QUERY_KEY = 'notificationUnreadCounts';
 const USER_PROFILE_QUERY_KEY = 'user-profile';
 const PRIMARY_ACCOUNT_QUERY_KEY = 'primary-account';
 const MONEY_DROP_QUERY_KEY = 'moneyDrop';
+const MONEY_DROP_DASHBOARD_QUERY_KEY = 'moneyDropDashboard';
+const MONEY_DROP_CLAIMED_QUERY_KEY = 'moneyDropClaimed';
 const TRANSFER_LISTS_QUERY_KEY = 'transferLists';
 
 const toReadableError = (error: unknown): Error => {
@@ -111,6 +121,22 @@ const normalizePaymentRequest = (request: PaymentRequest): PaymentRequest => {
   };
 };
 
+const mergeMutationOnSuccess = <TData, TError, TVariables, TContext>(
+  options: UseMutationOptions<TData, TError, TVariables, TContext> | undefined,
+  internalOnSuccess: NonNullable<
+    UseMutationOptions<TData, TError, TVariables, TContext>['onSuccess']
+  >
+): UseMutationOptions<TData, TError, TVariables, TContext> => {
+  const { onSuccess, ...restOptions } = options ?? {};
+  return {
+    ...restOptions,
+    onSuccess: async (data, variables, onMutateResult, context) => {
+      await internalOnSuccess(data, variables, onMutateResult, context);
+      return onSuccess?.(data, variables, onMutateResult, context);
+    },
+  };
+};
+
 /**
  * Custom hook to perform a Peer-to-Peer (P2P) transfer to another Transfa user.
  * @param options Optional mutation options (e.g., onSuccess, onError callbacks).
@@ -132,14 +158,15 @@ export const useP2PTransfer = (
     }
   };
 
+  const mutationOptions = mergeMutationOnSuccess(options, () => {
+    // Invalidate transactions list and account balance to refresh the UI
+    queryClient.invalidateQueries({ queryKey: [TRANSACTIONS_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
+  });
+
   return useMutation<TransactionResponse, Error, P2PTransferPayload>({
+    ...mutationOptions,
     mutationFn: p2pTransferMutation,
-    onSuccess: () => {
-      // Invalidate transactions list and account balance to refresh the UI
-      queryClient.invalidateQueries({ queryKey: [TRANSACTIONS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
-    },
-    ...options,
   });
 };
 
@@ -168,13 +195,14 @@ export const useBulkP2PTransfer = (
     }
   };
 
+  const mutationOptions = mergeMutationOnSuccess(options, () => {
+    queryClient.invalidateQueries({ queryKey: [TRANSACTIONS_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
+  });
+
   return useMutation<BulkP2PTransferResponse, Error, BulkP2PTransferPayload>({
+    ...mutationOptions,
     mutationFn: bulkP2PTransferMutation,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [TRANSACTIONS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
-    },
-    ...options,
   });
 };
 
@@ -206,15 +234,16 @@ export const useSelfTransfer = (
     }
   };
 
+  const mutationOptions = mergeMutationOnSuccess(options, () => {
+    // Invalidate transactions, beneficiaries, and account balance
+    queryClient.invalidateQueries({ queryKey: [TRANSACTIONS_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [BENEFICIARIES_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
+  });
+
   return useMutation<TransactionResponse, Error, SelfTransferPayload>({
+    ...mutationOptions,
     mutationFn: selfTransferMutation,
-    onSuccess: () => {
-      // Invalidate transactions, beneficiaries, and account balance
-      queryClient.invalidateQueries({ queryKey: [TRANSACTIONS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [BENEFICIARIES_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
-    },
-    ...options,
   });
 };
 
@@ -257,13 +286,14 @@ export const useUpdateReceivingPreference = (
     });
   };
 
+  const mutationOptions = mergeMutationOnSuccess(options, () => {
+    // Invalidate receiving preference to refresh the UI
+    queryClient.invalidateQueries({ queryKey: [RECEIVING_PREFERENCE_QUERY_KEY] });
+  });
+
   return useMutation<void, Error, UpdateReceivingPreferencePayload>({
+    ...mutationOptions,
     mutationFn: updateReceivingPreferenceMutation,
-    onSuccess: () => {
-      // Invalidate receiving preference to refresh the UI
-      queryClient.invalidateQueries({ queryKey: [RECEIVING_PREFERENCE_QUERY_KEY] });
-    },
-    ...options,
   });
 };
 
@@ -303,14 +333,15 @@ export const useSetDefaultBeneficiary = (
     });
   };
 
+  const mutationOptions = mergeMutationOnSuccess(options, () => {
+    // Invalidate both default beneficiary and beneficiaries list
+    queryClient.invalidateQueries({ queryKey: [DEFAULT_BENEFICIARY_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [BENEFICIARIES_QUERY_KEY] });
+  });
+
   return useMutation<void, Error, SetDefaultBeneficiaryPayload>({
+    ...mutationOptions,
     mutationFn: setDefaultBeneficiaryMutation,
-    onSuccess: () => {
-      // Invalidate both default beneficiary and beneficiaries list
-      queryClient.invalidateQueries({ queryKey: [DEFAULT_BENEFICIARY_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [BENEFICIARIES_QUERY_KEY] });
-    },
-    ...options,
   });
 };
 
@@ -398,6 +429,7 @@ export interface TransactionFeeResponse {
   p2p_fee_kobo: number;
   self_fee_kobo: number;
   money_drop_fee_kobo: number;
+  money_drop_fee_percent?: number;
 }
 
 export const TRANSACTION_FEES_QUERY_KEY = 'transaction-fees';
@@ -468,13 +500,14 @@ export const useCreatePaymentRequest = (
     return normalizePaymentRequest(data);
   };
 
+  const mutationOptions = mergeMutationOnSuccess(options, () => {
+    // After creating a request, invalidate the list to update the UI.
+    queryClient.invalidateQueries({ queryKey: [PAYMENT_REQUESTS_QUERY_KEY] });
+  });
+
   return useMutation<PaymentRequest, Error, CreatePaymentRequestPayload>({
+    ...mutationOptions,
     mutationFn: createPaymentRequestMutation,
-    onSuccess: () => {
-      // After creating a request, invalidate the list to update the UI.
-      queryClient.invalidateQueries({ queryKey: [PAYMENT_REQUESTS_QUERY_KEY] });
-    },
-    ...options,
   });
 };
 
@@ -519,12 +552,13 @@ export const useDeletePaymentRequest = (
     });
   };
 
+  const mutationOptions = mergeMutationOnSuccess(options, () => {
+    queryClient.invalidateQueries({ queryKey: [PAYMENT_REQUESTS_QUERY_KEY] });
+  });
+
   return useMutation<void, Error, { requestId: string }>({
+    ...mutationOptions,
     mutationFn: deletePaymentRequestMutation,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [PAYMENT_REQUESTS_QUERY_KEY] });
-    },
-    ...options,
   });
 };
 
@@ -607,21 +641,22 @@ export const usePayIncomingPaymentRequest = (
     };
   };
 
+  const mutationOptions = mergeMutationOnSuccess(options, () => {
+    queryClient.invalidateQueries({ queryKey: [INCOMING_PAYMENT_REQUESTS_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [PAYMENT_REQUESTS_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [NOTIFICATIONS_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [NOTIFICATION_UNREAD_COUNTS_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [TRANSACTIONS_QUERY_KEY] });
+  });
+
   return useMutation<
     PayIncomingPaymentRequestResponse,
     Error,
     { requestId: string; payload: PayIncomingPaymentRequestPayload }
   >({
+    ...mutationOptions,
     mutationFn: payMutation,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [INCOMING_PAYMENT_REQUESTS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [PAYMENT_REQUESTS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [NOTIFICATIONS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [NOTIFICATION_UNREAD_COUNTS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [TRANSACTIONS_QUERY_KEY] });
-    },
-    ...options,
   });
 };
 
@@ -651,19 +686,20 @@ export const useDeclineIncomingPaymentRequest = (
     return normalizePaymentRequest(data);
   };
 
+  const mutationOptions = mergeMutationOnSuccess(options, () => {
+    queryClient.invalidateQueries({ queryKey: [INCOMING_PAYMENT_REQUESTS_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [PAYMENT_REQUESTS_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [NOTIFICATIONS_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [NOTIFICATION_UNREAD_COUNTS_QUERY_KEY] });
+  });
+
   return useMutation<
     PaymentRequest,
     Error,
     { requestId: string; payload?: DeclineIncomingPaymentRequestPayload }
   >({
+    ...mutationOptions,
     mutationFn: declineMutation,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [INCOMING_PAYMENT_REQUESTS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [PAYMENT_REQUESTS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [NOTIFICATIONS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [NOTIFICATION_UNREAD_COUNTS_QUERY_KEY] });
-    },
-    ...options,
   });
 };
 
@@ -732,13 +768,14 @@ export const useMarkNotificationRead = (
     return data;
   };
 
+  const mutationOptions = mergeMutationOnSuccess(options, () => {
+    queryClient.invalidateQueries({ queryKey: [NOTIFICATIONS_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [NOTIFICATION_UNREAD_COUNTS_QUERY_KEY] });
+  });
+
   return useMutation<{ updated: boolean }, Error, { notificationId: string }>({
+    ...mutationOptions,
     mutationFn,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [NOTIFICATIONS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [NOTIFICATION_UNREAD_COUNTS_QUERY_KEY] });
-    },
-    ...options,
   });
 };
 
@@ -766,17 +803,18 @@ export const useMarkAllNotificationsRead = (
     return data;
   };
 
+  const mutationOptions = mergeMutationOnSuccess(options, () => {
+    queryClient.invalidateQueries({ queryKey: [NOTIFICATIONS_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [NOTIFICATION_UNREAD_COUNTS_QUERY_KEY] });
+  });
+
   return useMutation<
     { updated: number },
     Error,
     { category?: 'request' | 'newsletter' | 'system' }
   >({
+    ...mutationOptions,
     mutationFn,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [NOTIFICATIONS_QUERY_KEY] });
-      queryClient.invalidateQueries({ queryKey: [NOTIFICATION_UNREAD_COUNTS_QUERY_KEY] });
-    },
-    ...options,
   });
 };
 
@@ -1037,13 +1075,14 @@ export const useCreateMoneyDrop = (
     }
   };
 
+  const mutationOptions = mergeMutationOnSuccess(options, () => {
+    queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [MONEY_DROP_DASHBOARD_QUERY_KEY] });
+  });
+
   return useMutation<MoneyDropResponse, Error, CreateMoneyDropPayload>({
+    ...mutationOptions,
     mutationFn: createMoneyDropMutation,
-    onSuccess: () => {
-      // After creating a drop, invalidate account balance to reflect the funding debit.
-      queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
-    },
-    ...options,
   });
 };
 
@@ -1053,17 +1092,150 @@ export const useCreateMoneyDrop = (
  * @returns A TanStack Mutation object for the claim action.
  */
 export const useClaimMoneyDrop = (
-  options?: UseMutationOptions<ClaimMoneyDropResponse, Error, { dropId: string }>
+  options?: UseMutationOptions<ClaimMoneyDropResponse, Error, ClaimMoneyDropPayload>
 ) => {
   const queryClient = useQueryClient();
 
   const claimMoneyDropMutation = async ({
     dropId,
-  }: {
-    dropId: string;
-  }): Promise<ClaimMoneyDropResponse> => {
+    lockPassword,
+  }: ClaimMoneyDropPayload): Promise<ClaimMoneyDropResponse> => {
+    const payload = lockPassword ? { lock_password: lockPassword } : {};
     const { data } = await apiClient.post<ClaimMoneyDropResponse>(
       `/transactions/money-drops/${dropId}/claim`,
+      payload,
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
+    return data;
+  };
+
+  const mutationOptions = mergeMutationOnSuccess(options, () => {
+    queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [MONEY_DROP_DASHBOARD_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [MONEY_DROP_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [MONEY_DROP_CLAIMED_QUERY_KEY] });
+  });
+
+  return useMutation<ClaimMoneyDropResponse, Error, ClaimMoneyDropPayload>({
+    ...mutationOptions,
+    mutationFn: claimMoneyDropMutation,
+  });
+};
+
+export const useMoneyDropDashboard = () => {
+  const fetchDashboard = async (): Promise<MoneyDropDashboardResponse> => {
+    const { data } = await apiClient.get<MoneyDropDashboardResponse>(
+      '/transactions/money-drops/dashboard',
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
+    return data;
+  };
+
+  return useQuery<MoneyDropDashboardResponse, Error>({
+    queryKey: [MONEY_DROP_DASHBOARD_QUERY_KEY],
+    queryFn: fetchDashboard,
+    staleTime: 1000 * 30,
+    refetchOnWindowFocus: true,
+  });
+};
+
+export const useMoneyDropOwnerDetails = (
+  dropId: string | null,
+  options?: { claimersLimit?: number }
+) => {
+  const claimersLimit = options?.claimersLimit ?? 20;
+  const fetchOwnerDetails = async (): Promise<MoneyDropOwnerDetails> => {
+    const { data } = await apiClient.get<MoneyDropOwnerDetails>(
+      `/transactions/money-drops/${dropId}/owner-details`,
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+        params: {
+          claimers_limit: claimersLimit,
+        },
+      }
+    );
+    return data;
+  };
+
+  return useQuery<MoneyDropOwnerDetails, Error>({
+    queryKey: [MONEY_DROP_QUERY_KEY, 'owner-details', dropId, claimersLimit],
+    queryFn: fetchOwnerDetails,
+    enabled: !!dropId,
+  });
+};
+
+export const useRevealMoneyDropPassword = (
+  options?: UseMutationOptions<
+    RevealMoneyDropPasswordResponse,
+    Error,
+    RevealMoneyDropPasswordPayload
+  >
+) => {
+  const revealPasswordMutation = async ({
+    dropId,
+    transactionPin,
+  }: RevealMoneyDropPasswordPayload): Promise<RevealMoneyDropPasswordResponse> => {
+    const { data } = await apiClient.post<RevealMoneyDropPasswordResponse>(
+      `/transactions/money-drops/${dropId}/reveal-password`,
+      {
+        transaction_pin: transactionPin,
+      },
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+      }
+    );
+    return data;
+  };
+
+  return useMutation<RevealMoneyDropPasswordResponse, Error, RevealMoneyDropPasswordPayload>({
+    mutationFn: revealPasswordMutation,
+    ...options,
+  });
+};
+
+export const useMoneyDropClaimers = (
+  dropId: string | null,
+  params?: { search?: string; limit?: number; offset?: number }
+) => {
+  const search = params?.search ?? '';
+  const limit = params?.limit ?? 20;
+  const offset = params?.offset ?? 0;
+
+  const fetchClaimers = async (): Promise<MoneyDropClaimersResponse> => {
+    const { data } = await apiClient.get<MoneyDropClaimersResponse>(
+      `/transactions/money-drops/${dropId}/claimers`,
+      {
+        baseURL: TRANSACTION_SERVICE_URL,
+        params: { search, limit, offset },
+      }
+    );
+    return data;
+  };
+
+  return useQuery<MoneyDropClaimersResponse, Error>({
+    queryKey: [MONEY_DROP_QUERY_KEY, 'claimers', dropId, search, limit, offset],
+    queryFn: fetchClaimers,
+    enabled: !!dropId,
+    placeholderData: (previousData) => previousData,
+  });
+};
+
+export const useEndMoneyDrop = (
+  options?: UseMutationOptions<EndMoneyDropResponse, Error, { dropId: string }>
+) => {
+  const queryClient = useQueryClient();
+  const { onSuccess, ...restOptions } = options ?? {};
+  const endMoneyDropMutation = async ({
+    dropId,
+  }: {
+    dropId: string;
+  }): Promise<EndMoneyDropResponse> => {
+    const { data } = await apiClient.post<EndMoneyDropResponse>(
+      `/transactions/money-drops/${dropId}/end`,
       {},
       {
         baseURL: TRANSACTION_SERVICE_URL,
@@ -1072,13 +1244,32 @@ export const useClaimMoneyDrop = (
     return data;
   };
 
-  return useMutation<ClaimMoneyDropResponse, Error, { dropId: string }>({
-    mutationFn: claimMoneyDropMutation,
-    onSuccess: () => {
-      // After claiming, invalidate account balance to reflect the credit.
+  return useMutation<EndMoneyDropResponse, Error, { dropId: string }>({
+    ...restOptions,
+    mutationFn: endMoneyDropMutation,
+    onSuccess: (data, variables, onMutateResult, context) => {
       queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [MONEY_DROP_DASHBOARD_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [MONEY_DROP_QUERY_KEY] });
+      queryClient.invalidateQueries({ queryKey: [MONEY_DROP_CLAIMED_QUERY_KEY] });
+      onSuccess?.(data, variables, onMutateResult, context);
     },
-    ...options,
+  });
+};
+
+export const useClaimedMoneyDrops = () => {
+  const fetchClaimed = async (): Promise<ClaimedMoneyDropHistoryResponse> => {
+    const { data } = await apiClient.get<ClaimedMoneyDropHistoryResponse>(
+      '/transactions/money-drops/claimed',
+      { baseURL: TRANSACTION_SERVICE_URL }
+    );
+    return data;
+  };
+
+  return useQuery<ClaimedMoneyDropHistoryResponse, Error>({
+    queryKey: [MONEY_DROP_CLAIMED_QUERY_KEY],
+    queryFn: fetchClaimed,
+    staleTime: 1000 * 60,
   });
 };
 
@@ -1099,8 +1290,18 @@ export const useMoneyDropDetails = (dropId: string | null) => {
   };
 
   return useQuery<MoneyDropDetails, Error>({
-    queryKey: [MONEY_DROP_QUERY_KEY, dropId],
+    queryKey: [MONEY_DROP_QUERY_KEY, 'claim-details', dropId],
     queryFn: fetchDetails,
     enabled: !!dropId, // Only run query if dropId is present
   });
+};
+
+export const useRefreshMoneyDropCaches = () => {
+  const queryClient = useQueryClient();
+  return () => {
+    queryClient.invalidateQueries({ queryKey: [MONEY_DROP_DASHBOARD_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [MONEY_DROP_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [MONEY_DROP_CLAIMED_QUERY_KEY] });
+    queryClient.invalidateQueries({ queryKey: [ACCOUNT_BALANCE_QUERY_KEY] });
+  };
 };

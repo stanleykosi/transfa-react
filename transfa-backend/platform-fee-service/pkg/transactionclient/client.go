@@ -20,14 +20,16 @@ var ErrInsufficientFunds = errors.New("insufficient funds")
 // Client is a client for the transaction service.
 type Client struct {
 	baseURL    string
+	apiKey     string
 	httpClient *http.Client
 }
 
 // NewClient creates a new transaction service client.
-func NewClient(baseURL string) *Client {
+func NewClient(baseURL string, apiKey string) *Client {
 	normalizedURL := strings.TrimSuffix(baseURL, "/")
 	return &Client{
 		baseURL:    normalizedURL,
+		apiKey:     strings.TrimSpace(apiKey),
 		httpClient: &http.Client{Timeout: 15 * time.Second},
 	}
 }
@@ -36,6 +38,9 @@ func NewClient(baseURL string) *Client {
 func (c *Client) DebitPlatformFee(ctx context.Context, userID string, amount int64, invoiceID string) (string, error) {
 	if userID == "" {
 		return "", fmt.Errorf("user ID is required")
+	}
+	if c.apiKey == "" {
+		return "", fmt.Errorf("transaction service internal api key is not configured")
 	}
 
 	url := c.buildURL("/transactions/platform-fee")
@@ -57,6 +62,7 @@ func (c *Client) DebitPlatformFee(ctx context.Context, userID string, amount int
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Internal-API-Key", c.apiKey)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

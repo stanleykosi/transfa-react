@@ -1,49 +1,71 @@
-/**
- * @description
- * This screen provides a wizard-style interface for users to create a "Money Drop".
- * It showcases the unique features of money drops: separate secure account, fee transparency,
- * and easy distribution. Enhanced UI/UX with feature highlights and comprehensive fee display.
- *
- * @dependencies
- * - react, react-native: For UI components and state management.
- * - @react-navigation/native: For navigation actions.
- * - @/components/*: Reusable UI components.
- * - @/hooks/useSecureAction: For authorizing the transaction with biometrics or PIN.
- * - @/api/transactionApi: For the `useCreateMoneyDrop` mutation hook and fees.
- * - @/utils/formatCurrency: For formatting and parsing currency values.
- */
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
+  Alert,
   KeyboardAvoidingView,
   Platform,
-  Alert,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { TouchableOpacity } from 'react-native';
-import ScreenWrapper from '@/components/ScreenWrapper';
-import FormInput from '@/components/FormInput';
-import PrimaryButton from '@/components/PrimaryButton';
+import { LinearGradient } from 'expo-linear-gradient';
+
+import { useAccountBalance, useCreateMoneyDrop, useTransactionFees } from '@/api/transactionApi';
 import PinInputModal from '@/components/PinInputModal';
-import Card from '@/components/Card';
-import { theme } from '@/constants/theme';
-import { useCreateMoneyDrop, useAccountBalance, useTransactionFees } from '@/api/transactionApi';
 import { useSecureAction } from '@/hooks/useSecureAction';
-import { AppNavigationProp } from '@/types/navigation';
 import { formatCurrency, nairaToKobo } from '@/utils/formatCurrency';
+import type { AppNavigationProp } from '@/types/navigation';
+
+const BRAND_YELLOW = '#FFD300';
+const BG_BOTTOM = '#050607';
+const CARD_BG = 'rgba(255,255,255,0.08)';
+const CARD_BORDER = 'rgba(255,255,255,0.07)';
+
+const MIN_TITLE_LENGTH = 3;
+const MAX_TITLE_LENGTH = 80;
+const MIN_PASSWORD_LENGTH = 4;
+const MAX_PASSWORD_LENGTH = 64;
+const MIN_EXPIRY_MINUTES = 1;
+const MAX_EXPIRY_MINUTES = 1440;
+
+const parseNairaTextToKobo = (raw: string): number => {
+  const cleaned = raw.replace(/[^0-9.]/g, '');
+  const parsed = Number.parseFloat(cleaned);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 0;
+  }
+  return nairaToKobo(parsed);
+};
+
+const formatPercent = (value: number): string => {
+  if (!Number.isFinite(value)) {
+    return '0%';
+  }
+  const isWhole = Number.isInteger(value);
+  return `${value.toFixed(isWhole ? 0 : 2)}%`;
+};
 
 const CreateDropWizardScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
-  const [amountPerClaim, setAmountPerClaim] = useState('');
-  const [numberOfPeople, setNumberOfPeople] = useState('');
-  const [expiryInMinutes, setExpiryInMinutes] = useState('60'); // Default to 1 hour
+  const [title, setTitle] = useState('');
+  const [totalAmountInput, setTotalAmountInput] = useState('');
+  const [numberOfPeopleInput, setNumberOfPeopleInput] = useState('');
+  const [expiryMinutesInput, setExpiryMinutesInput] = useState('60');
+
+  const [lockDrop, setLockDrop] = useState(false);
+  const [passwordDraft, setPasswordDraft] = useState('');
+  const [savedPassword, setSavedPassword] = useState('');
+  const [showSavedPassword, setShowSavedPassword] = useState(false);
+  const [isEditingPassword, setIsEditingPassword] = useState(false);
 
   const { data: balanceData } = useAccountBalance();
-  const { data: feesData } = useTransactionFees();
+  const { data: feeData } = useTransactionFees();
   const {
     isModalVisible,
     error: pinError,
@@ -55,212 +77,365 @@ const CreateDropWizardScreen = () => {
 
   const { mutate: createMoneyDrop, isPending: isCreating } = useCreateMoneyDrop({
     onSuccess: (data) => {
-      // On success, navigate to a new screen to show the QR code and link
-      navigation.replace('MoneyDropSuccess', { dropDetails: data });
+      navigation.replace('MoneyDropSuccess', {
+        dropDetails: data,
+        lockPassword: lockDrop ? savedPassword : undefined,
+      });
     },
     onError: (error) => {
-      if (error.message.toLowerCase().includes('pin is not set')) {
+      const normalized = (error.message || '').toLowerCase();
+      if (normalized.includes('pin is not set')) {
         Alert.alert('Transaction PIN Required', 'Please create your transaction PIN to continue.', [
+          { text: 'Cancel', style: 'cancel' },
           { text: 'Set PIN', onPress: () => navigation.navigate('CreatePin') },
         ]);
         return;
       }
-      Alert.alert('Error Creating Drop', error.message || 'An unexpected error occurred.');
+      Alert.alert('Create MoneyDrop Failed', error.message || 'Could not create money drop.');
     },
   });
 
-  const totalAmount = useMemo(() => {
-    const amount = parseFloat(amountPerClaim);
-    const people = parseInt(numberOfPeople, 10);
-    if (!isNaN(amount) && !isNaN(people) && amount > 0 && people > 0) {
-      return amount * people;
+  const parsedTitle = title.trim();
+  const totalAmountKobo = useMemo(() => parseNairaTextToKobo(totalAmountInput), [totalAmountInput]);
+  const numberOfPeople = useMemo(
+    () => Number.parseInt(numberOfPeopleInput, 10) || 0,
+    [numberOfPeopleInput]
+  );
+  const expiryInMinutes = useMemo(
+    () => Number.parseInt(expiryMinutesInput, 10) || 0,
+    [expiryMinutesInput]
+  );
+
+  const amountPerPersonKobo = useMemo(() => {
+    if (totalAmountKobo <= 0 || numberOfPeople <= 0) {
+      return 0;
+    }
+    if (totalAmountKobo % numberOfPeople !== 0) {
+      return 0;
+    }
+    return totalAmountKobo / numberOfPeople;
+  }, [totalAmountKobo, numberOfPeople]);
+
+  const moneyDropFeePercent = feeData?.money_drop_fee_percent ?? 0;
+  const fallbackFlatFee = feeData?.money_drop_fee_kobo ?? 0;
+  const moneyDropFeeKobo = useMemo(() => {
+    if (totalAmountKobo <= 0) {
+      return 0;
+    }
+    if (moneyDropFeePercent > 0) {
+      return Math.round((totalAmountKobo * moneyDropFeePercent) / 100);
+    }
+    return fallbackFlatFee;
+  }, [fallbackFlatFee, moneyDropFeePercent, totalAmountKobo]);
+  const displayFeePercent = useMemo(() => {
+    if (moneyDropFeePercent > 0) {
+      return moneyDropFeePercent;
+    }
+    if (totalAmountKobo > 0 && moneyDropFeeKobo > 0) {
+      return (moneyDropFeeKobo / totalAmountKobo) * 100;
     }
     return 0;
-  }, [amountPerClaim, numberOfPeople]);
+  }, [moneyDropFeeKobo, moneyDropFeePercent, totalAmountKobo]);
+  const totalRequiredKobo = totalAmountKobo + moneyDropFeeKobo;
 
-  const moneyDropFee = feesData?.money_drop_fee_kobo || 0;
-  const moneyDropFeeNaira = moneyDropFee / 100; // Convert kobo to naira
-  const totalWithFee = useMemo(() => {
-    return totalAmount > 0 ? totalAmount + moneyDropFeeNaira : 0;
-  }, [totalAmount, moneyDropFeeNaira]);
+  const lockPasswordToSubmit = lockDrop ? savedPassword : '';
+  const canSavePassword = useMemo(() => {
+    const trimmed = passwordDraft.trim();
+    return trimmed.length >= MIN_PASSWORD_LENGTH && trimmed.length <= MAX_PASSWORD_LENGTH;
+  }, [passwordDraft]);
 
-  const handleCreateDrop = () => {
-    const amountKobo = nairaToKobo(parseFloat(amountPerClaim));
-    const people = parseInt(numberOfPeople, 10);
-    const expiry = parseInt(expiryInMinutes, 10);
-    const totalAmountKobo = nairaToKobo(totalAmount);
-    const totalRequiredKobo = totalAmountKobo + moneyDropFee;
-
-    if (isNaN(amountKobo) || amountKobo <= 0) {
-      Alert.alert('Invalid Input', 'Please enter a valid amount per person.');
-      return;
+  const validateForm = (): string | null => {
+    if (parsedTitle.length < MIN_TITLE_LENGTH || parsedTitle.length > MAX_TITLE_LENGTH) {
+      return 'Title must be between 3 and 80 characters.';
     }
-    if (isNaN(people) || people <= 0) {
-      Alert.alert('Invalid Input', 'Please enter a valid number of people.');
-      return;
+    if (totalAmountKobo <= 0) {
+      return 'Enter a valid total money drop amount.';
     }
-    if (isNaN(expiry) || expiry <= 0) {
-      Alert.alert('Invalid Input', 'Please enter a valid expiry time in minutes.');
-      return;
+    if (numberOfPeople <= 0) {
+      return 'Number of people must be greater than zero.';
+    }
+    if (expiryInMinutes < MIN_EXPIRY_MINUTES || expiryInMinutes > MAX_EXPIRY_MINUTES) {
+      return 'Expiry time must be between 1 and 1440 minutes.';
+    }
+    if (totalAmountKobo % numberOfPeople !== 0) {
+      return 'Total amount must divide equally by number of people.';
+    }
+    if (lockDrop) {
+      if (isEditingPassword) {
+        return 'Save your drop password before creating the money drop.';
+      }
+      const password = lockPasswordToSubmit.trim();
+      if (password.length < MIN_PASSWORD_LENGTH || password.length > MAX_PASSWORD_LENGTH) {
+        return 'Drop password must be between 4 and 64 characters.';
+      }
     }
     if (balanceData && balanceData.available_balance < totalRequiredKobo) {
-      Alert.alert(
-        'Insufficient Funds',
-        `You need ${formatCurrency(totalRequiredKobo)} to create this money drop (including ${formatCurrency(moneyDropFee)} fee).`
-      );
+      return `Insufficient balance. You need ${formatCurrency(totalRequiredKobo)} to proceed.`;
+    }
+    return null;
+  };
+
+  const saveDropPassword = () => {
+    const trimmed = passwordDraft.trim();
+    if (trimmed.length < MIN_PASSWORD_LENGTH || trimmed.length > MAX_PASSWORD_LENGTH) {
+      Alert.alert('Invalid Password', 'Drop password must be between 4 and 64 characters.');
+      return;
+    }
+    setSavedPassword(trimmed);
+    setPasswordDraft('');
+    setIsEditingPassword(false);
+    setShowSavedPassword(false);
+  };
+
+  const onToggleLockDrop = (enabled: boolean) => {
+    setLockDrop(enabled);
+    if (!enabled) {
+      setPasswordDraft('');
+      setSavedPassword('');
+      setShowSavedPassword(false);
+      setIsEditingPassword(false);
+    }
+  };
+
+  const openConfirmAndCreate = () => {
+    const validationError = validateForm();
+    if (validationError) {
+      Alert.alert('Invalid MoneyDrop', validationError);
       return;
     }
 
-    // Use the secure action hook to get authorization before creating the drop
-    triggerSecureAction((transactionPin: string) =>
-      createMoneyDrop({
-        amount_per_claim: amountKobo,
-        number_of_people: people,
-        expiry_in_minutes: expiry,
-        transaction_pin: transactionPin,
-      })
+    Alert.alert(
+      'Proceed With MoneyDrop?',
+      `You will move ${formatCurrency(totalAmountKobo)} to your MoneyDrop account and pay ${formatCurrency(moneyDropFeeKobo)} as fee.\n\nIf you do not already have a MoneyDrop account, one will be created for you automatically.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Yes, Proceed',
+          style: 'default',
+          onPress: () => {
+            triggerSecureAction((transactionPin: string) =>
+              createMoneyDrop({
+                title: parsedTitle,
+                total_amount: totalAmountKobo,
+                number_of_people: numberOfPeople,
+                expiry_in_minutes: expiryInMinutes,
+                lock_drop: lockDrop,
+                lock_password: lockDrop ? lockPasswordToSubmit : undefined,
+                transaction_pin: transactionPin,
+              })
+            );
+          },
+        },
+      ]
     );
   };
 
   return (
-    <ScreenWrapper>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
+    <View style={styles.root}>
+      <LinearGradient
+        colors={['#1A1B1E', '#0C0D0F', BG_BOTTOM]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={styles.backgroundGradient}
+      />
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.flex}
         >
-          <Ionicons name="arrow-back" size={24} color={theme.colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Create a Money Drop</Text>
-        <View style={{ width: 24 }} />
-      </View>
-
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.flex}
-      >
-        <ScrollView
-          contentContainerStyle={styles.contentWrapper}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Feature Highlights Card */}
-          <Card style={styles.featuresCard}>
-            <View style={styles.featuresHeader}>
-              <Ionicons name="shield-checkmark" size={24} color={theme.colors.success} />
-              <Text style={styles.featuresTitle}>Secure Money Drop</Text>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContent}
+          >
+            <View style={styles.topRow}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={styles.backButton}
+                onPress={() => navigation.goBack()}
+              >
+                <Ionicons name="arrow-back" size={24} color="#F4F4F5" />
+              </TouchableOpacity>
             </View>
-            <View style={styles.featureItem}>
-              <Ionicons name="lock-closed" size={16} color={theme.colors.textSecondary} />
-              <Text style={styles.featureText}>
-                Funds are stored in a dedicated secure account separate from your main wallet
-              </Text>
-            </View>
-            <View style={styles.featureItem}>
-              <Ionicons name="share-social" size={16} color={theme.colors.textSecondary} />
-              <Text style={styles.featureText}>
-                Share via QR code or link - recipients claim instantly to their account
-              </Text>
-            </View>
-            <View style={styles.featureItem}>
-              <Ionicons name="time" size={16} color={theme.colors.textSecondary} />
-              <Text style={styles.featureText}>
-                Auto-refund if not claimed - your money returns to your wallet automatically
-              </Text>
-            </View>
-          </Card>
 
-          {/* Step 1: Amount per Claim */}
-          <FormInput
-            label="Amount per Person (₦)"
-            value={amountPerClaim}
-            onChangeText={setAmountPerClaim}
-            placeholder="e.g., 500"
-            keyboardType="numeric"
-          />
-
-          {/* Step 2: Number of People */}
-          <FormInput
-            label="Number of People"
-            value={numberOfPeople}
-            onChangeText={setNumberOfPeople}
-            placeholder="e.g., 10"
-            keyboardType="number-pad"
-          />
-
-          {/* Step 3: Expiry Time */}
-          <FormInput
-            label="Expiry Time (minutes)"
-            value={expiryInMinutes}
-            onChangeText={setExpiryInMinutes}
-            placeholder="e.g., 60 for 1 hour"
-            keyboardType="number-pad"
-          />
-
-          {/* Summary Card */}
-          {totalAmount > 0 && (
-            <Card style={styles.summaryCard}>
-              <Text style={styles.summaryTitle}>Payment Summary</Text>
-
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Total Amount:</Text>
-                <Text style={styles.summaryValue}>{formatCurrency(nairaToKobo(totalAmount))}</Text>
+            <View style={styles.infoCard}>
+              <View style={styles.infoHeader}>
+                <Ionicons name="shield-checkmark" size={20} color={BRAND_YELLOW} />
+                <Text style={styles.infoTitle}>Secure MoneyDrop</Text>
               </View>
 
-              {moneyDropFee > 0 && (
-                <View style={styles.summaryRow}>
-                  <View style={styles.feeRow}>
-                    <Text style={styles.summaryLabel}>Creation Fee:</Text>
-                    <Ionicons
-                      name="information-circle-outline"
-                      size={16}
-                      color={theme.colors.textSecondary}
-                    />
-                  </View>
-                  <Text style={styles.summaryFee}>
-                    {formatCurrency(nairaToKobo(moneyDropFeeNaira))}
-                  </Text>
-                </View>
-              )}
-
-              <View style={styles.summaryDivider} />
-
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryTotalLabel}>Total Required:</Text>
-                <Text style={styles.summaryTotalValue}>
-                  {formatCurrency(nairaToKobo(totalWithFee))}
+              <View style={styles.infoRow}>
+                <Ionicons name="lock-closed-outline" size={17} color="#8A8E95" />
+                <Text style={styles.infoText}>
+                  Funds are stored in a dedicated secure account separate from your main wallet
                 </Text>
               </View>
+              <View style={styles.infoRow}>
+                <Ionicons name="share-social-outline" size={17} color="#8A8E95" />
+                <Text style={styles.infoText}>
+                  Share via QR code or link and claimers receive instantly to their account
+                </Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Ionicons name="time-outline" size={17} color="#8A8E95" />
+                <Text style={styles.infoText}>
+                  Auto-refund on expiry. Unclaimed funds return to your wallet automatically
+                </Text>
+              </View>
+            </View>
 
-              {balanceData && (
-                <View style={styles.balanceRow}>
-                  <Text style={styles.balanceLabel}>Available Balance:</Text>
-                  <Text
-                    style={[
-                      styles.balanceValue,
-                      balanceData.available_balance < nairaToKobo(totalWithFee) &&
-                        styles.balanceInsufficient,
-                    ]}
-                  >
-                    {formatCurrency(balanceData.available_balance)}
-                  </Text>
-                </View>
-              )}
-            </Card>
-          )}
+            <View style={styles.separator} />
 
-          <View style={styles.buttonContainer}>
-            <PrimaryButton
-              title="Create Money Drop"
-              onPress={handleCreateDrop}
-              isLoading={isCreating}
-              disabled={totalAmount <= 0}
+            <Text style={styles.fieldLabel}>Title</Text>
+            <TextInput
+              style={styles.fieldInput}
+              placeholder="e.g December Giveaway"
+              placeholderTextColor="#686C73"
+              value={title}
+              onChangeText={setTitle}
+              maxLength={MAX_TITLE_LENGTH}
             />
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+
+            <Text style={styles.fieldLabel}>Total MoneyDrop Amount (₦)</Text>
+            <TextInput
+              style={styles.fieldInput}
+              placeholder="Enter total amount"
+              placeholderTextColor="#686C73"
+              value={totalAmountInput}
+              onChangeText={setTotalAmountInput}
+              keyboardType="decimal-pad"
+            />
+
+            <Text style={styles.fieldLabel}>Number of people</Text>
+            <TextInput
+              style={styles.fieldInput}
+              placeholder="e.g 15"
+              placeholderTextColor="#686C73"
+              value={numberOfPeopleInput}
+              onChangeText={setNumberOfPeopleInput}
+              keyboardType="number-pad"
+            />
+            <Text style={styles.helperText}>
+              Amount per Person{' '}
+              <Text style={styles.helperHighlight}>
+                {amountPerPersonKobo > 0 ? formatCurrency(amountPerPersonKobo) : '—'}
+              </Text>
+            </Text>
+
+            <Text style={styles.fieldLabel}>Expiry Time (Minutes)</Text>
+            <TextInput
+              style={styles.fieldInput}
+              placeholder="e.g 60"
+              placeholderTextColor="#686C73"
+              value={expiryMinutesInput}
+              onChangeText={setExpiryMinutesInput}
+              keyboardType="number-pad"
+            />
+
+            <View style={styles.lockHeader}>
+              <Text style={styles.fieldLabel}>Lock Drop</Text>
+              <Switch
+                value={lockDrop}
+                onValueChange={onToggleLockDrop}
+                thumbColor={lockDrop ? '#111315' : '#E8EAEE'}
+                trackColor={{ false: '#C9CBD1', true: BRAND_YELLOW }}
+              />
+            </View>
+
+            {lockDrop && (
+              <View style={styles.lockBlock}>
+                <View style={styles.lockOptionRow}>
+                  <Text style={styles.lockOptionLabel}>Lock Option</Text>
+                  <Text style={styles.lockOptionValue}>Password</Text>
+                </View>
+
+                {savedPassword && !isEditingPassword ? (
+                  <View style={styles.savedPasswordWrap}>
+                    <Text style={styles.savedPasswordValue}>
+                      {showSavedPassword
+                        ? savedPassword
+                        : '*'.repeat(Math.max(savedPassword.length, 8))}
+                    </Text>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      style={styles.smallButton}
+                      onPress={() => setShowSavedPassword((prev) => !prev)}
+                    >
+                      <Text style={styles.smallButtonText}>
+                        {showSavedPassword ? 'Hide Password' : 'View Password'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      style={styles.smallButton}
+                      onPress={() => {
+                        setIsEditingPassword(true);
+                        setPasswordDraft(savedPassword);
+                      }}
+                    >
+                      <Text style={styles.smallButtonText}>Edit Drop Password</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <>
+                    <TextInput
+                      style={styles.fieldInput}
+                      placeholder="Enter password"
+                      placeholderTextColor="#686C73"
+                      secureTextEntry
+                      value={passwordDraft}
+                      onChangeText={setPasswordDraft}
+                      maxLength={MAX_PASSWORD_LENGTH}
+                    />
+                    <TouchableOpacity
+                      activeOpacity={0.9}
+                      style={[
+                        styles.passwordSaveButton,
+                        !canSavePassword && styles.passwordSaveButtonDisabled,
+                      ]}
+                      disabled={!canSavePassword}
+                      onPress={saveDropPassword}
+                    >
+                      <Text style={styles.passwordSaveButtonText}>Save Drop Password</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+            )}
+
+            <View style={styles.separator} />
+
+            <Text style={styles.summaryTitle}>Summary</Text>
+            <View style={styles.summaryCard}>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Amount per Person</Text>
+                <Text style={styles.summaryValue}>
+                  {amountPerPersonKobo > 0 ? formatCurrency(amountPerPersonKobo) : '—'}
+                </Text>
+              </View>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Fees</Text>
+                <Text style={styles.summaryValue}>{formatPercent(displayFeePercent)}</Text>
+              </View>
+              <View style={styles.summaryDivider} />
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryTotalLabel}>Total Required</Text>
+                <Text style={styles.summaryTotalValue}>{formatCurrency(totalRequiredKobo)}</Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              activeOpacity={0.92}
+              style={[styles.createDropButton, isCreating && styles.createDropButtonDisabled]}
+              onPress={openConfirmAndCreate}
+              disabled={isCreating}
+            >
+              <Text style={styles.createDropButtonText}>
+                {isCreating ? 'Creating MoneyDrop...' : 'Create MoneyDrop'}
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
 
       <PinInputModal
         visible={isModalVisible}
@@ -269,130 +444,239 @@ const CreateDropWizardScreen = () => {
         error={pinError}
         clearError={clearPinError}
       />
-    </ScreenWrapper>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: theme.spacing.s24,
+  root: {
+    flex: 1,
+    backgroundColor: BG_BOTTOM,
   },
-  backButton: {
-    padding: theme.spacing.s4,
+  backgroundGradient: {
+    ...StyleSheet.absoluteFillObject,
   },
-  title: {
-    fontSize: theme.fontSizes['2xl'],
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.textPrimary,
+  safeArea: {
+    flex: 1,
   },
   flex: {
     flex: 1,
   },
-  contentWrapper: {
-    paddingTop: theme.spacing.s16,
-    paddingBottom: theme.spacing.s80,
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 40,
   },
-  featuresCard: {
-    marginBottom: theme.spacing.s20,
-    padding: theme.spacing.s16,
+  topRow: {
+    marginBottom: 8,
   },
-  featuresHeader: {
+  backButton: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+  },
+  infoCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    borderStyle: 'dashed',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  infoHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: theme.spacing.s16,
+    marginBottom: 14,
   },
-  featuresTitle: {
-    fontSize: theme.fontSizes.lg,
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.textPrimary,
-    marginLeft: theme.spacing.s8,
+  infoTitle: {
+    color: '#F4F5F7',
+    fontSize: 31,
+    fontWeight: '700',
+    marginLeft: 8,
   },
-  featureItem: {
+  infoRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: theme.spacing.s12,
+    marginBottom: 12,
   },
-  featureText: {
+  infoText: {
     flex: 1,
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.textSecondary,
-    marginLeft: theme.spacing.s8,
-    lineHeight: 20,
+    color: '#888C93',
+    fontSize: 17,
+    lineHeight: 23,
+    marginLeft: 10,
   },
-  summaryCard: {
-    marginTop: theme.spacing.s16,
-    padding: theme.spacing.s16,
+  separator: {
+    marginTop: 14,
+    marginBottom: 18,
+    height: 1,
+    backgroundColor: '#51545C',
+  },
+  fieldLabel: {
+    color: '#EDEEF0',
+    fontSize: 20,
+    marginBottom: 10,
+  },
+  fieldInput: {
+    height: 58,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    backgroundColor: CARD_BG,
+    color: '#F1F2F4',
+    fontSize: 21,
+    paddingHorizontal: 14,
+    marginBottom: 14,
+  },
+  helperText: {
+    color: '#6E7279',
+    fontSize: 16,
+    marginTop: -8,
+    marginBottom: 14,
+    textDecorationLine: 'underline',
+  },
+  helperHighlight: {
+    color: '#ECEDEF',
+    textDecorationLine: 'none',
+  },
+  lockHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  lockBlock: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    padding: 12,
+    marginBottom: 8,
+  },
+  lockOptionRow: {
+    height: 46,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    backgroundColor: CARD_BG,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  lockOptionLabel: {
+    color: '#797D84',
+    fontSize: 16,
+  },
+  lockOptionValue: {
+    color: '#E5E7EB',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  passwordSaveButton: {
+    height: 52,
+    borderRadius: 12,
+    backgroundColor: BRAND_YELLOW,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  passwordSaveButtonDisabled: {
+    opacity: 0.5,
+  },
+  passwordSaveButtonText: {
+    color: '#0A0C0D',
+    fontSize: 19,
+    fontWeight: '700',
+  },
+  savedPasswordWrap: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#6E7178',
+    backgroundColor: CARD_BG,
+    padding: 12,
+  },
+  savedPasswordValue: {
+    color: '#F1F2F4',
+    fontSize: 20,
+    marginBottom: 10,
+  },
+  smallButton: {
+    height: 42,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#6E7178',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    backgroundColor: 'rgba(0,0,0,0.24)',
+  },
+  smallButtonText: {
+    color: '#D2D5DA',
+    fontSize: 16,
+    fontWeight: '600',
   },
   summaryTitle: {
-    fontSize: theme.fontSizes.lg,
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.s16,
+    color: BRAND_YELLOW,
+    fontSize: 40,
+    fontWeight: '700',
+    marginBottom: 10,
+  },
+  summaryCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: CARD_BORDER,
+    backgroundColor: CARD_BG,
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 12,
   },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: theme.spacing.s12,
+    marginBottom: 10,
   },
   summaryLabel: {
-    fontSize: theme.fontSizes.base,
-    color: theme.colors.textSecondary,
+    color: '#7E8289',
+    fontSize: 17,
   },
   summaryValue: {
-    fontSize: theme.fontSizes.base,
-    color: theme.colors.textPrimary,
-    fontWeight: theme.fontWeights.semibold,
-  },
-  feeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  summaryFee: {
-    fontSize: theme.fontSizes.base,
-    color: theme.colors.textSecondary,
+    color: '#ECEDEF',
+    fontSize: 17,
+    fontWeight: '500',
   },
   summaryDivider: {
     height: 1,
-    backgroundColor: theme.colors.border,
-    marginVertical: theme.spacing.s12,
+    backgroundColor: '#5C5F67',
+    marginVertical: 4,
   },
   summaryTotalLabel: {
-    fontSize: theme.fontSizes.lg,
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.textPrimary,
+    color: '#8D9198',
+    fontSize: 20,
+    fontWeight: '700',
   },
   summaryTotalValue: {
-    fontSize: theme.fontSizes.xl,
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.primary,
+    color: '#F5F6F8',
+    fontSize: 35,
+    fontWeight: '700',
   },
-  balanceRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  createDropButton: {
+    marginTop: 16,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: BRAND_YELLOW,
     alignItems: 'center',
-    marginTop: theme.spacing.s12,
-    paddingTop: theme.spacing.s12,
-    borderTopWidth: 1,
-    borderTopColor: theme.colors.border,
+    justifyContent: 'center',
   },
-  balanceLabel: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.textSecondary,
+  createDropButtonDisabled: {
+    opacity: 0.75,
   },
-  balanceValue: {
-    fontSize: theme.fontSizes.base,
-    color: theme.colors.success,
-    fontWeight: theme.fontWeights.semibold,
-  },
-  balanceInsufficient: {
-    color: theme.colors.error,
-  },
-  buttonContainer: {
-    marginTop: theme.spacing.s32,
+  createDropButtonText: {
+    color: '#0A0B0D',
+    fontSize: 18,
+    fontWeight: '700',
   },
 });
 

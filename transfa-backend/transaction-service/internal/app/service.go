@@ -21,9 +21,16 @@ package app
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"log"
+	"math"
 	"regexp"
 	"strings"
 	"sync"
@@ -39,16 +46,25 @@ import (
 )
 
 const (
-	defaultTransactionFee           = 500
-	pinMaxAttempts                  = 5
-	pinLockoutSeconds               = 900
-	maxBulkP2PTransfers             = 10
-	maxTransferListMembers          = 10
-	minTransferListNameLen          = 1
-	maxTransferListNameLen          = 80
-	maxPaymentRequestTitleLen       = 80
-	maxPaymentRequestDescriptionLen = 500
-	maxPaymentRequestDeclineLen     = 240
+	defaultTransactionFee            = 500
+	pinMaxAttempts                   = 5
+	pinLockoutSeconds                = 900
+	maxBulkP2PTransfers              = 10
+	maxTransferListMembers           = 10
+	minTransferListNameLen           = 1
+	maxTransferListNameLen           = 80
+	maxPaymentRequestTitleLen        = 80
+	maxPaymentRequestDescriptionLen  = 500
+	maxPaymentRequestDeclineLen      = 240
+	minMoneyDropTitleLen             = 3
+	maxMoneyDropTitleLen             = 80
+	minMoneyDropExpiryMinutes        = 1
+	maxMoneyDropExpiryMinutes        = 1440
+	minMoneyDropPasswordLen          = 4
+	maxMoneyDropPasswordLen          = 64
+	moneyDropRetryPendingReason      = "refund_retry_pending"
+	moneyDropRefundPayoutInFlight    = "refund_payout_inflight"
+	moneyDropRefundPersistFailReason = "refund_persistence_failed"
 )
 
 type serviceContextKey string
@@ -56,49 +72,73 @@ type serviceContextKey string
 const skipAnchorBalanceCheckCtxKey serviceContextKey = "skip_anchor_balance_check"
 
 var (
-	ErrInvalidTransactionPIN            = errors.New("invalid transaction pin")
-	ErrTransactionPINLocked             = errors.New("transaction pin temporarily locked")
-	ErrInvalidTransferAmount            = errors.New("transfer amount must be greater than zero")
-	ErrInvalidDescription               = errors.New("description must be between 3 and 100 characters")
-	ErrInvalidRecipient                 = errors.New("recipient username is required")
-	ErrSelfTransferNotAllowed           = errors.New("self transfer is not allowed on p2p endpoint")
-	ErrBulkTransferEmpty                = errors.New("at least one transfer item is required")
-	ErrBulkTransferLimit                = errors.New("bulk transfer supports a maximum of 10 recipients")
-	ErrDuplicateRecipient               = errors.New("duplicate recipient in bulk transfer request")
-	ErrTransferListNameRequired         = errors.New("list name is required")
-	ErrTransferListNameLength           = errors.New("list name must be between 1 and 80 characters")
-	ErrTransferListEmpty                = errors.New("at least one user is required in the list")
-	ErrTransferListMemberLimit          = errors.New("a transfer list supports a maximum of 10 users")
-	ErrTransferListDuplicateMember      = errors.New("duplicate user in transfer list")
-	ErrTransferListSelfMember           = errors.New("you cannot add yourself to a transfer list")
-	ErrTransferListNotFound             = errors.New("transfer list not found")
-	ErrInvalidPaymentRequestType        = errors.New("request type must be general or individual")
-	ErrInvalidPaymentRequestTitle       = errors.New("request title must be between 3 and 80 characters")
-	ErrInvalidPaymentRequestDescription = errors.New("request description cannot exceed 500 characters")
-	ErrInvalidPaymentRequestRecipient   = errors.New("recipient username is required for individual request")
-	ErrSelfPaymentRequest               = errors.New("cannot create an individual request for yourself")
-	ErrPaymentRequestNotFound           = errors.New("payment request not found")
-	ErrPaymentRequestNotPending         = errors.New("payment request is not pending")
-	ErrInvalidPaymentRequestDecline     = errors.New("decline reason cannot exceed 240 characters")
-	usernamePattern                     = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._]{1,18}[a-z0-9])?$`)
+	ErrInvalidTransactionPIN                  = errors.New("invalid transaction pin")
+	ErrTransactionPINLocked                   = errors.New("transaction pin temporarily locked")
+	ErrInvalidTransferAmount                  = errors.New("transfer amount must be greater than zero")
+	ErrInvalidDescription                     = errors.New("description must be between 3 and 100 characters")
+	ErrInvalidRecipient                       = errors.New("recipient username is required")
+	ErrSelfTransferNotAllowed                 = errors.New("self transfer is not allowed on p2p endpoint")
+	ErrBulkTransferEmpty                      = errors.New("at least one transfer item is required")
+	ErrBulkTransferLimit                      = errors.New("bulk transfer supports a maximum of 10 recipients")
+	ErrDuplicateRecipient                     = errors.New("duplicate recipient in bulk transfer request")
+	ErrTransferListNameRequired               = errors.New("list name is required")
+	ErrTransferListNameLength                 = errors.New("list name must be between 1 and 80 characters")
+	ErrTransferListEmpty                      = errors.New("at least one user is required in the list")
+	ErrTransferListMemberLimit                = errors.New("a transfer list supports a maximum of 10 users")
+	ErrTransferListDuplicateMember            = errors.New("duplicate user in transfer list")
+	ErrTransferListSelfMember                 = errors.New("you cannot add yourself to a transfer list")
+	ErrTransferListNotFound                   = errors.New("transfer list not found")
+	ErrInvalidPaymentRequestType              = errors.New("request type must be general or individual")
+	ErrInvalidPaymentRequestTitle             = errors.New("request title must be between 3 and 80 characters")
+	ErrInvalidPaymentRequestDescription       = errors.New("request description cannot exceed 500 characters")
+	ErrInvalidPaymentRequestRecipient         = errors.New("recipient username is required for individual request")
+	ErrSelfPaymentRequest                     = errors.New("cannot create an individual request for yourself")
+	ErrPaymentRequestNotFound                 = errors.New("payment request not found")
+	ErrPaymentRequestNotPending               = errors.New("payment request is not pending")
+	ErrInvalidPaymentRequestDecline           = errors.New("decline reason cannot exceed 240 characters")
+	ErrInvalidMoneyDropTitle                  = errors.New("money drop title must be between 3 and 80 characters")
+	ErrInvalidMoneyDropTotalAmount            = errors.New("money drop total amount must be greater than zero")
+	ErrInvalidMoneyDropPeopleCount            = errors.New("money drop number of people must be greater than zero")
+	ErrInvalidMoneyDropExpiry                 = errors.New("money drop expiry must be between 1 and 1440 minutes")
+	ErrMissingMoneyDropPassword               = errors.New("drop password is required when lock drop is enabled")
+	ErrInvalidMoneyDropPassword               = errors.New("drop password must be between 4 and 64 characters")
+	ErrMoneyDropPasswordRequiredForClaim      = errors.New("this money drop is password protected")
+	ErrMoneyDropPasswordMismatch              = errors.New("invalid drop password")
+	ErrMoneyDropPasswordEncryptionUnavailable = errors.New("money drop password encryption is not configured")
+	ErrMoneyDropEndNotAllowed                 = errors.New("money drop cannot be ended in its current state")
+	usernamePattern                           = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._]{1,18}[a-z0-9])?$`)
 )
 
 // Service provides the core business logic for transactions.
 type Service struct {
-	repo               store.Repository
-	anchorClient       *anchorclient.Client
-	accountClient      *accountclient.Client
-	eventProducer      rmrabbit.Publisher
-	transferConsumer   *TransferStatusConsumer
-	adminAccountID     string
-	transactionFeeKobo int64
-	moneyDropFeeKobo   int64
+	repo                  store.Repository
+	anchorClient          *anchorclient.Client
+	accountClient         *accountclient.Client
+	eventProducer         rmrabbit.Publisher
+	transferConsumer      *TransferStatusConsumer
+	adminAccountID        string
+	transactionFeeKobo    int64
+	moneyDropFeeKobo      int64
+	moneyDropFeePercent   float64
+	moneyDropShareBaseURL string
+	moneyDropPasswordKey  []byte
 
 	balanceFetchCircuitMu       sync.Mutex
 	balanceFetchCircuitOpenTill time.Time
 }
 
-func NewService(repo store.Repository, anchor *anchorclient.Client, accountClient *accountclient.Client, producer rmrabbit.Publisher, adminAccountID string, transactionFeeKobo int64, moneyDropFeeKobo int64) *Service {
+func NewService(
+	repo store.Repository,
+	anchor *anchorclient.Client,
+	accountClient *accountclient.Client,
+	producer rmrabbit.Publisher,
+	adminAccountID string,
+	transactionFeeKobo int64,
+	moneyDropFeeKobo int64,
+	moneyDropFeePercent float64,
+	moneyDropShareBaseURL string,
+	moneyDropPasswordKey string,
+) *Service {
 	if transactionFeeKobo <= 0 {
 		log.Printf("level=info component=service msg=\"using default transaction fee\" fee_kobo=%d", defaultTransactionFee)
 		transactionFeeKobo = defaultTransactionFee
@@ -107,15 +147,33 @@ func NewService(repo store.Repository, anchor *anchorclient.Client, accountClien
 	if adminAccountID == "" {
 		log.Printf("level=warn component=service msg=\"admin account not configured; fee collection disabled\"")
 	}
+	if moneyDropFeePercent < 0 {
+		moneyDropFeePercent = 0
+	}
+	if moneyDropFeePercent > 100 {
+		moneyDropFeePercent = 100
+	}
+	shareBaseURL := strings.TrimSpace(moneyDropShareBaseURL)
+	if shareBaseURL == "" {
+		shareBaseURL = "https://TryTransfa.com"
+	}
+	encryptionKey := deriveMoneyDropPasswordKey(moneyDropPasswordKey)
+	if len(encryptionKey) != 32 {
+		log.Printf("level=warn component=service msg=\"money-drop password encryption key is missing or invalid; locked-drop password features disabled\"")
+		encryptionKey = nil
+	}
 
 	svc := &Service{
-		repo:               repo,
-		anchorClient:       anchor,
-		accountClient:      accountClient,
-		eventProducer:      producer,
-		adminAccountID:     adminAccountID,
-		transactionFeeKobo: transactionFeeKobo,
-		moneyDropFeeKobo:   moneyDropFeeKobo,
+		repo:                  repo,
+		anchorClient:          anchor,
+		accountClient:         accountClient,
+		eventProducer:         producer,
+		adminAccountID:        adminAccountID,
+		transactionFeeKobo:    transactionFeeKobo,
+		moneyDropFeeKobo:      moneyDropFeeKobo,
+		moneyDropFeePercent:   moneyDropFeePercent,
+		moneyDropShareBaseURL: strings.TrimRight(shareBaseURL, "/"),
+		moneyDropPasswordKey:  encryptionKey,
 	}
 
 	svc.transferConsumer = NewTransferStatusConsumer(repo)
@@ -135,6 +193,10 @@ func (s *Service) GetTransactionFee() int64 {
 // GetMoneyDropFee returns the configured money drop creation fee in kobo.
 func (s *Service) GetMoneyDropFee() int64 {
 	return s.moneyDropFeeKobo
+}
+
+func (s *Service) GetMoneyDropFeePercent() float64 {
+	return s.moneyDropFeePercent
 }
 
 // ResolveInternalUserID converts a Clerk user id string (e.g., "user_abc123") into the
@@ -1755,6 +1817,57 @@ func (s *Service) syncMoneyDropAccountBalance(ctx context.Context, accountID uui
 func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req domain.CreateMoneyDropRequest) (*domain.CreateMoneyDropResponse, error) {
 	log.Printf("level=info component=service flow=money_drop_create msg=\"request accepted\" user_id=%s", userID)
 
+	title := strings.TrimSpace(req.Title)
+	if len(title) < minMoneyDropTitleLen || len(title) > maxMoneyDropTitleLen {
+		return nil, ErrInvalidMoneyDropTitle
+	}
+	if req.TotalAmount <= 0 {
+		return nil, ErrInvalidMoneyDropTotalAmount
+	}
+	if req.NumberOfPeople <= 0 {
+		return nil, ErrInvalidMoneyDropPeopleCount
+	}
+	if req.ExpiryInMinutes < minMoneyDropExpiryMinutes || req.ExpiryInMinutes > maxMoneyDropExpiryMinutes {
+		return nil, ErrInvalidMoneyDropExpiry
+	}
+	if req.TotalAmount%int64(req.NumberOfPeople) != 0 {
+		return nil, errors.New("total amount must be divisible equally by number of people")
+	}
+
+	lockPassword := strings.TrimSpace(req.LockPassword)
+	if req.LockDrop {
+		if len(s.moneyDropPasswordKey) != 32 {
+			return nil, ErrMoneyDropPasswordEncryptionUnavailable
+		}
+		if lockPassword == "" {
+			return nil, ErrMissingMoneyDropPassword
+		}
+		if len(lockPassword) < minMoneyDropPasswordLen || len(lockPassword) > maxMoneyDropPasswordLen {
+			return nil, ErrInvalidMoneyDropPassword
+		}
+	}
+
+	amountPerClaim := req.TotalAmount / int64(req.NumberOfPeople)
+	feeAmount := s.calculateMoneyDropCreationFee(req.TotalAmount)
+	requiredAmount := req.TotalAmount + feeAmount
+
+	var lockPasswordHash *string
+	var lockPasswordEncrypted *string
+	if req.LockDrop {
+		hashedPassword, hashErr := bcrypt.GenerateFromPassword([]byte(lockPassword), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return nil, fmt.Errorf("failed to hash drop password: %w", hashErr)
+		}
+		hashValue := string(hashedPassword)
+		lockPasswordHash = &hashValue
+
+		encryptedPassword, encErr := s.encryptMoneyDropPassword(lockPassword)
+		if encErr != nil {
+			return nil, fmt.Errorf("failed to encrypt drop password: %w", encErr)
+		}
+		lockPasswordEncrypted = &encryptedPassword
+	}
+
 	// 1. Get user's primary account and validate funds
 	primaryAccount, err := s.repo.FindAccountByUserID(ctx, userID)
 	if err != nil {
@@ -1766,25 +1879,20 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 		log.Printf("level=warn component=service flow=money_drop_create msg=\"balance sync failed\" user_id=%s err=%v", userID, err)
 	}
 
-	// Get actual balance from Anchor for validation
 	anchorBalance, err := s.anchorClient.GetAccountBalance(ctx, primaryAccount.AnchorAccountID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get account balance from Anchor: %w", err)
 	}
-
-	totalAmount := req.AmountPerClaim * int64(req.NumberOfPeople)
-	requiredAmount := totalAmount + s.moneyDropFeeKobo // Add fee to required amount
-
 	if anchorBalance.Data.AvailableBalance < requiredAmount {
 		return nil, errors.New("insufficient funds in primary wallet")
 	}
+
 	// 2. Get or create money drop account via account-service
 	moneyDropAccount, err := s.repo.FindMoneyDropAccountByUserID(ctx, userID)
 	if err != nil && !errors.Is(err, store.ErrAccountNotFound) {
 		return nil, fmt.Errorf("failed to get user's money drop account: %w", err)
 	}
 
-	// If account doesn't exist or doesn't have Anchor account, create it via account-service
 	if moneyDropAccount == nil || moneyDropAccount.AnchorAccountID == "" {
 		log.Printf("level=info component=service flow=money_drop_create msg=\"creating money-drop anchor account\" user_id=%s", userID)
 		accountResp, err := s.accountClient.CreateMoneyDropAccount(ctx, userID.String())
@@ -1793,8 +1901,6 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 		}
 		log.Printf("level=info component=service flow=money_drop_create msg=\"money-drop anchor account created\" user_id=%s anchor_account_id=%s", userID, accountResp.AnchorAccountID)
 
-		// Account-service already created/updated the account in the database
-		// Re-fetch to get the updated account with Anchor details
 		moneyDropAccount, err = s.repo.FindMoneyDropAccountByUserID(ctx, userID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch money drop account after creation: %w", err)
@@ -1805,74 +1911,66 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 	}
 
 	// 3. Transfer funds from primary account to money drop account via Book Transfer
-	reason := fmt.Sprintf("Money Drop Funding - Total: %d kobo", totalAmount)
-	_, err = s.anchorClient.InitiateBookTransfer(ctx, primaryAccount.AnchorAccountID, moneyDropAccount.AnchorAccountID, reason, totalAmount)
+	reason := fmt.Sprintf("Money Drop Funding - Total: %d kobo", req.TotalAmount)
+	_, err = s.anchorClient.InitiateBookTransfer(ctx, primaryAccount.AnchorAccountID, moneyDropAccount.AnchorAccountID, reason, req.TotalAmount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to transfer funds to money drop account: %w", err)
 	}
-	log.Printf("level=info component=service flow=money_drop_create msg=\"funding transfer created\" user_id=%s amount=%d", userID, totalAmount)
+	log.Printf("level=info component=service flow=money_drop_create msg=\"funding transfer created\" user_id=%s amount=%d", userID, req.TotalAmount)
 
-	// 3.5. Sync money drop account balance after funding
 	if err := s.syncMoneyDropAccountBalance(ctx, moneyDropAccount.ID, moneyDropAccount.AnchorAccountID); err != nil {
 		log.Printf("level=warn component=service flow=money_drop_create msg=\"money-drop account sync failed after funding\" account_id=%s err=%v", moneyDropAccount.ID, err)
-		// Don't fail the operation, balance will sync later
 	}
 
 	// 4. Debit required amount (total + fee) from primary account
 	if err := s.repo.DebitWallet(ctx, userID, requiredAmount); err != nil {
+		refundReason := "Money Drop Create Debit Failed - Reverse Funding"
+		if _, refundErr := s.anchorClient.InitiateBookTransfer(
+			ctx,
+			moneyDropAccount.AnchorAccountID,
+			primaryAccount.AnchorAccountID,
+			refundReason,
+			req.TotalAmount,
+		); refundErr != nil {
+			log.Printf("level=error component=service flow=money_drop_create msg=\"failed to reverse funding after debit error\" user_id=%s err=%v", userID, refundErr)
+		}
 		return nil, fmt.Errorf("failed to debit primary wallet: %w", err)
 	}
 
-	// 4.5. Collect the money drop creation fee to admin account (if fee > 0)
-	if s.moneyDropFeeKobo > 0 {
-		// Create temporary transaction record for fee collection
-		tempFeeTx := &domain.Transaction{
-			ID:              uuid.New(),
-			SenderID:        userID,
-			SourceAccountID: primaryAccount.ID,
-			Type:            "money_drop_fee",
-			Category:        "Money Drop",
-			Status:          "pending",
-			Amount:          0,
-			Fee:             s.moneyDropFeeKobo,
-			Description:     "Money Drop Creation Fee",
-		}
-		if err := s.collectTransactionFee(ctx, tempFeeTx, primaryAccount, s.moneyDropFeeKobo, "Money Drop Creation Fee"); err != nil {
-			log.Printf("level=warn component=service flow=money_drop_create msg=\"money-drop creation fee collection failed\" user_id=%s err=%v", userID, err)
-			// Don't fail the operation, just log the warning
-		}
-	}
-
 	// 5. Create money drop record
-	expiry := time.Now().Add(time.Duration(req.ExpiryInMinutes) * time.Minute)
+	expiry := time.Now().UTC().Add(time.Duration(req.ExpiryInMinutes) * time.Minute)
 	drop := &domain.MoneyDrop{
 		CreatorID:              userID,
+		Title:                  title,
 		Status:                 "active",
-		AmountPerClaim:         req.AmountPerClaim,
+		TotalAmount:            req.TotalAmount,
+		AmountPerClaim:         amountPerClaim,
 		TotalClaimsAllowed:     req.NumberOfPeople,
 		ClaimsMadeCount:        0,
 		ExpiryTimestamp:        expiry,
+		LockEnabled:            req.LockDrop,
+		LockPasswordHash:       lockPasswordHash,
+		LockPasswordEncrypted:  lockPasswordEncrypted,
+		FeeAmount:              feeAmount,
+		FeePercentage:          s.moneyDropFeePercent,
 		FundingSourceAccountID: primaryAccount.ID,
 		MoneyDropAccountID:     moneyDropAccount.ID,
 	}
 
 	createdDrop, err := s.repo.CreateMoneyDrop(ctx, drop)
 	if err != nil {
-		// Refund the Book Transfer since drop creation failed
-		// Transfer back from money drop account to primary account
-		refundReason := fmt.Sprintf("Money Drop Creation Failed - Refund")
-		if _, refundErr := s.anchorClient.InitiateBookTransfer(ctx, moneyDropAccount.AnchorAccountID, primaryAccount.AnchorAccountID, refundReason, totalAmount); refundErr != nil {
+		refundReason := "Money Drop Creation Failed - Refund"
+		if _, refundErr := s.anchorClient.InitiateBookTransfer(
+			ctx,
+			moneyDropAccount.AnchorAccountID,
+			primaryAccount.AnchorAccountID,
+			refundReason,
+			req.TotalAmount,
+		); refundErr != nil {
 			log.Printf("level=error component=service flow=money_drop_create msg=\"anchor funding refund failed after record creation error\" user_id=%s err=%v", userID, refundErr)
-			// Also try to credit the database balance (including fee)
-			if dbRefundErr := s.repo.CreditWallet(ctx, userID, requiredAmount); dbRefundErr != nil {
-				log.Printf("level=error component=service flow=money_drop_create msg=\"wallet refund failed after record creation error\" user_id=%s err=%v", userID, dbRefundErr)
-			}
-		} else {
-			// If Anchor transfer refund succeeded but drop creation failed, also refund the fee
-			if s.moneyDropFeeKobo > 0 {
-				// Try to refund fee from admin account back to user (if fee was collected)
-				log.Printf("level=warn component=service flow=money_drop_create msg=\"drop creation failed after fee collection; manual fee refund may be required\" user_id=%s", userID)
-			}
+		}
+		if dbRefundErr := s.repo.CreditWallet(ctx, userID, requiredAmount); dbRefundErr != nil {
+			log.Printf("level=error component=service flow=money_drop_create msg=\"wallet refund failed after record creation error\" user_id=%s err=%v", userID, dbRefundErr)
 		}
 		return nil, fmt.Errorf("failed to create money drop record: %w", err)
 	}
@@ -1886,25 +1984,47 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 		Type:                 "money_drop_funding",
 		Category:             "Money Drop",
 		Status:               "completed",
-		Amount:               totalAmount,
-		Fee:                  s.moneyDropFeeKobo, // Record fee in database
+		Amount:               req.TotalAmount,
+		Fee:                  feeAmount,
 		Description:          fmt.Sprintf("Funding for Money Drop #%s", createdDrop.ID.String()),
 	}
 	if err := s.repo.CreateTransaction(ctx, fundingTx); err != nil {
 		log.Printf("level=warn component=service flow=money_drop_create msg=\"failed to persist funding transaction log\" user_id=%s err=%v", userID, err)
-		// Don't fail the operation, the drop is already created
+	}
+
+	// 6.5. Collect money drop creation fee to admin account (if fee > 0).
+	// This is intentionally after drop creation so rollback paths for failed creates are deterministic.
+	if feeAmount > 0 {
+		tempFeeTx := &domain.Transaction{
+			ID:              uuid.New(),
+			SenderID:        userID,
+			SourceAccountID: primaryAccount.ID,
+			Type:            "money_drop_fee",
+			Category:        "Money Drop",
+			Status:          "pending",
+			Amount:          0,
+			Fee:             feeAmount,
+			Description:     "Money Drop Creation Fee",
+		}
+		if err := s.collectTransactionFee(ctx, tempFeeTx, primaryAccount, feeAmount, "Money Drop Creation Fee"); err != nil {
+			log.Printf("level=warn component=service flow=money_drop_create msg=\"money-drop creation fee collection failed\" user_id=%s err=%v", userID, err)
+		}
 	}
 
 	// 7. Prepare and return response
 	dropIDStr := createdDrop.ID.String()
+	shareableLink, qrCodeContent := s.buildMoneyDropLinks(ctx, dropIDStr, userID)
 	response := &domain.CreateMoneyDropResponse{
 		MoneyDropID:     dropIDStr,
-		QRCodeContent:   fmt.Sprintf("transfa://claim-drop/%s", dropIDStr),
-		ShareableLink:   fmt.Sprintf("https://transfa.app/claim?drop_id=%s", dropIDStr),
-		TotalAmount:     totalAmount,
-		AmountPerClaim:  req.AmountPerClaim,
+		Title:           title,
+		QRCodeContent:   qrCodeContent,
+		ShareableLink:   shareableLink,
+		TotalAmount:     req.TotalAmount,
+		AmountPerClaim:  amountPerClaim,
 		NumberOfPeople:  req.NumberOfPeople,
-		Fee:             s.moneyDropFeeKobo, // Include fee in response
+		Fee:             feeAmount,
+		FeePercentage:   s.moneyDropFeePercent,
+		LockEnabled:     req.LockDrop,
 		ExpiryTimestamp: expiry,
 	}
 
@@ -1913,7 +2033,7 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 }
 
 // ClaimMoneyDrop orchestrates claiming a portion of a money drop.
-func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, dropID uuid.UUID) (*domain.ClaimMoneyDropResponse, error) {
+func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, dropID uuid.UUID, req domain.ClaimMoneyDropRequest) (*domain.ClaimMoneyDropResponse, error) {
 	log.Printf("level=info component=service flow=money_drop_claim msg=\"claim requested\" money_drop_id=%s claimant_id=%s", dropID, claimantID)
 
 	// 1. Get drop details
@@ -1924,6 +2044,19 @@ func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, drop
 
 	if drop.CreatorID == claimantID {
 		return nil, errors.New("you cannot claim your own money drop")
+	}
+
+	if drop.LockEnabled {
+		password := strings.TrimSpace(req.LockPassword)
+		if password == "" {
+			return nil, ErrMoneyDropPasswordRequiredForClaim
+		}
+		if drop.LockPasswordHash == nil || *drop.LockPasswordHash == "" {
+			return nil, ErrMoneyDropPasswordMismatch
+		}
+		if bcrypt.CompareHashAndPassword([]byte(*drop.LockPasswordHash), []byte(password)) != nil {
+			return nil, ErrMoneyDropPasswordMismatch
+		}
 	}
 
 	// 2. Get claimant's account
@@ -1939,7 +2072,7 @@ func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, drop
 	}
 
 	// 4. Perform atomic claim in database
-	err = s.repo.ClaimMoneyDropAtomic(ctx, dropID, claimantID, claimantAccount.ID, moneyDropAccount.ID, drop.AmountPerClaim)
+	claimTxID, err := s.repo.ClaimMoneyDropAtomic(ctx, dropID, claimantID, claimantAccount.ID, moneyDropAccount.ID, drop.AmountPerClaim)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process claim: %w", err)
 	}
@@ -1955,19 +2088,63 @@ func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, drop
 		return nil, fmt.Errorf("money drop account does not have an Anchor account ID")
 	}
 
-	// 7. Initiate BookTransfer from money drop account to claimant's account
-	reason := fmt.Sprintf("Money Drop Claim by %s", creator.Username)
+	// 7. Initiate BookTransfer from money drop account to claimant's account.
+	// Include deterministic transaction token so webhook reconciliation can recover from unknown initiation outcomes.
+	reason := buildMoneyDropClaimTransferReason(claimTxID, creator.Username)
 
-	_, err = s.anchorClient.InitiateBookTransfer(ctx, moneyDropAccount.AnchorAccountID, claimantAccount.AnchorAccountID, reason, drop.AmountPerClaim)
+	transferResp, err := s.anchorClient.InitiateBookTransfer(
+		ctx,
+		moneyDropAccount.AnchorAccountID,
+		claimantAccount.AnchorAccountID,
+		reason,
+		drop.AmountPerClaim,
+	)
 	if err != nil {
 		log.Printf("level=error component=service flow=money_drop_claim msg=\"anchor transfer initiation failed\" money_drop_id=%s claimant_id=%s err=%v", dropID, claimantID, err)
-		// Note: The claim has already been recorded in the database.
-		// In a production system, you might want to implement retry logic or a compensation transaction.
-		// For now, we return success but log the error.
-		// The transaction status will be updated by the webhook handler.
-	} else {
-		log.Printf("level=info component=service flow=money_drop_claim msg=\"anchor transfer created\" money_drop_id=%s claimant_id=%s amount=%d", dropID, claimantID, drop.AmountPerClaim)
+		// Only compensate/revert when Anchor explicitly rejected the request.
+		// Transport/timeouts are ambiguous and may still settle, so claims must remain pending.
+		var anchorErr *anchorclient.ErrorResponse
+		if errors.As(err, &anchorErr) && anchorErr.IsExplicitRejection() {
+			if revertErr := s.repo.RevertMoneyDropClaimAtomic(ctx, dropID, claimantID, claimTxID); revertErr != nil {
+				log.Printf("level=error component=service flow=money_drop_claim msg=\"failed to revert claim after explicit anchor rejection\" money_drop_id=%s claimant_id=%s claim_transaction_id=%s err=%v", dropID, claimantID, claimTxID, revertErr)
+				return nil, fmt.Errorf("failed to initiate payout and failed to rollback claim: %w", revertErr)
+			}
+			return nil, fmt.Errorf("failed to initiate payout transfer: %w", err)
+		}
+
+		log.Printf("level=warn component=service flow=money_drop_claim msg=\"payout initiation state is unknown; claim kept pending\" money_drop_id=%s claimant_id=%s claim_transaction_id=%s err=%v", dropID, claimantID, claimTxID, err)
+		return &domain.ClaimMoneyDropResponse{
+			Message:         "Claim received. Payout is being processed and will reflect shortly.",
+			AmountClaimed:   drop.AmountPerClaim,
+			CreatorUsername: creator.Username,
+		}, nil
 	}
+	anchorTransferID := strings.TrimSpace(transferResp.Data.ID)
+	transferType := "book"
+	anchorReason := buildMoneyDropClaimAnchorReason(dropID, "transfer_initiated")
+	clearedFailureReason := ""
+	metadata := store.UpdateTransactionMetadataParams{
+		TransferType:  &transferType,
+		FailureReason: &clearedFailureReason,
+		AnchorReason:  &anchorReason,
+	}
+	if anchorTransferID != "" {
+		metadata.AnchorTransferID = &anchorTransferID
+	}
+	if metaErr := s.repo.UpdateTransactionMetadata(ctx, claimTxID, metadata); metaErr != nil {
+		// Fallback to the simpler status update path when full metadata update fails.
+		// This still persists anchor_transfer_id, which prevents duplicate reconciliation retries.
+		if anchorTransferID != "" {
+			if fallbackErr := s.repo.UpdateTransactionStatus(ctx, claimTxID, anchorTransferID, "pending"); fallbackErr == nil {
+				log.Printf("level=warn component=service flow=money_drop_claim msg=\"metadata update failed; persisted anchor transfer id via fallback\" money_drop_id=%s claimant_id=%s claim_transaction_id=%s anchor_transfer_id=%s err=%v", dropID, claimantID, claimTxID, anchorTransferID, metaErr)
+			} else {
+				return nil, fmt.Errorf("failed to persist claim payout transfer reference: metadata_err=%v fallback_err=%w", metaErr, fallbackErr)
+			}
+		} else {
+			return nil, fmt.Errorf("failed to persist claim payout metadata: %w", metaErr)
+		}
+	}
+	log.Printf("level=info component=service flow=money_drop_claim msg=\"anchor transfer created\" money_drop_id=%s claimant_id=%s amount=%d anchor_transfer_id=%s", dropID, claimantID, drop.AmountPerClaim, anchorTransferID)
 
 	// 7.5. Sync money drop account balance after claim
 	if err := s.syncMoneyDropAccountBalance(ctx, moneyDropAccount.ID, moneyDropAccount.AnchorAccountID); err != nil {
@@ -1988,29 +2165,6 @@ func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, drop
 		CreatorUsername: creator.Username,
 	}
 
-	claimBody := fmt.Sprintf("You received %d kobo from a money drop.", drop.AmountPerClaim)
-	claimEntityType := "money_drop"
-	claimDedupe := fmt.Sprintf("money_drop.claim.received:%s:%s", dropID, claimantID)
-	s.emitInAppNotification(ctx, "money_drop_claim", domain.InAppNotification{
-		ID:                uuid.New(),
-		UserID:            claimantID,
-		Category:          "system",
-		Type:              "money_drop.claim.received",
-		Title:             "Money Drop Claimed",
-		Body:              &claimBody,
-		Status:            "unread",
-		RelatedEntityType: &claimEntityType,
-		RelatedEntityID:   &dropID,
-		DedupeKey:         &claimDedupe,
-		Data: map[string]interface{}{
-			"drop_id":            dropID.String(),
-			"amount":             drop.AmountPerClaim,
-			"creator_user_id":    creator.ID.String(),
-			"creator_username":   stripUsernamePrefix(creator.Username),
-			"claimed_by_user_id": claimantID.String(),
-		},
-	})
-
 	log.Printf("level=info component=service flow=money_drop_claim msg=\"claim completed\" money_drop_id=%s claimant_id=%s", dropID, claimantID)
 	return response, nil
 }
@@ -2028,12 +2182,15 @@ func (s *Service) GetMoneyDropDetails(ctx context.Context, dropID uuid.UUID) (*d
 	}
 
 	details := &domain.MoneyDropDetails{
-		ID:              drop.ID,
-		CreatorUsername: creator.Username,
-		AmountPerClaim:  drop.AmountPerClaim,
-		Status:          drop.Status,
-		IsClaimable:     false,
-		Message:         "",
+		ID:               drop.ID,
+		Title:            drop.Title,
+		CreatorUsername:  creator.Username,
+		TotalAmount:      drop.TotalAmount,
+		AmountPerClaim:   drop.AmountPerClaim,
+		Status:           drop.Status,
+		IsClaimable:      false,
+		RequiresPassword: drop.LockEnabled,
+		Message:          "",
 	}
 
 	// Determine if drop is claimable
@@ -2047,79 +2204,563 @@ func (s *Service) GetMoneyDropDetails(ctx context.Context, dropID uuid.UUID) (*d
 		details.Message = "This money drop has been fully claimed."
 		details.IsClaimable = false
 	} else {
-		details.Message = "You can claim this money drop!"
+		if drop.LockEnabled {
+			details.Message = "This money drop requires a password to claim."
+		} else {
+			details.Message = "You can claim this money drop!"
+		}
 		details.IsClaimable = true
 	}
 
 	return details, nil
 }
 
+func (s *Service) GetMoneyDropDashboard(ctx context.Context, creatorID uuid.UUID) (*domain.MoneyDropDashboardResponse, error) {
+	currentBalance := int64(0)
+	moneyDropAccount, err := s.repo.FindMoneyDropAccountByUserID(ctx, creatorID)
+	if err != nil && !errors.Is(err, store.ErrAccountNotFound) {
+		return nil, fmt.Errorf("failed to fetch money drop account: %w", err)
+	}
+	if moneyDropAccount != nil {
+		currentBalance = moneyDropAccount.Balance
+		if moneyDropAccount.AnchorAccountID != "" {
+			if syncErr := s.syncMoneyDropAccountBalance(ctx, moneyDropAccount.ID, moneyDropAccount.AnchorAccountID); syncErr == nil {
+				updatedAccount, refetchErr := s.repo.FindMoneyDropAccountByUserID(ctx, creatorID)
+				if refetchErr == nil && updatedAccount != nil {
+					currentBalance = updatedAccount.Balance
+				}
+			}
+		}
+	}
+
+	activeDrops, err := s.repo.ListActiveMoneyDropsByCreator(ctx, creatorID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch active drops: %w", err)
+	}
+	endedDrops, err := s.repo.ListEndedMoneyDropsByCreator(ctx, creatorID, 20)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch drop history: %w", err)
+	}
+
+	now := time.Now().UTC()
+	activeItems := make([]domain.MoneyDropDashboardItem, 0, len(activeDrops))
+	for _, drop := range activeDrops {
+		activeItems = append(activeItems, buildMoneyDropDashboardItem(drop, now))
+	}
+
+	historyItems := make([]domain.MoneyDropDashboardItem, 0, len(endedDrops))
+	for _, drop := range endedDrops {
+		historyItems = append(historyItems, buildMoneyDropDashboardItem(drop, now))
+	}
+
+	return &domain.MoneyDropDashboardResponse{
+		CurrentBalance: currentBalance,
+		ActiveDrops:    activeItems,
+		DropHistory:    historyItems,
+	}, nil
+}
+
+func (s *Service) GetMoneyDropOwnerDetails(
+	ctx context.Context,
+	ownerID uuid.UUID,
+	dropID uuid.UUID,
+	claimersLimit int,
+) (*domain.MoneyDropOwnerDetails, error) {
+	drop, err := s.repo.FindMoneyDropByIDAndCreatorID(ctx, dropID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	if claimersLimit <= 0 {
+		claimersLimit = 20
+	}
+
+	claimers, _, err := s.repo.ListMoneyDropClaimsByDropID(ctx, dropID, "", claimersLimit, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch money drop claimers: %w", err)
+	}
+
+	lockPassword := (*string)(nil)
+	lockPasswordMasked := ""
+	if drop.LockEnabled {
+		lockPasswordMasked = "**********"
+	}
+
+	shareableLink, qrCode := s.buildMoneyDropLinks(ctx, drop.ID.String(), ownerID)
+	canEndDrop := drop.Status == "active" && time.Now().UTC().Before(drop.ExpiryTimestamp) && drop.ClaimsMadeCount < drop.TotalClaimsAllowed
+
+	return &domain.MoneyDropOwnerDetails{
+		ID:                 drop.ID,
+		Title:              drop.Title,
+		Status:             drop.Status,
+		StatusLabel:        moneyDropStatusLabel(drop.Status, drop.ExpiryTimestamp, drop.ClaimsMadeCount, drop.TotalClaimsAllowed),
+		TotalAmount:        drop.TotalAmount,
+		AmountPerPerson:    drop.AmountPerClaim,
+		NumberOfPeople:     drop.TotalClaimsAllowed,
+		ClaimsMadeCount:    drop.ClaimsMadeCount,
+		ExpiryTimestamp:    drop.ExpiryTimestamp,
+		LockEnabled:        drop.LockEnabled,
+		LockPasswordMasked: lockPasswordMasked,
+		LockPassword:       lockPassword,
+		ShareableLink:      shareableLink,
+		QRCodeContent:      qrCode,
+		Claimers:           claimers,
+		CanEndDrop:         canEndDrop,
+		EndedAt:            drop.EndedAt,
+		EndedReason:        drop.EndedReason,
+	}, nil
+}
+
+func (s *Service) RevealMoneyDropPassword(ctx context.Context, ownerID uuid.UUID, dropID uuid.UUID) (string, error) {
+	if len(s.moneyDropPasswordKey) != 32 {
+		return "", ErrMoneyDropPasswordEncryptionUnavailable
+	}
+	drop, err := s.repo.FindMoneyDropByIDAndCreatorID(ctx, dropID, ownerID)
+	if err != nil {
+		return "", err
+	}
+	if !drop.LockEnabled {
+		return "", errors.New("this drop is not password protected")
+	}
+	if drop.LockPasswordEncrypted == nil || strings.TrimSpace(*drop.LockPasswordEncrypted) == "" {
+		return "", errors.New("drop password is unavailable")
+	}
+
+	decrypted, err := s.decryptMoneyDropPassword(*drop.LockPasswordEncrypted)
+	if err != nil {
+		return "", fmt.Errorf("failed to decrypt drop password: %w", err)
+	}
+	return decrypted, nil
+}
+
+func (s *Service) GetMoneyDropClaimers(
+	ctx context.Context,
+	ownerID uuid.UUID,
+	dropID uuid.UUID,
+	search string,
+	limit int,
+	offset int,
+) (*domain.MoneyDropClaimersResponse, error) {
+	drop, err := s.repo.FindMoneyDropByIDAndCreatorID(ctx, dropID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+
+	claimers, total, err := s.repo.ListMoneyDropClaimsByDropID(ctx, dropID, search, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch claimers: %w", err)
+	}
+
+	hasMore := offset+len(claimers) < total
+	return &domain.MoneyDropClaimersResponse{
+		DropID:   drop.ID,
+		Title:    drop.Title,
+		Claimers: claimers,
+		Total:    total,
+		HasMore:  hasMore,
+	}, nil
+}
+
+func (s *Service) EndMoneyDrop(ctx context.Context, ownerID uuid.UUID, dropID uuid.UUID) (*domain.EndMoneyDropResponse, error) {
+	drop, err := s.repo.FindMoneyDropByIDAndCreatorID(ctx, dropID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	if drop.Status != "active" {
+		return nil, ErrMoneyDropEndNotAllowed
+	}
+
+	status, refundedAmount, remaining, err := s.finalizeMoneyDropWithRefund(ctx, dropID, ownerID, "manual_end")
+	if err != nil {
+		return nil, fmt.Errorf("failed to finalize money drop end: %w", err)
+	}
+
+	return &domain.EndMoneyDropResponse{
+		DropID:           dropID,
+		Status:           status,
+		RefundedAmount:   refundedAmount,
+		RemainingBalance: remaining,
+		Message:          "Money drop ended successfully",
+	}, nil
+}
+
+func (s *Service) GetClaimedMoneyDropHistory(ctx context.Context, userID uuid.UUID) (*domain.ClaimedMoneyDropHistoryResponse, error) {
+	items, err := s.repo.ListClaimedMoneyDropsByUserID(ctx, userID, 50)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch claimed money drop history: %w", err)
+	}
+	return &domain.ClaimedMoneyDropHistoryResponse{Items: items}, nil
+}
+
 // RefundMoneyDrop processes a refund for an expired or completed money drop.
 func (s *Service) RefundMoneyDrop(ctx context.Context, dropID uuid.UUID, creatorID uuid.UUID, amount int64) error {
-	log.Printf("level=info component=service flow=money_drop_refund msg=\"refund requested\" money_drop_id=%s creator_id=%s amount=%d", dropID, creatorID, amount)
+	log.Printf("level=info component=service flow=money_drop_refund msg=\"refund requested\" money_drop_id=%s creator_id=%s requested_amount=%d", dropID, creatorID, amount)
 
-	// Get creator's primary account
-	creatorAccount, err := s.repo.FindAccountByUserID(ctx, creatorID)
+	status, refundedAmount, remaining, err := s.finalizeMoneyDropWithRefund(ctx, dropID, creatorID, "expired")
 	if err != nil {
-		return fmt.Errorf("failed to get creator's account: %w", err)
+		return err
 	}
 
-	// Get money drop account
-	moneyDropAccount, err := s.repo.FindMoneyDropAccountByUserID(ctx, creatorID)
-	if err != nil {
-		return fmt.Errorf("failed to get money drop account: %w", err)
+	if amount > 0 {
+		authoritativeAmount := refundedAmount + remaining
+		if amount != authoritativeAmount {
+			log.Printf("level=warn component=service flow=money_drop_refund msg=\"caller provided amount differs from authoritative amount\" money_drop_id=%s creator_id=%s caller_amount=%d authoritative_amount=%d refunded=%d outstanding=%d", dropID, creatorID, amount, authoritativeAmount, refundedAmount, remaining)
+		}
 	}
 
-	// Verify money drop account has Anchor account ID
-	if moneyDropAccount.AnchorAccountID == "" {
-		return fmt.Errorf("money drop account does not have an Anchor account ID")
-	}
-
-	// Transfer funds from money drop account back to primary account via Book Transfer
-	reason := fmt.Sprintf("Money Drop Refund - Amount: %d kobo", amount)
-	_, err = s.anchorClient.InitiateBookTransfer(ctx, moneyDropAccount.AnchorAccountID, creatorAccount.AnchorAccountID, reason, amount)
-	if err != nil {
-		return fmt.Errorf("failed to transfer funds back to primary account: %w", err)
-	}
-	log.Printf("level=info component=service flow=money_drop_refund msg=\"anchor transfer created\" money_drop_id=%s creator_id=%s amount=%d", dropID, creatorID, amount)
-
-	// Update database balances (credit primary)
-	if err := s.repo.CreditWallet(ctx, creatorID, amount); err != nil {
-		log.Printf("level=warn component=service flow=money_drop_refund msg=\"wallet credit failed\" creator_id=%s err=%v", creatorID, err)
-		// Don't fail - Anchor transfer succeeded, balance will sync later
-	}
-
-	// Sync money drop account balance after refund
-	if err := s.syncMoneyDropAccountBalance(ctx, moneyDropAccount.ID, moneyDropAccount.AnchorAccountID); err != nil {
-		log.Printf("level=warn component=service flow=money_drop_refund msg=\"money-drop account sync failed after refund\" account_id=%s err=%v", moneyDropAccount.ID, err)
-		// Don't fail the operation, balance will sync later
-	}
-
-	// Sync creator's primary account balance after refund
-	if err := s.syncAccountBalance(ctx, creatorID); err != nil {
-		log.Printf("level=warn component=service flow=money_drop_refund msg=\"creator balance sync failed after refund\" creator_id=%s err=%v", creatorID, err)
-		// Don't fail the operation, balance will sync later
-	}
-
-	// Log the refund transaction
-	refundTx := &domain.Transaction{
-		ID:                   uuid.New(),
-		SenderID:             creatorID,
-		SourceAccountID:      moneyDropAccount.ID,
-		DestinationAccountID: &creatorAccount.ID,
-		Type:                 "money_drop_refund",
-		Category:             "Money Drop",
-		Status:               "completed",
-		Amount:               amount,
-		Fee:                  0,
-		Description:          fmt.Sprintf("Refund for Money Drop #%s", dropID.String()),
-	}
-	if err := s.repo.CreateTransaction(ctx, refundTx); err != nil {
-		log.Printf("level=warn component=service flow=money_drop_refund msg=\"failed to persist refund transaction log\" creator_id=%s err=%v", creatorID, err)
-	}
-
-	log.Printf("level=info component=service flow=money_drop_refund msg=\"refund completed\" money_drop_id=%s creator_id=%s", dropID, creatorID)
+	log.Printf("level=info component=service flow=money_drop_refund msg=\"refund finalize completed\" money_drop_id=%s creator_id=%s status=%s refunded_amount=%d outstanding=%d", dropID, creatorID, status, refundedAmount, remaining)
 	return nil
+}
+
+func (s *Service) finalizeMoneyDropWithRefund(ctx context.Context, dropID uuid.UUID, creatorID uuid.UUID, endedReason string) (string, int64, int64, error) {
+	lockAcquired, restoreActiveOnRelease, err := s.repo.AcquireMoneyDropFinalizationLock(ctx, dropID)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("failed to acquire drop finalization lock: %w", err)
+	}
+
+	if !lockAcquired {
+		drop, lookupErr := s.repo.FindMoneyDropByID(ctx, dropID)
+		if lookupErr != nil {
+			return "", 0, 0, fmt.Errorf("money drop not found: %w", lookupErr)
+		}
+		if drop.CreatorID != creatorID {
+			return "", 0, 0, store.ErrMoneyDropNotFound
+		}
+		_, remaining := calculateMoneyDropOutstanding(
+			drop.TotalAmount,
+			drop.AmountPerClaim,
+			drop.TotalClaimsAllowed,
+			drop.ClaimsMadeCount,
+			drop.RefundedAmount,
+		)
+		// Another worker has already finalized or is in-flight.
+		return drop.Status, 0, remaining, nil
+	}
+
+	releaseLock := true
+	defer func() {
+		if !releaseLock {
+			return
+		}
+		if releaseErr := s.repo.ReleaseMoneyDropFinalizationLock(ctx, dropID, restoreActiveOnRelease); releaseErr != nil {
+			log.Printf("level=error component=service flow=money_drop_refund msg=\"failed to release finalization lock\" money_drop_id=%s err=%v", dropID, releaseErr)
+		}
+	}()
+
+	drop, err := s.repo.FindMoneyDropByID(ctx, dropID)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("money drop not found after acquiring lock: %w", err)
+	}
+	if drop.CreatorID != creatorID {
+		return "", 0, 0, store.ErrMoneyDropNotFound
+	}
+
+	totalAmount, remaining := calculateMoneyDropOutstanding(
+		drop.TotalAmount,
+		drop.AmountPerClaim,
+		drop.TotalClaimsAllowed,
+		drop.ClaimsMadeCount,
+		drop.RefundedAmount,
+	)
+	authoritativeRemaining := totalAmount - int64(drop.ClaimsMadeCount)*drop.AmountPerClaim
+	if authoritativeRemaining < 0 {
+		authoritativeRemaining = 0
+	}
+
+	finalStatus := "completed"
+	if authoritativeRemaining > 0 {
+		finalStatus = "expired_and_refunded"
+	}
+	refundedAmount := int64(0)
+	outstanding := remaining
+	if remaining > 0 {
+		creatorAccount, creatorErr := s.repo.FindAccountByUserID(ctx, creatorID)
+		if creatorErr != nil {
+			return "", 0, remaining, fmt.Errorf("failed to get creator's account: %w", creatorErr)
+		}
+
+		moneyDropAccount, moneyDropErr := s.repo.FindMoneyDropAccountByUserID(ctx, creatorID)
+		if moneyDropErr != nil {
+			return "", 0, remaining, fmt.Errorf("failed to get money drop account: %w", moneyDropErr)
+		}
+
+		if moneyDropAccount.AnchorAccountID == "" {
+			return "", 0, remaining, fmt.Errorf("money drop account does not have an Anchor account ID")
+		}
+
+		refundableAmount := remaining
+		if bal, balErr := s.anchorClient.GetAccountBalance(ctx, moneyDropAccount.AnchorAccountID); balErr == nil {
+			if bal.Data.AvailableBalance < refundableAmount {
+				log.Printf("level=warn component=service flow=money_drop_refund msg=\"refundable amount capped by anchor available balance\" money_drop_id=%s creator_id=%s remaining=%d available=%d", dropID, creatorID, remaining, bal.Data.AvailableBalance)
+				refundableAmount = bal.Data.AvailableBalance
+			}
+		} else {
+			log.Printf("level=warn component=service flow=money_drop_refund msg=\"anchor balance fetch failed; using authoritative db remaining amount\" money_drop_id=%s creator_id=%s err=%v", dropID, creatorID, balErr)
+		}
+		if refundableAmount < 0 {
+			refundableAmount = 0
+		}
+
+		if refundableAmount > 0 {
+			// Persist a pre-payout marker before initiating external transfer.
+			// If post-payout persistence later fails, this prevents automatic retries
+			// from treating the drop as a safe pre-payout refund-processing candidate.
+			if err := s.repo.UpdateMoneyDropEndMetadata(
+				ctx,
+				dropID,
+				"completed",
+				moneyDropRefundPayoutInFlight,
+				time.Now().UTC(),
+			); err != nil {
+				return "", 0, remaining, fmt.Errorf("failed to mark money drop refund payout as in-flight: %w", err)
+			}
+
+			reason := fmt.Sprintf("Money Drop Refund - Amount: %d kobo", refundableAmount)
+			transferResp, transferErr := s.anchorClient.InitiateBookTransfer(ctx, moneyDropAccount.AnchorAccountID, creatorAccount.AnchorAccountID, reason, refundableAmount)
+			if transferErr != nil {
+				return "", 0, remaining, fmt.Errorf("failed to transfer funds back to primary account: %w", transferErr)
+			}
+			transferID := strings.TrimSpace(transferResp.Data.ID)
+			log.Printf("level=info component=service flow=money_drop_refund msg=\"anchor transfer created\" money_drop_id=%s creator_id=%s amount=%d transfer_id=%s", dropID, creatorID, refundableAmount, transferID)
+
+			// Once payout has been sent externally, keep this drop in refund_processing
+			// until persistence catches up; reopening to active can double-refund pooled funds.
+			releaseLock = false
+			if err := s.repo.AddMoneyDropRefundedAmount(ctx, dropID, refundableAmount); err != nil {
+				markErr := s.repo.UpdateMoneyDropEndMetadata(ctx, dropID, "completed", moneyDropRefundPersistFailReason, time.Now().UTC())
+				if markErr != nil {
+					log.Printf("level=error component=service flow=money_drop_refund msg=\"failed to mark drop for manual reconciliation after refunded-amount persistence failure\" money_drop_id=%s creator_id=%s transfer_id=%s err=%v", dropID, creatorID, transferID, markErr)
+				}
+				return "", 0, remaining, fmt.Errorf("failed to persist money drop refunded amount after payout transfer_id=%s: %w", transferID, err)
+			}
+
+			if err := s.repo.CreditWallet(ctx, creatorID, refundableAmount); err != nil {
+				log.Printf("level=warn component=service flow=money_drop_refund msg=\"wallet credit failed\" creator_id=%s err=%v", creatorID, err)
+			}
+
+			if err := s.syncMoneyDropAccountBalance(ctx, moneyDropAccount.ID, moneyDropAccount.AnchorAccountID); err != nil {
+				log.Printf("level=warn component=service flow=money_drop_refund msg=\"money-drop account sync failed after refund\" account_id=%s err=%v", moneyDropAccount.ID, err)
+			}
+
+			if err := s.syncAccountBalance(ctx, creatorID); err != nil {
+				log.Printf("level=warn component=service flow=money_drop_refund msg=\"creator balance sync failed after refund\" creator_id=%s err=%v", creatorID, err)
+			}
+
+			refundTx := &domain.Transaction{
+				ID:                   uuid.New(),
+				SenderID:             creatorID,
+				SourceAccountID:      moneyDropAccount.ID,
+				DestinationAccountID: &creatorAccount.ID,
+				Type:                 "money_drop_refund",
+				Category:             "Money Drop",
+				Status:               "completed",
+				Amount:               refundableAmount,
+				Fee:                  0,
+				Description:          fmt.Sprintf("Refund for Money Drop #%s", dropID.String()),
+			}
+			if err := s.repo.CreateTransaction(ctx, refundTx); err != nil {
+				log.Printf("level=warn component=service flow=money_drop_refund msg=\"failed to persist refund transaction log\" creator_id=%s err=%v", creatorID, err)
+			}
+		}
+
+		refundedAmount = refundableAmount
+		outstanding = remaining - refundedAmount
+		if outstanding < 0 {
+			outstanding = 0
+		}
+
+		// Keep the drop in refund_processing if full remaining amount could not be refunded yet.
+		// This avoids permanently stranding funds when anchor balance is temporarily lower than
+		// the authoritative remaining amount (for example, due to in-flight claim settlements).
+		if outstanding > 0 {
+			if err := s.repo.UpdateMoneyDropEndMetadata(ctx, dropID, "completed", moneyDropRetryPendingReason, time.Now().UTC()); err != nil {
+				// Keep the drop non-claimable if retry-pending metadata cannot be persisted.
+				// Re-opening to active here can allow new claims after partial refunds.
+				releaseLock = false
+				return "", refundedAmount, outstanding, fmt.Errorf("failed to mark money drop refund as retry pending: %w", err)
+			}
+			log.Printf("level=warn component=service flow=money_drop_refund msg=\"partial refund applied; keeping drop in refund_processing for retry\" money_drop_id=%s creator_id=%s refunded_amount=%d outstanding=%d", dropID, creatorID, refundedAmount, outstanding)
+			releaseLock = false
+			return "refund_processing", refundedAmount, outstanding, nil
+		}
+
+	}
+
+	if finalStatus == "completed" {
+		endedReason = "completed"
+	}
+	if err := s.repo.UpdateMoneyDropEndMetadata(ctx, dropID, finalStatus, endedReason, time.Now().UTC()); err != nil {
+		return "", refundedAmount, outstanding, fmt.Errorf("failed to finalize money drop metadata: %w", err)
+	}
+
+	releaseLock = false
+	return finalStatus, refundedAmount, outstanding, nil
+}
+
+func calculateMoneyDropOutstanding(
+	totalAmount int64,
+	amountPerClaim int64,
+	totalClaimsAllowed int,
+	claimsMadeCount int,
+	refundedAmount int64,
+) (int64, int64) {
+	if totalAmount <= 0 {
+		totalAmount = int64(totalClaimsAllowed) * amountPerClaim
+	}
+	authoritativeRemaining := totalAmount - int64(claimsMadeCount)*amountPerClaim
+	if authoritativeRemaining < 0 {
+		authoritativeRemaining = 0
+	}
+
+	alreadyRefunded := refundedAmount
+	if alreadyRefunded < 0 {
+		alreadyRefunded = 0
+	}
+	if alreadyRefunded > authoritativeRemaining {
+		alreadyRefunded = authoritativeRemaining
+	}
+
+	return totalAmount, authoritativeRemaining - alreadyRefunded
+}
+
+func (s *Service) calculateMoneyDropCreationFee(totalAmount int64) int64 {
+	if totalAmount <= 0 {
+		return 0
+	}
+	if s.moneyDropFeePercent > 0 {
+		return int64(math.Round((float64(totalAmount) * s.moneyDropFeePercent) / 100.0))
+	}
+	if s.moneyDropFeeKobo > 0 {
+		return s.moneyDropFeeKobo
+	}
+	return 0
+}
+
+func deriveMoneyDropPasswordKey(rawSecret string) []byte {
+	secret := strings.TrimSpace(rawSecret)
+	if secret == "" {
+		return nil
+	}
+
+	if decoded, err := base64.StdEncoding.DecodeString(secret); err == nil && len(decoded) == 32 {
+		return decoded
+	}
+	sum := sha256.Sum256([]byte(secret))
+	return sum[:]
+}
+
+func (s *Service) encryptMoneyDropPassword(plain string) (string, error) {
+	if len(s.moneyDropPasswordKey) != 32 {
+		return "", errors.New("money drop password key is invalid")
+	}
+	block, err := aes.NewCipher(s.moneyDropPasswordKey)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	ciphertext := gcm.Seal(nonce, nonce, []byte(plain), nil)
+	return base64.StdEncoding.EncodeToString(ciphertext), nil
+}
+
+func (s *Service) decryptMoneyDropPassword(encrypted string) (string, error) {
+	if len(s.moneyDropPasswordKey) != 32 {
+		return "", errors.New("money drop password key is invalid")
+	}
+	raw, err := base64.StdEncoding.DecodeString(encrypted)
+	if err != nil {
+		return "", err
+	}
+
+	block, err := aes.NewCipher(s.moneyDropPasswordKey)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonceSize := gcm.NonceSize()
+	if len(raw) < nonceSize {
+		return "", errors.New("invalid encrypted payload")
+	}
+	nonce, ciphertext := raw[:nonceSize], raw[nonceSize:]
+	plain, err := gcm.Open(nil, nonce, ciphertext, nil)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
+}
+
+func (s *Service) buildMoneyDropLinks(ctx context.Context, dropID string, creatorID uuid.UUID) (string, string) {
+	segment := "_drop_"
+	if user, err := s.repo.FindUserByID(ctx, creatorID); err == nil && user != nil {
+		segment = sanitizeMoneyDropUsernameSegment(user.Username)
+	}
+	shareableLink := fmt.Sprintf("%s/%s?drop_id=%s", s.moneyDropShareBaseURL, segment, dropID)
+	return shareableLink, shareableLink
+}
+
+func sanitizeMoneyDropUsernameSegment(username string) string {
+	normalized := strings.TrimSpace(strings.ToLower(username))
+	normalized = strings.TrimPrefix(normalized, "_")
+	if normalized == "" {
+		return "_drop_"
+	}
+	return fmt.Sprintf("_%s_", normalized)
+}
+
+func buildMoneyDropDashboardItem(drop domain.MoneyDrop, now time.Time) domain.MoneyDropDashboardItem {
+	statusLabel := moneyDropStatusLabel(drop.Status, drop.ExpiryTimestamp, drop.ClaimsMadeCount, drop.TotalClaimsAllowed)
+	return domain.MoneyDropDashboardItem{
+		ID:                 drop.ID,
+		Title:              drop.Title,
+		Status:             drop.Status,
+		TotalAmount:        drop.TotalAmount,
+		AmountPerPerson:    drop.AmountPerClaim,
+		NumberOfPeople:     drop.TotalClaimsAllowed,
+		ClaimsMadeCount:    drop.ClaimsMadeCount,
+		TimeLeftLabel:      humanizeMoneyDropTimeLeft(drop.ExpiryTimestamp, now),
+		UsersClaimedLabel:  fmt.Sprintf("%d/%d", drop.ClaimsMadeCount, drop.TotalClaimsAllowed),
+		ExpiryTimestamp:    drop.ExpiryTimestamp,
+		CreatedDateLabel:   drop.CreatedAt.Format("02/01/06"),
+		Ended:              statusLabel == "Ended",
+		EndedDisplayStatus: statusLabel,
+	}
+}
+
+func moneyDropStatusLabel(status string, expiry time.Time, claimsMade int, totalClaims int) string {
+	if status == "active" && time.Now().UTC().Before(expiry) && claimsMade < totalClaims {
+		return "Live"
+	}
+	return "Ended"
+}
+
+func humanizeMoneyDropTimeLeft(expiry time.Time, now time.Time) string {
+	if expiry.Before(now) {
+		return "0m"
+	}
+	d := expiry.Sub(now)
+	totalMinutes := int(d.Minutes())
+	days := totalMinutes / (24 * 60)
+	hours := (totalMinutes % (24 * 60)) / 60
+	minutes := totalMinutes % 60
+
+	if days > 0 {
+		if hours > 0 {
+			return fmt.Sprintf("%dd %dh", days, hours)
+		}
+		return fmt.Sprintf("%dd %dm", days, minutes)
+	}
+	if hours > 0 {
+		return fmt.Sprintf("%dh %dm", hours, minutes)
+	}
+	return fmt.Sprintf("%dm", minutes)
 }
 
 func normalizeTransferListName(raw string) string {

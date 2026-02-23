@@ -97,15 +97,22 @@ func TransactionRoutes(h *TransactionHandlers, jwksURL string) http.Handler {
 
 		// Money Drop routes
 		r.Route("/money-drops", func(r chi.Router) {
-			r.Post("/", h.CreateMoneyDropHandler)                     // Create a new money drop
-			r.Post("/{drop_id}/claim", h.ClaimMoneyDropHandler)       // Claim a money drop
-			r.Get("/{drop_id}/details", h.GetMoneyDropDetailsHandler) // Get money drop details
+			r.Post("/", h.CreateMoneyDropHandler)                                // Create a new money drop
+			r.Get("/dashboard", h.GetMoneyDropDashboardHandler)                  // Owner dashboard
+			r.Get("/claimed", h.GetClaimedMoneyDropsHandler)                     // Claimed history for current user
+			r.Post("/{drop_id}/claim", h.ClaimMoneyDropHandler)                  // Claim a money drop
+			r.Post("/{drop_id}/end", h.EndMoneyDropHandler)                      // End an active money drop
+			r.Get("/{drop_id}/details", h.GetMoneyDropDetailsHandler)            // Public details for claim flow
+			r.Get("/{drop_id}/owner-details", h.GetMoneyDropOwnerDetailsHandler) // Full owner details
+			r.Post("/{drop_id}/reveal-password", h.RevealMoneyDropPasswordHandler)
+			r.Get("/{drop_id}/claimers", h.GetMoneyDropClaimersHandler) // Paginated claimers list
 		})
 	})
 
-	// Internal endpoints (no authentication required for service-to-service communication)
+	// Internal endpoints (authenticated via X-Internal-API-Key).
 	r.Post("/platform-fee", h.PlatformFeeHandler)
 	r.Post("/internal/money-drops/refund", h.RefundMoneyDropHandler)
+	r.Post("/internal/money-drops/reconcile-claims", h.ReconcileMoneyDropClaimsHandler)
 
 	return r
 }

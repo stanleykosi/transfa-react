@@ -96,6 +96,7 @@ type Repository interface {
 	FindTransactionByID(ctx context.Context, transactionID uuid.UUID) (*domain.Transaction, error)
 	FindLikelyPaymentRequestSettlementTransaction(ctx context.Context, senderID uuid.UUID, recipientID uuid.UUID, amount int64, description string, since time.Time) (*domain.Transaction, error)
 	FindTransactionByAnchorTransferID(ctx context.Context, anchorTransferID string) (*domain.Transaction, error)
+	FindPendingMoneyDropClaimByAnchorParticipantsAndAmount(ctx context.Context, anchorAccountID string, counterpartyID string, amount int64) (*domain.Transaction, error)
 	MarkTransactionAsFailed(ctx context.Context, transactionID uuid.UUID, anchorTransferID, failureReason string) error
 	MarkTransactionAsCompleted(ctx context.Context, transactionID uuid.UUID, anchorTransferID string) error
 	RefundTransactionFee(ctx context.Context, transactionID uuid.UUID, userID uuid.UUID, fee int64) error
@@ -105,10 +106,24 @@ type Repository interface {
 	CreateAccount(ctx context.Context, account *domain.Account) (*domain.Account, error)
 	CreateMoneyDrop(ctx context.Context, drop *domain.MoneyDrop) (*domain.MoneyDrop, error)
 	FindMoneyDropByID(ctx context.Context, dropID uuid.UUID) (*domain.MoneyDrop, error)
+	FindMoneyDropByIDAndCreatorID(ctx context.Context, dropID, creatorID uuid.UUID) (*domain.MoneyDrop, error)
+	FindMoneyDropClaimDropIDByTransactionID(ctx context.Context, transactionID uuid.UUID) (uuid.UUID, error)
 	FindMoneyDropCreatorByDropID(ctx context.Context, dropID uuid.UUID) (*domain.User, error)
-	ClaimMoneyDropAtomic(ctx context.Context, dropID, claimantID, claimantAccountID, moneyDropAccountID uuid.UUID, amount int64) error
+	ClaimMoneyDropAtomic(ctx context.Context, dropID, claimantID, claimantAccountID, moneyDropAccountID uuid.UUID, amount int64) (uuid.UUID, error)
+	RevertMoneyDropClaimAtomic(ctx context.Context, dropID, claimantID, claimTransactionID uuid.UUID) error
+	ListActiveMoneyDropsByCreator(ctx context.Context, creatorID uuid.UUID) ([]domain.MoneyDrop, error)
+	ListEndedMoneyDropsByCreator(ctx context.Context, creatorID uuid.UUID, limit int) ([]domain.MoneyDrop, error)
+	ListClaimedMoneyDropsByUserID(ctx context.Context, userID uuid.UUID, limit int) ([]domain.ClaimedMoneyDropHistoryItem, error)
+	ListMoneyDropClaimsByDropID(ctx context.Context, dropID uuid.UUID, search string, limit int, offset int) ([]domain.MoneyDropClaimer, int, error)
+	ListPendingMoneyDropClaimReconciliationCandidates(ctx context.Context, limit int, olderThan time.Time) ([]domain.PendingMoneyDropClaimReconciliationCandidate, error)
+	MarkMoneyDropClaimReconcileRequested(ctx context.Context, transactionID uuid.UUID, anchorReason string, failureReason string) (bool, error)
+	MarkMoneyDropClaimReconcileInFlight(ctx context.Context, transactionID uuid.UUID, anchorReason string) (bool, error)
 	FindExpiredAndCompletedMoneyDrops(ctx context.Context) ([]domain.MoneyDrop, error)
+	AcquireMoneyDropFinalizationLock(ctx context.Context, dropID uuid.UUID) (bool, bool, error)
+	ReleaseMoneyDropFinalizationLock(ctx context.Context, dropID uuid.UUID, restoreActive bool) error
 	UpdateMoneyDropStatus(ctx context.Context, dropID uuid.UUID, status string) error
+	UpdateMoneyDropEndMetadata(ctx context.Context, dropID uuid.UUID, status string, endedReason string, endedAt time.Time) error
+	AddMoneyDropRefundedAmount(ctx context.Context, dropID uuid.UUID, amount int64) error
 	UpdateMoneyDropAccountBalance(ctx context.Context, accountID uuid.UUID, balance int64) error
 }
 

@@ -50,6 +50,9 @@ import RequestPaymentAuthScreen from '@/screens/Notifications/RequestPaymentAuth
 import CreateDropWizardScreen from '@/screens/MoneyDrop/CreateDropWizardScreen';
 import MoneyDropSuccessScreen from '@/screens/MoneyDrop/MoneyDropSuccessScreen';
 import ClaimDropScreen from '@/screens/MoneyDrop/ClaimDropScreen';
+import MoneyDropDetailsScreen from '@/screens/MoneyDrop/MoneyDropDetailsScreen';
+import MoneyDropClaimersScreen from '@/screens/MoneyDrop/MoneyDropClaimersScreen';
+import MoneyDropClaimedHistoryScreen from '@/screens/MoneyDrop/MoneyDropClaimedHistoryScreen';
 import TransferListsScreen from '@/screens/List/TransferListsScreen';
 import CreateTransferListScreen from '@/screens/List/CreateTransferListScreen';
 import TransferListDetailScreen from '@/screens/List/TransferListDetailScreen';
@@ -131,8 +134,14 @@ export type AppStackParamList = {
   PayTransferList: { listId: string };
   // Money Drop Screens
   CreateDropWizard: undefined;
-  MoneyDropSuccess: { dropDetails: import('@/types/api').MoneyDropResponse };
+  MoneyDropSuccess: {
+    dropDetails: import('@/types/api').MoneyDropResponse;
+    lockPassword?: string;
+  };
   ClaimDrop: { dropId: string };
+  MoneyDropDetails: { dropId: string };
+  MoneyDropClaimers: { dropId: string; title?: string };
+  MoneyDropClaimedHistory: undefined;
 };
 
 const Stack = createNativeStackNavigator<AppStackParamList>();
@@ -361,6 +370,21 @@ const AppStack = () => {
         options={{ headerShown: false, gestureEnabled: false }}
       />
       <Stack.Screen name="ClaimDrop" component={ClaimDropScreen} options={{ headerShown: false }} />
+      <Stack.Screen
+        name="MoneyDropDetails"
+        component={MoneyDropDetailsScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="MoneyDropClaimers"
+        component={MoneyDropClaimersScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="MoneyDropClaimedHistory"
+        component={MoneyDropClaimedHistoryScreen}
+        options={{ headerShown: false }}
+      />
     </Stack.Navigator>
   );
 };

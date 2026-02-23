@@ -9,6 +9,7 @@ package domain
 type MoneyDrop struct {
 	ID                     string `json:"id"`
 	CreatorID              string `json:"creator_id"`
+	TotalAmount            int64  `json:"total_amount"`
 	AmountPerClaim         int64  `json:"amount_per_claim"`
 	TotalClaimsAllowed     int    `json:"total_claims_allowed"`
 	ClaimsMadeCount        int    `json:"claims_made_count"`

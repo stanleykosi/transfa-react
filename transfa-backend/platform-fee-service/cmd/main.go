@@ -60,7 +60,7 @@ func main() {
 	logger.Info("database connection established")
 
 	repository := store.NewRepository(dbpool)
-	txClient := transactionclient.NewClient(cfg.TransactionServiceURL)
+	txClient := transactionclient.NewClient(cfg.TransactionServiceURL, cfg.TransactionServiceInternalAPIKey)
 
 	var publisher app.EventPublisher = &platformrabbit.EventProducerFallback{}
 	if cfg.RabbitMQURL != "" {

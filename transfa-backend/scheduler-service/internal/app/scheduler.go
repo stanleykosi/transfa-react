@@ -59,6 +59,12 @@ func (s *Scheduler) Start() {
 		s.logger.Info("scheduled money drop expiry job", "schedule", s.config.MoneyDropExpirySchedule)
 	}
 
+	if _, err := s.cron.AddFunc(s.config.MoneyDropClaimReconcileSchedule, s.jobs.ProcessMoneyDropClaimReconciliation); err != nil {
+		s.logger.Error("failed to schedule money drop claim reconciliation job", "error", err)
+	} else {
+		s.logger.Info("scheduled money drop claim reconciliation job", "schedule", s.config.MoneyDropClaimReconcileSchedule)
+	}
+
 	s.cron.Start()
 }
 

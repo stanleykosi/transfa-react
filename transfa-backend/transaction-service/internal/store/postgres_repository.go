@@ -38,6 +38,7 @@ var (
 	ErrPaymentRequestNotFound = errors.New("payment request not found")
 	ErrPaymentRequestNotReady = errors.New("payment request is not payable")
 	ErrTransferListNotFound   = errors.New("transfer list not found")
+	ErrMoneyDropNotFound      = errors.New("money drop not found")
 )
 
 // PostgresRepository is a concrete implementation of the Repository interface for PostgreSQL.
@@ -529,6 +530,81 @@ func (r *PostgresRepository) FindTransactionByAnchorTransferID(ctx context.Conte
 		return nil, err
 	}
 	return &tx, nil
+}
+
+func (r *PostgresRepository) FindPendingMoneyDropClaimByAnchorParticipantsAndAmount(ctx context.Context, anchorAccountID string, counterpartyID string, amount int64) (*domain.Transaction, error) {
+	sourceID := strings.TrimSpace(anchorAccountID)
+	destinationID := strings.TrimSpace(counterpartyID)
+	if sourceID == "" || destinationID == "" || amount <= 0 {
+		return nil, ErrTransactionNotFound
+	}
+
+	query := `
+		SELECT t.id, t.anchor_transfer_id, t.sender_id, t.recipient_id, t.source_account_id,
+		       t.destination_account_id, t.destination_beneficiary_id, t.type, t.category, t.status,
+		       t.amount, t.fee, t.description, t.transfer_type, t.failure_reason, t.anchor_session_id,
+		       t.anchor_reason, t.created_at, t.updated_at
+		FROM transactions t
+		INNER JOIN accounts src ON src.id = t.source_account_id
+		INNER JOIN accounts dest ON dest.id = t.destination_account_id
+		WHERE t.type = 'money_drop_claim'
+		  AND t.status = 'pending'
+		  AND t.anchor_transfer_id IS NULL
+		  AND t.amount = $1
+		  AND (
+		      (src.anchor_account_id = $2 AND dest.anchor_account_id = $3)
+		      OR (src.anchor_account_id = $3 AND dest.anchor_account_id = $2)
+		  )
+		ORDER BY t.created_at DESC
+		LIMIT 2
+	`
+
+	rows, err := r.db.Query(ctx, query, amount, sourceID, destinationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	matches := make([]domain.Transaction, 0, 2)
+	for rows.Next() {
+		var tx domain.Transaction
+		if err := rows.Scan(
+			&tx.ID,
+			&tx.AnchorTransferID,
+			&tx.SenderID,
+			&tx.RecipientID,
+			&tx.SourceAccountID,
+			&tx.DestinationAccountID,
+			&tx.DestinationBeneficiaryID,
+			&tx.Type,
+			&tx.Category,
+			&tx.Status,
+			&tx.Amount,
+			&tx.Fee,
+			&tx.Description,
+			&tx.TransferType,
+			&tx.FailureReason,
+			&tx.AnchorSessionID,
+			&tx.AnchorReason,
+			&tx.CreatedAt,
+			&tx.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		matches = append(matches, tx)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	if len(matches) == 0 {
+		return nil, ErrTransactionNotFound
+	}
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("%w: ambiguous pending money_drop_claim for anchor participants and amount", ErrTransactionNotFound)
+	}
+
+	return &matches[0], nil
 }
 
 func (r *PostgresRepository) FindTransactionByID(ctx context.Context, transactionID uuid.UUID) (*domain.Transaction, error) {
@@ -2218,15 +2294,17 @@ func (r *PostgresRepository) CreateAccount(ctx context.Context, account *domain.
 func (r *PostgresRepository) CreateMoneyDrop(ctx context.Context, drop *domain.MoneyDrop) (*domain.MoneyDrop, error) {
 	query := `
 		INSERT INTO money_drops (
-			creator_id, status, amount_per_claim, total_claims_allowed,
-			claims_made_count, expiry_timestamp, funding_source_account_id, money_drop_account_id
+			creator_id, title, status, total_amount, refunded_amount, amount_per_claim, total_claims_allowed,
+			claims_made_count, expiry_timestamp, lock_enabled, lock_password_hash, lock_password_encrypted,
+			fee_amount, fee_percentage, funding_source_account_id, money_drop_account_id
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		RETURNING id, created_at
 	`
 	err := r.db.QueryRow(ctx, query,
-		drop.CreatorID, drop.Status, drop.AmountPerClaim, drop.TotalClaimsAllowed,
-		drop.ClaimsMadeCount, drop.ExpiryTimestamp, drop.FundingSourceAccountID, drop.MoneyDropAccountID,
+		drop.CreatorID, drop.Title, drop.Status, drop.TotalAmount, drop.RefundedAmount, drop.AmountPerClaim, drop.TotalClaimsAllowed,
+		drop.ClaimsMadeCount, drop.ExpiryTimestamp, drop.LockEnabled, drop.LockPasswordHash, drop.LockPasswordEncrypted,
+		drop.FeeAmount, drop.FeePercentage, drop.FundingSourceAccountID, drop.MoneyDropAccountID,
 	).Scan(&drop.ID, &drop.CreatedAt)
 	if err != nil {
 		return nil, err
@@ -2238,23 +2316,151 @@ func (r *PostgresRepository) CreateMoneyDrop(ctx context.Context, drop *domain.M
 func (r *PostgresRepository) FindMoneyDropByID(ctx context.Context, dropID uuid.UUID) (*domain.MoneyDrop, error) {
 	var drop domain.MoneyDrop
 	query := `
-		SELECT id, creator_id, status, amount_per_claim, total_claims_allowed,
-		       claims_made_count, expiry_timestamp, funding_source_account_id,
+		SELECT id, creator_id, title, status, total_amount, refunded_amount, amount_per_claim, total_claims_allowed,
+		       claims_made_count, expiry_timestamp, lock_enabled, lock_password_hash, lock_password_encrypted,
+		       fee_amount, fee_percentage, ended_at, ended_reason, funding_source_account_id,
 		       money_drop_account_id, created_at
 		FROM money_drops
 		WHERE id = $1
 	`
 	err := r.db.QueryRow(ctx, query, dropID).Scan(
-		&drop.ID, &drop.CreatorID, &drop.Status, &drop.AmountPerClaim,
-		&drop.TotalClaimsAllowed, &drop.ClaimsMadeCount, &drop.ExpiryTimestamp,
+		&drop.ID, &drop.CreatorID, &drop.Title, &drop.Status, &drop.TotalAmount, &drop.RefundedAmount, &drop.AmountPerClaim,
+		&drop.TotalClaimsAllowed, &drop.ClaimsMadeCount, &drop.ExpiryTimestamp, &drop.LockEnabled, &drop.LockPasswordHash,
+		&drop.LockPasswordEncrypted, &drop.FeeAmount, &drop.FeePercentage, &drop.EndedAt, &drop.EndedReason,
 		&drop.FundingSourceAccountID, &drop.MoneyDropAccountID, &drop.CreatedAt)
 	if err != nil {
 		if err == pgx.ErrNoRows {
-			return nil, errors.New("money drop not found")
+			return nil, ErrMoneyDropNotFound
 		}
 		return nil, err
 	}
 	return &drop, nil
+}
+
+func (r *PostgresRepository) FindMoneyDropByIDAndCreatorID(ctx context.Context, dropID, creatorID uuid.UUID) (*domain.MoneyDrop, error) {
+	var drop domain.MoneyDrop
+	query := `
+		SELECT id, creator_id, title, status, total_amount, refunded_amount, amount_per_claim, total_claims_allowed,
+		       claims_made_count, expiry_timestamp, lock_enabled, lock_password_hash, lock_password_encrypted,
+		       fee_amount, fee_percentage, ended_at, ended_reason, funding_source_account_id,
+		       money_drop_account_id, created_at
+		FROM money_drops
+		WHERE id = $1 AND creator_id = $2
+	`
+	err := r.db.QueryRow(ctx, query, dropID, creatorID).Scan(
+		&drop.ID, &drop.CreatorID, &drop.Title, &drop.Status, &drop.TotalAmount, &drop.RefundedAmount, &drop.AmountPerClaim,
+		&drop.TotalClaimsAllowed, &drop.ClaimsMadeCount, &drop.ExpiryTimestamp, &drop.LockEnabled, &drop.LockPasswordHash,
+		&drop.LockPasswordEncrypted, &drop.FeeAmount, &drop.FeePercentage, &drop.EndedAt, &drop.EndedReason,
+		&drop.FundingSourceAccountID, &drop.MoneyDropAccountID, &drop.CreatedAt,
+	)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return nil, ErrMoneyDropNotFound
+		}
+		return nil, err
+	}
+	return &drop, nil
+}
+
+// FindMoneyDropClaimDropIDByTransactionID resolves the money_drop_claims.drop_id that
+// corresponds to a money_drop_claim transaction.
+func (r *PostgresRepository) FindMoneyDropClaimDropIDByTransactionID(ctx context.Context, transactionID uuid.UUID) (uuid.UUID, error) {
+	// New money-drop claims persist a deterministic drop token in transactions.anchor_reason.
+	// Prefer this path and only fall back to legacy heuristic matching when token is absent.
+	var anchorReason *string
+	anchorReasonQuery := `
+		SELECT anchor_reason
+		FROM transactions
+		WHERE id = $1
+		  AND type = 'money_drop_claim'
+	`
+	if err := r.db.QueryRow(ctx, anchorReasonQuery, transactionID).Scan(&anchorReason); err != nil {
+		if err == pgx.ErrNoRows {
+			return uuid.Nil, ErrTransactionNotFound
+		}
+		return uuid.Nil, err
+	}
+
+	if dropID, ok := parseMoneyDropIDFromAnchorReason(anchorReason); ok {
+		return dropID, nil
+	}
+
+	// Legacy fallback for old rows without deterministic drop token.
+	// We fail closed when multiple candidates match so we never mutate the wrong drop.
+	query := `
+		SELECT c.drop_id
+		FROM transactions t
+		INNER JOIN money_drop_claims c ON c.claimant_id = t.recipient_id
+		INNER JOIN money_drops md ON md.id = c.drop_id
+		WHERE t.id = $1
+		  AND t.type = 'money_drop_claim'
+		  AND md.creator_id = t.sender_id
+		  AND md.amount_per_claim = t.amount
+		  AND c.claimed_at BETWEEN (t.created_at - INTERVAL '10 minutes') AND (t.created_at + INTERVAL '10 minutes')
+		ORDER BY ABS(EXTRACT(EPOCH FROM (c.claimed_at - t.created_at))) ASC
+		LIMIT 2
+	`
+
+	rows, err := r.db.Query(ctx, query, transactionID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	defer rows.Close()
+
+	matches := make([]uuid.UUID, 0, 2)
+	for rows.Next() {
+		var dropID uuid.UUID
+		if err := rows.Scan(&dropID); err != nil {
+			return uuid.Nil, err
+		}
+		matches = append(matches, dropID)
+	}
+	if err := rows.Err(); err != nil {
+		return uuid.Nil, err
+	}
+
+	return selectUniqueMoneyDropMatch(matches, transactionID)
+}
+
+func parseMoneyDropIDFromAnchorReason(anchorReason *string) (uuid.UUID, bool) {
+	if anchorReason == nil {
+		return uuid.Nil, false
+	}
+
+	reason := strings.TrimSpace(*anchorReason)
+	if reason == "" {
+		return uuid.Nil, false
+	}
+
+	const tokenPrefix = "md_drop:"
+	start := strings.Index(reason, tokenPrefix)
+	if start == -1 {
+		return uuid.Nil, false
+	}
+
+	token := strings.TrimSpace(reason[start+len(tokenPrefix):])
+	if delimiter := strings.Index(token, ";"); delimiter >= 0 {
+		token = strings.TrimSpace(token[:delimiter])
+	}
+	if token == "" {
+		return uuid.Nil, false
+	}
+
+	dropID, err := uuid.Parse(token)
+	if err != nil {
+		return uuid.Nil, false
+	}
+	return dropID, true
+}
+
+func selectUniqueMoneyDropMatch(matches []uuid.UUID, transactionID uuid.UUID) (uuid.UUID, error) {
+	if len(matches) == 0 {
+		return uuid.Nil, ErrMoneyDropNotFound
+	}
+	if len(matches) > 1 {
+		return uuid.Nil, fmt.Errorf("ambiguous money drop mapping for claim transaction %s", transactionID)
+	}
+	return matches[0], nil
 }
 
 // FindMoneyDropCreatorByDropID retrieves the creator of a money drop.
@@ -2278,10 +2484,11 @@ func (r *PostgresRepository) FindMoneyDropCreatorByDropID(ctx context.Context, d
 }
 
 // ClaimMoneyDropAtomic performs an atomic claim operation on a money drop.
-func (r *PostgresRepository) ClaimMoneyDropAtomic(ctx context.Context, dropID, claimantID, claimantAccountID, moneyDropAccountID uuid.UUID, amount int64) error {
+// It returns the created money_drop_claim transaction ID for compensation if needed.
+func (r *PostgresRepository) ClaimMoneyDropAtomic(ctx context.Context, dropID, claimantID, claimantAccountID, moneyDropAccountID uuid.UUID, amount int64) (uuid.UUID, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
+		return uuid.Nil, fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
@@ -2297,17 +2504,17 @@ func (r *PostgresRepository) ClaimMoneyDropAtomic(ctx context.Context, dropID, c
 	`
 	err = tx.QueryRow(ctx, query, dropID).Scan(&claimsMade, &totalAllowed, &status, &expiry)
 	if err != nil {
-		return fmt.Errorf("failed to get and lock money drop: %w", err)
+		return uuid.Nil, fmt.Errorf("failed to get and lock money drop: %w", err)
 	}
 
 	if status != "active" {
-		return errors.New("money drop is not active")
+		return uuid.Nil, errors.New("money drop is not active")
 	}
 	if time.Now().After(expiry) {
-		return errors.New("money drop has expired")
+		return uuid.Nil, errors.New("money drop has expired")
 	}
 	if claimsMade >= totalAllowed {
-		return errors.New("money drop has been fully claimed")
+		return uuid.Nil, errors.New("money drop has been fully claimed")
 	}
 
 	// 2. Check if this user has already claimed
@@ -2319,21 +2526,33 @@ func (r *PostgresRepository) ClaimMoneyDropAtomic(ctx context.Context, dropID, c
 	`
 	err = tx.QueryRow(ctx, claimCheckQuery, dropID, claimantID).Scan(&claimCount)
 	if err != nil {
-		return fmt.Errorf("failed to check existing claims: %w", err)
+		return uuid.Nil, fmt.Errorf("failed to check existing claims: %w", err)
 	}
 	if claimCount > 0 {
-		return errors.New("you have already claimed this money drop")
+		return uuid.Nil, errors.New("you have already claimed this money drop")
 	}
 
 	// 3. Update the money_drops table
 	updateQuery := `
 		UPDATE money_drops
-		SET claims_made_count = claims_made_count + 1
+		SET claims_made_count = claims_made_count + 1,
+		    status = CASE
+		        WHEN claims_made_count + 1 >= total_claims_allowed THEN 'completed'
+		        ELSE status
+		    END,
+		    ended_at = CASE
+		        WHEN claims_made_count + 1 >= total_claims_allowed THEN NOW()
+		        ELSE ended_at
+		    END,
+		    ended_reason = CASE
+		        WHEN claims_made_count + 1 >= total_claims_allowed THEN 'completed'
+		        ELSE ended_reason
+		    END
 		WHERE id = $1
 	`
 	_, err = tx.Exec(ctx, updateQuery, dropID)
 	if err != nil {
-		return fmt.Errorf("failed to update money drop claim count: %w", err)
+		return uuid.Nil, fmt.Errorf("failed to update money drop claim count: %w", err)
 	}
 
 	// 4. Insert into money_drop_claims table
@@ -2343,37 +2562,440 @@ func (r *PostgresRepository) ClaimMoneyDropAtomic(ctx context.Context, dropID, c
 	`
 	_, err = tx.Exec(ctx, insertClaimQuery, dropID, claimantID)
 	if err != nil {
-		return fmt.Errorf("failed to insert claim record: %w", err)
+		return uuid.Nil, fmt.Errorf("failed to insert claim record: %w", err)
 	}
 
 	// 5. Log the transaction within the same DB transaction for consistency
+	var claimTxID uuid.UUID
 	logTxQuery := `
 		INSERT INTO transactions (
 			sender_id, recipient_id, source_account_id, destination_account_id,
-			type, category, status, amount, fee, description
+			type, category, status, amount, fee, description, anchor_reason
 		)
-		SELECT creator_id, $1, $2, $3, 'money_drop_claim', 'Money Drop', 'pending', $4, 0, 'Money Drop Claim'
+		SELECT creator_id, $1, $2, $3, 'money_drop_claim', 'Money Drop', 'pending', $4, 0, 'Money Drop Claim', 'md_drop:' || $5::text || ';state:created'
 		FROM money_drops
 		WHERE id = $5
+		RETURNING id
 	`
-	_, err = tx.Exec(ctx, logTxQuery, claimantID, moneyDropAccountID, claimantAccountID, amount, dropID)
+	err = tx.QueryRow(ctx, logTxQuery, claimantID, moneyDropAccountID, claimantAccountID, amount, dropID).Scan(&claimTxID)
 	if err != nil {
-		return fmt.Errorf("failed to log money drop claim transaction: %w", err)
+		return uuid.Nil, fmt.Errorf("failed to log money drop claim transaction: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return uuid.Nil, err
+	}
+	return claimTxID, nil
+}
+
+// RevertMoneyDropClaimAtomic compensates a previously recorded claim when downstream transfer fails.
+func (r *PostgresRepository) RevertMoneyDropClaimAtomic(ctx context.Context, dropID, claimantID, claimTransactionID uuid.UUID) error {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin revert transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Lock drop row to avoid concurrent mutations while we roll back counters/status.
+	lockQuery := `
+		SELECT id
+		FROM money_drops
+		WHERE id = $1
+		FOR UPDATE
+	`
+	var lockedID uuid.UUID
+	if err := tx.QueryRow(ctx, lockQuery, dropID).Scan(&lockedID); err != nil {
+		if err == pgx.ErrNoRows {
+			return ErrMoneyDropNotFound
+		}
+		return fmt.Errorf("failed to lock money drop for claim revert: %w", err)
+	}
+
+	deleteClaimQuery := `
+		DELETE FROM money_drop_claims
+		WHERE drop_id = $1
+		  AND claimant_id = $2
+	`
+	deleteResult, err := tx.Exec(ctx, deleteClaimQuery, dropID, claimantID)
+	if err != nil {
+		return fmt.Errorf("failed to delete claim row: %w", err)
+	}
+	if deleteResult.RowsAffected() > 0 {
+		revertDropQuery := `
+			UPDATE money_drops
+			SET claims_made_count = GREATEST(claims_made_count - 1, 0),
+			    status = CASE
+			        WHEN status = 'completed' AND COALESCE(ended_reason, 'completed') = 'completed' THEN 'active'
+			        ELSE status
+			    END,
+			    ended_at = CASE
+			        WHEN status = 'completed' AND COALESCE(ended_reason, 'completed') = 'completed' THEN NULL
+			        ELSE ended_at
+			    END,
+			    ended_reason = CASE
+			        WHEN status = 'completed' AND COALESCE(ended_reason, 'completed') = 'completed' THEN NULL
+			        ELSE ended_reason
+			    END
+			WHERE id = $1
+		`
+		if _, err := tx.Exec(ctx, revertDropQuery, dropID); err != nil {
+			return fmt.Errorf("failed to revert money drop counters/status: %w", err)
+		}
+	}
+
+	deleteTxQuery := `
+		DELETE FROM transactions
+		WHERE id = $1
+		  AND type = 'money_drop_claim'
+	`
+	if _, err := tx.Exec(ctx, deleteTxQuery, claimTransactionID); err != nil {
+		return fmt.Errorf("failed to delete claim transaction record: %w", err)
 	}
 
 	return tx.Commit(ctx)
 }
 
-// FindExpiredAndCompletedMoneyDrops finds all expired or fully claimed money drops.
+func (r *PostgresRepository) ListActiveMoneyDropsByCreator(ctx context.Context, creatorID uuid.UUID) ([]domain.MoneyDrop, error) {
+	query := `
+		SELECT id, creator_id, title, status, total_amount, refunded_amount, amount_per_claim, total_claims_allowed,
+		       claims_made_count, expiry_timestamp, lock_enabled, lock_password_hash, lock_password_encrypted,
+		       fee_amount, fee_percentage, ended_at, ended_reason, funding_source_account_id,
+		       money_drop_account_id, created_at
+		FROM money_drops
+		WHERE creator_id = $1
+		  AND status = 'active'
+		  AND expiry_timestamp > NOW()
+		  AND claims_made_count < total_claims_allowed
+		ORDER BY created_at DESC
+	`
+	rows, err := r.db.Query(ctx, query, creatorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	drops := make([]domain.MoneyDrop, 0)
+	for rows.Next() {
+		var drop domain.MoneyDrop
+		if err := rows.Scan(
+			&drop.ID, &drop.CreatorID, &drop.Title, &drop.Status, &drop.TotalAmount, &drop.RefundedAmount, &drop.AmountPerClaim,
+			&drop.TotalClaimsAllowed, &drop.ClaimsMadeCount, &drop.ExpiryTimestamp, &drop.LockEnabled, &drop.LockPasswordHash,
+			&drop.LockPasswordEncrypted, &drop.FeeAmount, &drop.FeePercentage, &drop.EndedAt, &drop.EndedReason,
+			&drop.FundingSourceAccountID, &drop.MoneyDropAccountID, &drop.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		drops = append(drops, drop)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return drops, nil
+}
+
+func (r *PostgresRepository) ListEndedMoneyDropsByCreator(ctx context.Context, creatorID uuid.UUID, limit int) ([]domain.MoneyDrop, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	query := `
+		SELECT id, creator_id, title, status, total_amount, refunded_amount, amount_per_claim, total_claims_allowed,
+		       claims_made_count, expiry_timestamp, lock_enabled, lock_password_hash, lock_password_encrypted,
+		       fee_amount, fee_percentage, ended_at, ended_reason, funding_source_account_id,
+		       money_drop_account_id, created_at
+		FROM money_drops
+		WHERE creator_id = $1
+		  AND (
+		    status <> 'active'
+		    OR expiry_timestamp <= NOW()
+		    OR claims_made_count >= total_claims_allowed
+		  )
+		ORDER BY COALESCE(ended_at, created_at) DESC
+		LIMIT $2
+	`
+	rows, err := r.db.Query(ctx, query, creatorID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	drops := make([]domain.MoneyDrop, 0)
+	for rows.Next() {
+		var drop domain.MoneyDrop
+		if err := rows.Scan(
+			&drop.ID, &drop.CreatorID, &drop.Title, &drop.Status, &drop.TotalAmount, &drop.RefundedAmount, &drop.AmountPerClaim,
+			&drop.TotalClaimsAllowed, &drop.ClaimsMadeCount, &drop.ExpiryTimestamp, &drop.LockEnabled, &drop.LockPasswordHash,
+			&drop.LockPasswordEncrypted, &drop.FeeAmount, &drop.FeePercentage, &drop.EndedAt, &drop.EndedReason,
+			&drop.FundingSourceAccountID, &drop.MoneyDropAccountID, &drop.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		drops = append(drops, drop)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return drops, nil
+}
+
+func (r *PostgresRepository) ListClaimedMoneyDropsByUserID(ctx context.Context, userID uuid.UUID, limit int) ([]domain.ClaimedMoneyDropHistoryItem, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	query := `
+		SELECT c.drop_id, md.title, btrim(u.username) AS creator_username, md.amount_per_claim, c.claimed_at
+		FROM money_drop_claims c
+		INNER JOIN money_drops md ON md.id = c.drop_id
+		INNER JOIN users u ON u.id = md.creator_id
+		WHERE c.claimant_id = $1
+		ORDER BY c.claimed_at DESC
+		LIMIT $2
+	`
+	rows, err := r.db.Query(ctx, query, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.ClaimedMoneyDropHistoryItem, 0)
+	for rows.Next() {
+		var item domain.ClaimedMoneyDropHistoryItem
+		if err := rows.Scan(
+			&item.DropID,
+			&item.Title,
+			&item.CreatorUsername,
+			&item.AmountClaimed,
+			&item.ClaimedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *PostgresRepository) ListMoneyDropClaimsByDropID(ctx context.Context, dropID uuid.UUID, search string, limit int, offset int) ([]domain.MoneyDropClaimer, int, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	trimmedSearch := strings.TrimSpace(search)
+	searchPattern := "%" + trimmedSearch + "%"
+
+	countQuery := `
+		SELECT COUNT(*)
+		FROM money_drop_claims c
+		INNER JOIN users u ON u.id = c.claimant_id
+		WHERE c.drop_id = $1
+		  AND (
+		    $2 = ''
+		    OR btrim(u.username) ILIKE $3
+		    OR COALESCE(u.full_name, '') ILIKE $3
+		  )
+	`
+	var total int
+	if err := r.db.QueryRow(ctx, countQuery, dropID, trimmedSearch, searchPattern).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	query := `
+		SELECT c.claimant_id, btrim(u.username) AS username, u.full_name, u.profile_picture_url, md.amount_per_claim, c.claimed_at
+		FROM money_drop_claims c
+		INNER JOIN users u ON u.id = c.claimant_id
+		INNER JOIN money_drops md ON md.id = c.drop_id
+		WHERE c.drop_id = $1
+		  AND (
+		    $2 = ''
+		    OR btrim(u.username) ILIKE $3
+		    OR COALESCE(u.full_name, '') ILIKE $3
+		  )
+		ORDER BY c.claimed_at DESC
+		LIMIT $4 OFFSET $5
+	`
+	rows, err := r.db.Query(ctx, query, dropID, trimmedSearch, searchPattern, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	claimers := make([]domain.MoneyDropClaimer, 0)
+	for rows.Next() {
+		var item domain.MoneyDropClaimer
+		if err := rows.Scan(
+			&item.UserID,
+			&item.Username,
+			&item.FullName,
+			&item.ProfilePictureURL,
+			&item.AmountClaimed,
+			&item.ClaimedAt,
+		); err != nil {
+			return nil, 0, err
+		}
+		claimers = append(claimers, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	return claimers, total, nil
+}
+
+func (r *PostgresRepository) ListPendingMoneyDropClaimReconciliationCandidates(
+	ctx context.Context,
+	limit int,
+	olderThan time.Time,
+) ([]domain.PendingMoneyDropClaimReconciliationCandidate, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	if olderThan.IsZero() {
+		olderThan = time.Now().UTC().Add(-2 * time.Minute)
+	}
+
+	query := `
+			SELECT
+				t.id,
+				src.anchor_account_id AS source_anchor_account_id,
+				dest.anchor_account_id AS destination_anchor_account_id,
+				t.amount
+			FROM transactions t
+			INNER JOIN accounts src ON src.id = t.source_account_id
+			INNER JOIN accounts dest ON dest.id = t.destination_account_id
+				WHERE t.type = 'money_drop_claim'
+				  AND t.status = 'pending'
+				  AND COALESCE(BTRIM(t.anchor_transfer_id), '') = ''
+				  AND COALESCE(t.anchor_reason, '') LIKE '%state:reconcile_retry_requested%'
+				  AND COALESCE(t.anchor_reason, '') NOT LIKE '%state:transfer_initiated%'
+				  AND COALESCE(t.anchor_reason, '') NOT LIKE '%state:reconcile_retry_initiated%'
+				  AND COALESCE(t.anchor_reason, '') NOT LIKE '%state:reconcile_retry_inflight%'
+				  AND t.destination_account_id IS NOT NULL
+				  AND t.updated_at <= $1
+				  AND src.anchor_account_id <> ''
+			  AND dest.anchor_account_id <> ''
+			ORDER BY t.updated_at ASC
+		LIMIT $2
+	`
+
+	rows, err := r.db.Query(ctx, query, olderThan, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]domain.PendingMoneyDropClaimReconciliationCandidate, 0)
+	for rows.Next() {
+		var item domain.PendingMoneyDropClaimReconciliationCandidate
+		if err := rows.Scan(
+			&item.TransactionID,
+			&item.SourceAnchorAccountID,
+			&item.DestinationAnchorAccountID,
+			&item.Amount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return items, nil
+}
+
+func (r *PostgresRepository) MarkMoneyDropClaimReconcileRequested(
+	ctx context.Context,
+	transactionID uuid.UUID,
+	anchorReason string,
+	failureReason string,
+) (bool, error) {
+	normalizedReason := strings.TrimSpace(anchorReason)
+	if normalizedReason == "" {
+		normalizedReason = "money_drop_claim;state:reconcile_retry_requested"
+	}
+	normalizedFailure := strings.TrimSpace(failureReason)
+
+	query := `
+		UPDATE transactions
+		SET status = 'pending',
+		    anchor_transfer_id = NULL,
+		    transfer_type = NULL,
+		    failure_reason = CASE
+		        WHEN $1 = '' THEN failure_reason
+		        ELSE $1
+		    END,
+		    anchor_reason = $2,
+		    updated_at = NOW()
+		WHERE id = $3
+		  AND type = 'money_drop_claim'
+		  AND status <> 'completed'
+		  AND (
+		      status = 'failed'
+		      OR COALESCE(BTRIM(anchor_transfer_id), '') <> ''
+		  )
+	`
+	result, err := r.db.Exec(ctx, query, normalizedFailure, normalizedReason, transactionID)
+	if err != nil {
+		return false, err
+	}
+	return result.RowsAffected() > 0, nil
+}
+
+func (r *PostgresRepository) MarkMoneyDropClaimReconcileInFlight(ctx context.Context, transactionID uuid.UUID, anchorReason string) (bool, error) {
+	normalizedReason := strings.TrimSpace(anchorReason)
+	if normalizedReason == "" {
+		normalizedReason = "money_drop_claim;state:reconcile_retry_inflight"
+	}
+
+	query := `
+		UPDATE transactions
+		SET anchor_reason = $1,
+		    failure_reason = NULL,
+		    updated_at = NOW()
+		WHERE id = $2
+		  AND type = 'money_drop_claim'
+		  AND status = 'pending'
+		  AND COALESCE(BTRIM(anchor_transfer_id), '') = ''
+		  AND COALESCE(anchor_reason, '') LIKE '%state:reconcile_retry_requested%'
+		  AND COALESCE(anchor_reason, '') NOT LIKE '%state:transfer_initiated%'
+		  AND COALESCE(anchor_reason, '') NOT LIKE '%state:reconcile_retry_initiated%'
+		  AND COALESCE(anchor_reason, '') NOT LIKE '%state:reconcile_retry_inflight%'
+	`
+	result, err := r.db.Exec(ctx, query, normalizedReason, transactionID)
+	if err != nil {
+		return false, err
+	}
+	return result.RowsAffected() > 0, nil
+}
+
+// FindExpiredAndCompletedMoneyDrops finds all active drops that need finalization,
+// plus stale completed drops left in recoverable refund states.
 func (r *PostgresRepository) FindExpiredAndCompletedMoneyDrops(ctx context.Context) ([]domain.MoneyDrop, error) {
 	var drops []domain.MoneyDrop
 	query := `
-		SELECT id, creator_id, amount_per_claim, total_claims_allowed,
+		SELECT id, creator_id, status, total_amount, amount_per_claim, total_claims_allowed,
 		       claims_made_count, expiry_timestamp, funding_source_account_id,
 		       money_drop_account_id, created_at
 		FROM money_drops
-		WHERE status = 'active'
-		  AND (expiry_timestamp <= NOW() OR claims_made_count >= total_claims_allowed)
+		WHERE (status = 'active' AND (expiry_timestamp <= NOW() OR claims_made_count >= total_claims_allowed))
+		   OR (
+		       status = 'completed'
+		       AND ended_reason IN ('refund_retry_pending', 'refund_processing', 'refund_payout_inflight')
+		       AND ended_at <= (NOW() - INTERVAL '5 minutes')
+		   )
 	`
 	rows, err := r.db.Query(ctx, query)
 	if err != nil {
@@ -2383,24 +3005,141 @@ func (r *PostgresRepository) FindExpiredAndCompletedMoneyDrops(ctx context.Conte
 
 	for rows.Next() {
 		var drop domain.MoneyDrop
+		var status string
 		err := rows.Scan(
-			&drop.ID, &drop.CreatorID, &drop.AmountPerClaim, &drop.TotalClaimsAllowed,
+			&drop.ID, &drop.CreatorID, &status, &drop.TotalAmount, &drop.AmountPerClaim, &drop.TotalClaimsAllowed,
 			&drop.ClaimsMadeCount, &drop.ExpiryTimestamp, &drop.FundingSourceAccountID,
 			&drop.MoneyDropAccountID, &drop.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
-		drop.Status = "active" // Will be updated by scheduler
+		drop.Status = status
 		drops = append(drops, drop)
 	}
 
 	return drops, nil
 }
 
+// AcquireMoneyDropFinalizationLock transitions an eligible drop into refund_processing state.
+// It returns:
+// - acquired: whether this caller acquired the lock and should proceed with finalization.
+// - restoreActiveOnFailure: whether a release should restore to active (true) or keep completed retry-pending (false).
+// Stale retry-pending/refund-processing/refund-payout-inflight locks older than
+// 5 minutes are recoverable by the next caller.
+func (r *PostgresRepository) AcquireMoneyDropFinalizationLock(ctx context.Context, dropID uuid.UUID) (acquired bool, restoreActiveOnFailure bool, err error) {
+	query := `
+		WITH candidate AS (
+			SELECT id, status
+			FROM money_drops
+			WHERE id = $1
+			  AND (
+			      status = 'active'
+			      OR (
+			          status = 'completed'
+			          AND ended_reason IN ('refund_retry_pending', 'refund_processing', 'refund_payout_inflight')
+			          AND ended_at <= (NOW() - INTERVAL '5 minutes')
+			      )
+			  )
+			FOR UPDATE
+		),
+		updated AS (
+			UPDATE money_drops md
+			SET status = 'completed',
+			    ended_reason = 'refund_processing',
+			    ended_at = NOW()
+			FROM candidate c
+			WHERE md.id = c.id
+			RETURNING c.status
+		)
+		SELECT status
+		FROM updated
+	`
+
+	var previousStatus string
+	err = r.db.QueryRow(ctx, query, dropID).Scan(&previousStatus)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return false, false, nil
+		}
+		return false, false, err
+	}
+
+	return true, previousStatus == "active", nil
+}
+
+// ReleaseMoneyDropFinalizationLock restores a lock held in refund_processing/refund_payout_inflight
+// state when finalization fails before post-payout persistence is committed.
+// Active-origin locks are restored to active; completed-origin locks are kept completed and marked retry-pending.
+func (r *PostgresRepository) ReleaseMoneyDropFinalizationLock(ctx context.Context, dropID uuid.UUID, restoreActive bool) error {
+	if restoreActive {
+		query := `
+			UPDATE money_drops
+			SET status = 'active',
+			    ended_reason = NULL,
+			    ended_at = NULL
+			WHERE id = $1
+			  AND status = 'completed'
+			  AND ended_reason IN ('refund_processing', 'refund_payout_inflight')
+		`
+		_, err := r.db.Exec(ctx, query, dropID)
+		return err
+	}
+
+	query := `
+		UPDATE money_drops
+		SET status = 'completed',
+		    ended_reason = 'refund_retry_pending',
+		    ended_at = COALESCE(ended_at, NOW())
+		WHERE id = $1
+		  AND status = 'completed'
+		  AND ended_reason IN ('refund_processing', 'refund_payout_inflight')
+	`
+	_, err := r.db.Exec(ctx, query, dropID)
+	return err
+}
+
 // UpdateMoneyDropStatus updates the status of a money drop.
 func (r *PostgresRepository) UpdateMoneyDropStatus(ctx context.Context, dropID uuid.UUID, status string) error {
-	query := `UPDATE money_drops SET status = $1 WHERE id = $2`
+	query := `
+		UPDATE money_drops
+		SET status = $1,
+		    ended_at = COALESCE(ended_at, NOW()),
+		    ended_reason = COALESCE(
+		        ended_reason,
+		        CASE
+		            WHEN $1 = 'completed' THEN 'completed'
+		            WHEN $1 = 'expired_and_refunded' THEN 'expired'
+		            ELSE 'ended'
+		        END
+		    )
+		WHERE id = $2
+	`
 	_, err := r.db.Exec(ctx, query, status, dropID)
+	return err
+}
+
+func (r *PostgresRepository) UpdateMoneyDropEndMetadata(ctx context.Context, dropID uuid.UUID, status string, endedReason string, endedAt time.Time) error {
+	query := `
+		UPDATE money_drops
+		SET status = $1, ended_reason = $2, ended_at = $3
+		WHERE id = $4
+	`
+	_, err := r.db.Exec(ctx, query, status, endedReason, endedAt, dropID)
+	return err
+}
+
+func (r *PostgresRepository) AddMoneyDropRefundedAmount(ctx context.Context, dropID uuid.UUID, amount int64) error {
+	if amount <= 0 {
+		return nil
+	}
+
+	query := `
+		UPDATE money_drops
+		SET refunded_amount = refunded_amount + $1,
+		    updated_at = NOW()
+		WHERE id = $2
+	`
+	_, err := r.db.Exec(ctx, query, amount, dropID)
 	return err
 }
 

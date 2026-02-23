@@ -13,6 +13,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,7 +30,8 @@ import (
 
 // TransactionHandlers holds the application service that handlers will use.
 type TransactionHandlers struct {
-	service *app.Service
+	service        *app.Service
+	internalAPIKey string
 }
 
 // transferInitiationResponse is sent back to the mobile client immediately after a transfer
@@ -109,9 +111,27 @@ func (h *TransactionHandlers) authorizeTransactionPIN(r *http.Request, w http.Re
 	return false
 }
 
+func (h *TransactionHandlers) authorizeInternalRequest(w http.ResponseWriter, r *http.Request) bool {
+	requiredKey := strings.TrimSpace(h.internalAPIKey)
+	if requiredKey == "" {
+		http.Error(w, "Internal API key is not configured", http.StatusServiceUnavailable)
+		return false
+	}
+
+	providedKey := strings.TrimSpace(r.Header.Get("X-Internal-API-Key"))
+	if providedKey == "" || subtle.ConstantTimeCompare([]byte(providedKey), []byte(requiredKey)) != 1 {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return false
+	}
+	return true
+}
+
 // NewTransactionHandlers creates a new instance of TransactionHandlers.
-func NewTransactionHandlers(service *app.Service) *TransactionHandlers {
-	return &TransactionHandlers{service: service}
+func NewTransactionHandlers(service *app.Service, internalAPIKey string) *TransactionHandlers {
+	return &TransactionHandlers{
+		service:        service,
+		internalAPIKey: strings.TrimSpace(internalAPIKey),
+	}
 }
 
 // P2PTransferHandler handles requests for peer-to-peer transfers.
@@ -588,10 +608,11 @@ func (h *TransactionHandlers) GetAccountBalanceHandler(w http.ResponseWriter, r 
 
 // GetFeesHandler returns the currently configured transaction fees.
 func (h *TransactionHandlers) GetFeesHandler(w http.ResponseWriter, r *http.Request) {
-	fees := map[string]int64{
-		"p2p_fee_kobo":        h.service.GetTransactionFee(),
-		"self_fee_kobo":       h.service.GetTransactionFee(),
-		"money_drop_fee_kobo": h.service.GetMoneyDropFee(),
+	fees := map[string]interface{}{
+		"p2p_fee_kobo":           h.service.GetTransactionFee(),
+		"self_fee_kobo":          h.service.GetTransactionFee(),
+		"money_drop_fee_kobo":    h.service.GetMoneyDropFee(),
+		"money_drop_fee_percent": h.service.GetMoneyDropFeePercent(),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -752,6 +773,10 @@ func (h *TransactionHandlers) GetTransactionByIDHandler(w http.ResponseWriter, r
 // PlatformFeeHandler handles internal requests to debit platform fees.
 // This is called by the platform-fee service for monthly billing.
 func (h *TransactionHandlers) PlatformFeeHandler(w http.ResponseWriter, r *http.Request) {
+	if !h.authorizeInternalRequest(w, r) {
+		return
+	}
+
 	var req struct {
 		UserID    string `json:"user_id"`
 		Amount    int64  `json:"amount"`

@@ -23,17 +23,21 @@ import (
 // Config holds all the configuration variables for the transaction-service.
 // These values are loaded from environment variables.
 type Config struct {
-	ServerPort            string `mapstructure:"SERVER_PORT"`
-	DatabaseURL           string `mapstructure:"DATABASE_URL"`
-	RabbitMQURL           string `mapstructure:"RABBITMQ_URL"`
-	TransferEventQueue    string `mapstructure:"TRANSFER_EVENT_QUEUE"`
-	AnchorAPIBaseURL      string `mapstructure:"ANCHOR_API_BASE_URL"`
-	AnchorAPIKey          string `mapstructure:"ANCHOR_API_KEY"`
-	ClerkJWKSURL          string `mapstructure:"CLERK_JWKS_URL"`
-	AccountServiceURL     string `mapstructure:"ACCOUNT_SERVICE_URL"`
-	AdminAccountID        string `mapstructure:"ADMIN_ACCOUNT_ID"`
-	P2PTransactionFeeKobo int64  `mapstructure:"P2P_TRANSACTION_FEE_KOBO"`
-	MoneyDropFeeKobo      int64  `mapstructure:"MONEY_DROP_FEE_KOBO"`
+	ServerPort            string  `mapstructure:"SERVER_PORT"`
+	DatabaseURL           string  `mapstructure:"DATABASE_URL"`
+	RabbitMQURL           string  `mapstructure:"RABBITMQ_URL"`
+	TransferEventQueue    string  `mapstructure:"TRANSFER_EVENT_QUEUE"`
+	AnchorAPIBaseURL      string  `mapstructure:"ANCHOR_API_BASE_URL"`
+	AnchorAPIKey          string  `mapstructure:"ANCHOR_API_KEY"`
+	ClerkJWKSURL          string  `mapstructure:"CLERK_JWKS_URL"`
+	AccountServiceURL     string  `mapstructure:"ACCOUNT_SERVICE_URL"`
+	AdminAccountID        string  `mapstructure:"ADMIN_ACCOUNT_ID"`
+	InternalAPIKey        string  `mapstructure:"INTERNAL_API_KEY"`
+	P2PTransactionFeeKobo int64   `mapstructure:"P2P_TRANSACTION_FEE_KOBO"`
+	MoneyDropFeeKobo      int64   `mapstructure:"MONEY_DROP_FEE_KOBO"`
+	MoneyDropFeePercent   float64 `mapstructure:"MONEY_DROP_FEE_PERCENT"`
+	MoneyDropShareBaseURL string  `mapstructure:"MONEY_DROP_SHARE_BASE_URL"`
+	MoneyDropPasswordKey  string  `mapstructure:"MONEY_DROP_PASSWORD_ENCRYPTION_KEY"`
 }
 
 // LoadConfig reads configuration from environment variables from the given path.
@@ -54,6 +58,8 @@ func LoadConfig(path string) (config Config, err error) {
 	viper.SetDefault("ADMIN_ACCOUNT_ID", "17568857819889-anc_acc")
 	viper.SetDefault("P2P_TRANSACTION_FEE_KOBO", 500)
 	viper.SetDefault("MONEY_DROP_FEE_KOBO", 0) // Default: no fee (can be configured)
+	viper.SetDefault("MONEY_DROP_FEE_PERCENT", 0.0)
+	viper.SetDefault("MONEY_DROP_SHARE_BASE_URL", "https://TryTransfa.com")
 
 	// Bind environment variables explicitly to ensure they appear in Unmarshal
 	_ = viper.BindEnv("SERVER_PORT")
@@ -66,12 +72,17 @@ func LoadConfig(path string) (config Config, err error) {
 	_ = viper.BindEnv("CLERK_JWKS_URL")
 	_ = viper.BindEnv("ACCOUNT_SERVICE_URL")
 	_ = viper.BindEnv("ADMIN_ACCOUNT_ID")
+	_ = viper.BindEnv("INTERNAL_API_KEY", "INTERNAL_API_KEY", "TRANSACTION_SERVICE_INTERNAL_API_KEY")
 	_ = viper.BindEnv("P2P_TRANSACTION_FEE_KOBO")
 	_ = viper.BindEnv("P2P_TRANSACTION_FEE")
 	_ = viper.BindEnv("P2P_TRANSACTION_FEE_NAIRA")
 	_ = viper.BindEnv("MONEY_DROP_FEE_KOBO")
 	_ = viper.BindEnv("MONEY_DROP_FEE")
 	_ = viper.BindEnv("MONEY_DROP_FEE_NAIRA")
+	_ = viper.BindEnv("MONEY_DROP_FEE_PERCENT")
+	_ = viper.BindEnv("MONEY_DROP_FEE_PERCENTAGE")
+	_ = viper.BindEnv("MONEY_DROP_SHARE_BASE_URL")
+	_ = viper.BindEnv("MONEY_DROP_PASSWORD_ENCRYPTION_KEY")
 
 	// Attempt to read the config file. It's okay if it doesn't exist.
 	if err = viper.ReadInConfig(); err != nil {
@@ -90,6 +101,9 @@ func LoadConfig(path string) (config Config, err error) {
 
 	if port := strings.TrimSpace(os.Getenv("PORT")); port != "" {
 		config.ServerPort = port
+	}
+	if strings.TrimSpace(config.InternalAPIKey) == "" {
+		config.InternalAPIKey = strings.TrimSpace(os.Getenv("TRANSACTION_SERVICE_INTERNAL_API_KEY"))
 	}
 
 	// Allow specifying fee in whole currency units via P2P_TRANSACTION_FEE or P2P_TRANSACTION_FEE_NAIRA.
@@ -146,6 +160,29 @@ func LoadConfig(path string) (config Config, err error) {
 	if config.MoneyDropFeeKobo < 0 {
 		log.Printf("level=warn component=config msg=\"negative money-drop fee configured; coercing to zero\" fee_kobo=%d", config.MoneyDropFeeKobo)
 		config.MoneyDropFeeKobo = 0
+	}
+
+	if viper.IsSet("MONEY_DROP_FEE_PERCENTAGE") {
+		percentStr := strings.TrimSpace(viper.GetString("MONEY_DROP_FEE_PERCENTAGE"))
+		if percentStr != "" {
+			percentValue, parseErr := strconv.ParseFloat(percentStr, 64)
+			if parseErr != nil {
+				log.Printf("level=warn component=config msg=\"invalid MONEY_DROP_FEE_PERCENTAGE\" value=%q err=%v", percentStr, parseErr)
+			} else {
+				config.MoneyDropFeePercent = percentValue
+			}
+		}
+	} else if viper.IsSet("MONEY_DROP_FEE_PERCENT") {
+		config.MoneyDropFeePercent = viper.GetFloat64("MONEY_DROP_FEE_PERCENT")
+	}
+
+	if config.MoneyDropFeePercent < 0 {
+		log.Printf("level=warn component=config msg=\"negative money-drop fee percent configured; coercing to zero\" fee_percent=%f", config.MoneyDropFeePercent)
+		config.MoneyDropFeePercent = 0
+	}
+	if config.MoneyDropFeePercent > 100 {
+		log.Printf("level=warn component=config msg=\"money-drop fee percent too high; capping at 100\" fee_percent=%f", config.MoneyDropFeePercent)
+		config.MoneyDropFeePercent = 100
 	}
 
 	return

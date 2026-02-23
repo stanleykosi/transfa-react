@@ -17,6 +17,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -109,6 +111,7 @@ type ErrorResponse struct {
 		Detail string `json:"detail"`
 		Status string `json:"status"`
 	} `json:"errors"`
+	HTTPStatusCode int `json:"-"`
 }
 
 func (e *ErrorResponse) Error() string {
@@ -116,6 +119,42 @@ func (e *ErrorResponse) Error() string {
 		return fmt.Sprintf("anchor api error: %s - %s", e.Errors[0].Title, e.Errors[0].Detail)
 	}
 	return "unknown anchor api error"
+}
+
+func (e *ErrorResponse) statusCode() int {
+	if e == nil {
+		return 0
+	}
+	if e.HTTPStatusCode > 0 {
+		return e.HTTPStatusCode
+	}
+	if len(e.Errors) == 0 {
+		return 0
+	}
+
+	statusText := strings.TrimSpace(e.Errors[0].Status)
+	if statusText == "" {
+		return 0
+	}
+
+	parsed, err := strconv.Atoi(statusText)
+	if err != nil {
+		return 0
+	}
+	return parsed
+}
+
+// IsExplicitRejection returns true only for deterministic client-side rejections.
+// 5xx and throttling/timeouts are treated as ambiguous and should not be compensated immediately.
+func (e *ErrorResponse) IsExplicitRejection() bool {
+	status := e.statusCode()
+	if status < 400 || status >= 500 {
+		return false
+	}
+	if status == http.StatusRequestTimeout || status == http.StatusTooManyRequests {
+		return false
+	}
+	return true
 }
 
 // BalanceResponse represents the balance response from Anchor API.
@@ -191,6 +230,7 @@ func (c *Client) doTransfer(ctx context.Context, payload interface{}) (*Transfer
 			log.Printf("level=warn component=anchor_client op=transfer status=%d msg=\"non-2xx response (unparsable error body)\"", resp.StatusCode)
 			return nil, fmt.Errorf("failed to decode error response (status %d)", resp.StatusCode)
 		}
+		errResp.HTTPStatusCode = resp.StatusCode
 		log.Printf("level=warn component=anchor_client op=transfer status=%d title=%q detail=%q", resp.StatusCode, firstErrorTitle(errResp), firstErrorDetail(errResp))
 		return nil, &errResp
 	}
@@ -231,6 +271,7 @@ func (c *Client) GetAccountBalance(ctx context.Context, accountID string) (*Bala
 			log.Printf("level=warn component=anchor_client op=get_balance account_id=%s status=%d msg=\"non-2xx response (unparsable error body)\"", accountID, resp.StatusCode)
 			return nil, fmt.Errorf("failed to decode error response (status %d)", resp.StatusCode)
 		}
+		errResp.HTTPStatusCode = resp.StatusCode
 		log.Printf("level=warn component=anchor_client op=get_balance account_id=%s status=%d title=%q detail=%q", accountID, resp.StatusCode, firstErrorTitle(errResp), firstErrorDetail(errResp))
 		return nil, &errResp
 	}

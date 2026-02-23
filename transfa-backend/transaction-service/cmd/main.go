@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -43,6 +44,9 @@ func main() {
 	cfg, err := config.LoadConfig(".")
 	if err != nil {
 		log.Fatalf("level=fatal component=bootstrap msg=\"config load failed\" err=%v", err)
+	}
+	if strings.TrimSpace(cfg.InternalAPIKey) == "" {
+		log.Fatalf("level=fatal component=bootstrap msg=\"internal api key must be configured\" env=INTERNAL_API_KEY")
 	}
 
 	// Use the configured SERVER_PORT (defaults to 8083, can be overridden by environment)
@@ -93,10 +97,21 @@ func main() {
 	repository := store.NewPostgresRepository(dbpool)
 
 	// Initialize the core application service with its dependencies.
-	transactionService := app.NewService(repository, anchorClient, accountClient, rabbitProducer, cfg.AdminAccountID, cfg.P2PTransactionFeeKobo, cfg.MoneyDropFeeKobo)
+	transactionService := app.NewService(
+		repository,
+		anchorClient,
+		accountClient,
+		rabbitProducer,
+		cfg.AdminAccountID,
+		cfg.P2PTransactionFeeKobo,
+		cfg.MoneyDropFeeKobo,
+		cfg.MoneyDropFeePercent,
+		cfg.MoneyDropShareBaseURL,
+		cfg.MoneyDropPasswordKey,
+	)
 
 	// Initialize the API handlers.
-	transactionHandlers := api.NewTransactionHandlers(transactionService)
+	transactionHandlers := api.NewTransactionHandlers(transactionService, cfg.InternalAPIKey)
 
 	// Set up the HTTP router and define the API routes.
 	router := chi.NewRouter()
