@@ -47,6 +47,7 @@ import IncomingRequestsScreen from '@/screens/Notifications/IncomingRequestsScre
 import IncomingRequestDetailScreen from '@/screens/Notifications/IncomingRequestDetailScreen';
 import RequestPaymentSummaryScreen from '@/screens/Notifications/RequestPaymentSummaryScreen';
 import RequestPaymentAuthScreen from '@/screens/Notifications/RequestPaymentAuthScreen';
+import ScanScreen from '@/screens/Scan/ScanScreen';
 import CreateDropWizardScreen from '@/screens/MoneyDrop/CreateDropWizardScreen';
 import MoneyDropSuccessScreen from '@/screens/MoneyDrop/MoneyDropSuccessScreen';
 import ClaimDropScreen from '@/screens/MoneyDrop/ClaimDropScreen';
@@ -80,6 +81,7 @@ export type AppStackParamList = {
     reason?: string;
   };
   UserSearch: undefined;
+  Scan: undefined;
   PayUser:
     | {
         initialRecipient?: UserDiscoveryResult;
@@ -272,6 +274,7 @@ const AppStack = () => {
         component={UserSearchScreen}
         options={{ headerShown: false }}
       />
+      <Stack.Screen name="Scan" component={ScanScreen} options={{ headerShown: false }} />
       <Stack.Screen
         name="UserProfileView"
         component={UserProfileViewScreen}

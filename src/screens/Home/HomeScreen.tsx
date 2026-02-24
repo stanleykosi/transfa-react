@@ -205,7 +205,11 @@ const HomeScreen = () => {
               title="Send"
               onPress={() => navigation.navigate('PayUser')}
             />
-            <ActionCard icon="scan-outline" title="Scan" onPress={() => {}} />
+            <ActionCard
+              icon="scan-outline"
+              title="Scan"
+              onPress={() => navigation.navigate('Scan')}
+            />
             <ActionCard
               icon="arrow-down-outline"
               title="Receive"
