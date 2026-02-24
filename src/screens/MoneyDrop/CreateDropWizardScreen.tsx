@@ -490,7 +490,7 @@ const styles = StyleSheet.create({
   },
   infoTitle: {
     color: '#F4F5F7',
-    fontSize: 31,
+    fontSize: 24,
     fontWeight: '700',
     marginLeft: 8,
   },
@@ -502,8 +502,8 @@ const styles = StyleSheet.create({
   infoText: {
     flex: 1,
     color: '#888C93',
-    fontSize: 17,
-    lineHeight: 23,
+    fontSize: 15,
+    lineHeight: 21,
     marginLeft: 10,
   },
   separator: {
@@ -514,23 +514,23 @@ const styles = StyleSheet.create({
   },
   fieldLabel: {
     color: '#EDEEF0',
-    fontSize: 20,
+    fontSize: 16,
     marginBottom: 10,
   },
   fieldInput: {
-    height: 58,
+    height: 52,
     borderRadius: 11,
     borderWidth: 1,
     borderColor: CARD_BORDER,
     backgroundColor: CARD_BG,
     color: '#F1F2F4',
-    fontSize: 21,
+    fontSize: 16,
     paddingHorizontal: 14,
     marginBottom: 14,
   },
   helperText: {
     color: '#6E7279',
-    fontSize: 16,
+    fontSize: 14,
     marginTop: -8,
     marginBottom: 14,
     textDecorationLine: 'underline',
@@ -587,7 +587,7 @@ const styles = StyleSheet.create({
   },
   passwordSaveButtonText: {
     color: '#0A0C0D',
-    fontSize: 19,
+    fontSize: 17,
     fontWeight: '700',
   },
   savedPasswordWrap: {
@@ -599,7 +599,7 @@ const styles = StyleSheet.create({
   },
   savedPasswordValue: {
     color: '#F1F2F4',
-    fontSize: 20,
+    fontSize: 16,
     marginBottom: 10,
   },
   smallButton: {
@@ -619,7 +619,7 @@ const styles = StyleSheet.create({
   },
   summaryTitle: {
     color: BRAND_YELLOW,
-    fontSize: 40,
+    fontSize: 30,
     fontWeight: '700',
     marginBottom: 10,
   },
@@ -640,11 +640,11 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     color: '#7E8289',
-    fontSize: 17,
+    fontSize: 15,
   },
   summaryValue: {
     color: '#ECEDEF',
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '500',
   },
   summaryDivider: {
@@ -654,12 +654,12 @@ const styles = StyleSheet.create({
   },
   summaryTotalLabel: {
     color: '#8D9198',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
   },
   summaryTotalValue: {
     color: '#F5F6F8',
-    fontSize: 35,
+    fontSize: 28,
     fontWeight: '700',
   },
   createDropButton: {

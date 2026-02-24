@@ -504,14 +504,14 @@ const styles = StyleSheet.create({
   screenTitle: {
     color: '#F0F1F3',
     fontWeight: '700',
-    fontSize: 34,
+    fontSize: 30,
     letterSpacing: 0.4,
     textAlign: 'center',
     marginTop: 8,
   },
   balanceAmount: {
     color: '#F5F5F7',
-    fontSize: 52,
+    fontSize: 46,
     fontWeight: '700',
     textAlign: 'center',
     marginTop: 20,
@@ -532,13 +532,13 @@ const styles = StyleSheet.create({
   },
   dropName: {
     color: '#F5F6F8',
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: '700',
     flex: 1,
     marginRight: 10,
   },
   statusText: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '700',
   },
   statusLive: {
@@ -632,13 +632,13 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     color: '#F4F5F7',
-    fontSize: 19,
+    fontSize: 17,
     fontWeight: '700',
     marginLeft: 8,
   },
   shareLabel: {
     color: '#E8EAED',
-    fontSize: 18,
+    fontSize: 16,
     marginBottom: 8,
   },
   linkField: {
@@ -671,7 +671,7 @@ const styles = StyleSheet.create({
   },
   shareButtonText: {
     color: '#A7ABB2',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     marginLeft: 8,
   },
@@ -683,7 +683,7 @@ const styles = StyleSheet.create({
   },
   claimersTitle: {
     color: '#ECEDEF',
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '600',
   },
   viewAllButton: {
@@ -697,7 +697,7 @@ const styles = StyleSheet.create({
   },
   viewAllText: {
     color: '#D8DADF',
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '500',
   },
   claimersList: {
@@ -722,7 +722,7 @@ const styles = StyleSheet.create({
   },
   claimerAvatarText: {
     color: '#101215',
-    fontSize: 21,
+    fontSize: 18,
     fontWeight: '700',
   },
   claimerMiddle: {
@@ -731,7 +731,7 @@ const styles = StyleSheet.create({
   },
   claimerUsername: {
     color: '#08090A',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
   },
   claimerFullName: {
@@ -751,7 +751,7 @@ const styles = StyleSheet.create({
   },
   claimerAmount: {
     color: '#08090A',
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '600',
   },
   emptyClaimersCard: {
@@ -779,8 +779,8 @@ const styles = StyleSheet.create({
   },
   noteText: {
     color: '#8A8E95',
-    fontSize: 16,
-    lineHeight: 22,
+    fontSize: 15,
+    lineHeight: 20,
     marginLeft: 8,
     flex: 1,
   },
@@ -798,7 +798,7 @@ const styles = StyleSheet.create({
   },
   endDropText: {
     color: '#FF4B4B',
-    fontSize: 31,
+    fontSize: 22,
     fontWeight: '700',
   },
 });

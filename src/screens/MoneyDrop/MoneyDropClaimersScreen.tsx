@@ -165,7 +165,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: '#F4F5F7',
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
   },
   searchBox: {
@@ -182,7 +182,7 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     color: '#E8EAED',
-    fontSize: 18,
+    fontSize: 16,
     marginLeft: 8,
   },
   centerState: {
@@ -208,8 +208,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   avatarWrap: {
-    width: 56,
-    height: 56,
+    width: 50,
+    height: 50,
     borderRadius: 14,
     backgroundColor: '#ABABFD',
     alignItems: 'center',
@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     color: '#090A0B',
-    fontSize: 23,
+    fontSize: 18,
     fontWeight: '700',
   },
   claimerMiddle: {
@@ -227,12 +227,12 @@ const styles = StyleSheet.create({
   },
   claimerUsername: {
     color: '#070809',
-    fontSize: 19,
+    fontSize: 17,
     fontWeight: '700',
   },
   claimerFullName: {
     color: '#2E3135',
-    fontSize: 16,
+    fontSize: 15,
     marginTop: 1,
   },
   dateWrap: {
@@ -242,12 +242,12 @@ const styles = StyleSheet.create({
   },
   dateText: {
     color: '#2E3135',
-    fontSize: 15,
+    fontSize: 14,
     marginLeft: 5,
   },
   claimerAmount: {
     color: '#070809',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
   },
   emptyState: {

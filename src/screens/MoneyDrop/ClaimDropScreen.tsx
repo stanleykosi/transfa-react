@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -55,7 +55,11 @@ const ClaimDropScreen = () => {
   const [step, setStep] = useState<ClaimStep>('preview');
   const [showSuccessSheet, setShowSuccessSheet] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
-  const idempotencyKey = useMemo(() => generateIdempotencyKey(), [dropId]);
+  const idempotencyKeyRef = useRef<string>(generateIdempotencyKey());
+
+  useEffect(() => {
+    idempotencyKeyRef.current = generateIdempotencyKey();
+  }, [dropId]);
 
   const { data, isLoading, error } = useMoneyDropDetails(dropId);
   const { mutate: claimDrop, isPending } = useClaimMoneyDrop({
@@ -129,7 +133,7 @@ const ClaimDropScreen = () => {
     claimDrop({
       dropId,
       lockPassword: data.requires_password ? lockPassword.trim() : undefined,
-      idempotencyKey,
+      idempotencyKey: idempotencyKeyRef.current,
     });
   };
 
@@ -339,7 +343,7 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingHorizontal: 18,
+    paddingHorizontal: 20,
   },
   backButton: {
     width: 34,
@@ -369,7 +373,7 @@ const styles = StyleSheet.create({
   previewWrap: {
     flex: 1,
     justifyContent: 'center',
-    paddingBottom: 52,
+    paddingBottom: 40,
   },
   previewCard: {
     borderRadius: 8,
@@ -380,7 +384,7 @@ const styles = StyleSheet.create({
   previewHeader: {
     backgroundColor: '#0C0E11',
     paddingTop: 12,
-    paddingBottom: 24,
+    paddingBottom: 18,
     paddingHorizontal: 16,
     alignItems: 'center',
     borderBottomWidth: 1,
@@ -388,16 +392,16 @@ const styles = StyleSheet.create({
   },
   previewBrand: {
     color: '#E2E4E8',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     marginBottom: 10,
   },
   previewTitle: {
     color: '#FFFFFF',
-    fontSize: 50,
-    lineHeight: 50,
+    fontSize: 34,
+    lineHeight: 38,
     fontWeight: '700',
-    letterSpacing: -1,
+    letterSpacing: 0.2,
   },
   previewBody: {
     backgroundColor: '#F4F4F5',
@@ -407,7 +411,7 @@ const styles = StyleSheet.create({
   },
   fieldLabel: {
     color: '#1D1D20',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '500',
     marginBottom: 6,
   },
@@ -416,7 +420,7 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     borderColor: '#CACBD0',
     borderRadius: 4,
-    minHeight: 54,
+    minHeight: 48,
     justifyContent: 'center',
     paddingHorizontal: 12,
     marginBottom: 12,
@@ -424,16 +428,16 @@ const styles = StyleSheet.create({
   },
   valueText: {
     color: '#0F1013',
-    fontSize: 31,
+    fontSize: 24,
     fontWeight: '700',
   },
   progressTrackLight: {
-    height: 28,
-    borderRadius: 8,
+    height: 22,
+    borderRadius: 6,
     backgroundColor: '#DADADF',
     overflow: 'hidden',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 14,
   },
   progressFillLight: {
     position: 'absolute',
@@ -449,7 +453,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   previewClaimButton: {
-    height: 56,
+    height: 52,
     borderRadius: 10,
     backgroundColor: BRAND_YELLOW,
     alignItems: 'center',
@@ -459,12 +463,12 @@ const styles = StyleSheet.create({
   },
   previewClaimButtonText: {
     color: '#0A0B0D',
-    fontSize: 28,
+    fontSize: 20,
     fontWeight: '700',
   },
   claimFlowWrap: {
     flex: 1,
-    paddingTop: 44,
+    paddingTop: 24,
   },
   claimFlowTopRow: {
     flexDirection: 'row',
@@ -473,9 +477,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   giftBadgeWrap: {
-    width: 54,
-    height: 54,
-    borderRadius: 28,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     borderWidth: 2,
     borderStyle: 'dashed',
     borderColor: BRAND_YELLOW,
@@ -483,30 +487,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   claimFlowArrow: {
-    width: 70,
+    width: 56,
     borderTopWidth: 1,
     borderStyle: 'dashed',
     borderColor: '#A7ABB2',
     marginHorizontal: 10,
   },
   userBadgeWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: 12,
+    width: 48,
+    height: 48,
+    borderRadius: 10,
     backgroundColor: '#D9C29D',
     alignItems: 'center',
     justifyContent: 'center',
   },
   userBadgeText: {
     color: '#16171B',
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '700',
   },
   claimFlowTopLabels: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginHorizontal: 52,
-    marginBottom: 28,
+    marginHorizontal: 44,
+    marginBottom: 20,
   },
   claimFlowLabel: {
     color: '#A5A9B1',
@@ -515,28 +519,28 @@ const styles = StyleSheet.create({
   },
   claimAmount: {
     color: '#F5F6F8',
-    fontSize: 52,
+    fontSize: 44,
     fontWeight: '700',
     textAlign: 'center',
     marginBottom: 8,
   },
   claimHint: {
     color: '#6F737B',
-    fontSize: 18,
+    fontSize: 16,
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   passwordBlock: {
     marginBottom: 14,
   },
   passwordInput: {
-    height: 54,
+    height: 52,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: CARD_BORDER,
     backgroundColor: CARD_BG,
     color: '#F4F5F7',
-    fontSize: 17,
+    fontSize: 16,
     paddingHorizontal: 14,
   },
   passwordInputError: {
@@ -548,7 +552,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   claimButton: {
-    height: 56,
+    height: 52,
     borderRadius: 10,
     backgroundColor: BRAND_YELLOW,
     alignItems: 'center',
@@ -559,7 +563,7 @@ const styles = StyleSheet.create({
   },
   claimButtonText: {
     color: '#0C0D10',
-    fontSize: 24,
+    fontSize: 18,
     fontWeight: '700',
   },
   successOverlay: {
@@ -573,13 +577,13 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 22,
     paddingHorizontal: 24,
     paddingTop: 24,
-    paddingBottom: 36,
+    paddingBottom: 28,
     alignItems: 'center',
   },
   successIconWrap: {
-    width: 130,
-    height: 130,
-    borderRadius: 65,
+    width: 112,
+    height: 112,
+    borderRadius: 56,
     backgroundColor: BRAND_YELLOW,
     alignItems: 'center',
     justifyContent: 'center',
@@ -587,15 +591,15 @@ const styles = StyleSheet.create({
   },
   successTitle: {
     color: '#101215',
-    fontSize: 40,
+    fontSize: 32,
     fontWeight: '700',
     marginBottom: 8,
   },
   successSubtitle: {
     color: '#303238',
-    fontSize: 17,
+    fontSize: 15,
     textAlign: 'center',
-    lineHeight: 30,
+    lineHeight: 22,
     marginBottom: 14,
   },
   successDoneButton: {
@@ -610,12 +614,12 @@ const styles = StyleSheet.create({
   },
   successDoneButtonText: {
     color: '#F5F6F8',
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '700',
   },
   successHistoryLink: {
     color: '#181A20',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     textDecorationLine: 'underline',
   },

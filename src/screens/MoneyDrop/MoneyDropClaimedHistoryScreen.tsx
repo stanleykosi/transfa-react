@@ -138,7 +138,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: '#F4F5F7',
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
   },
   centerState: {
@@ -173,12 +173,12 @@ const styles = StyleSheet.create({
   itemTitle: {
     flex: 1,
     color: '#F2F3F5',
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
   },
   itemAmount: {
     color: '#F2F3F5',
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '600',
   },
   itemCreator: {

@@ -297,7 +297,7 @@ const styles = StyleSheet.create({
   },
   successTitle: {
     color: '#F5F6F8',
-    fontSize: 40,
+    fontSize: 32,
     fontWeight: '700',
     marginTop: 14,
   },
@@ -313,7 +313,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: '#F4F5F7',
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     marginLeft: 8,
   },
@@ -402,13 +402,13 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     color: '#F4F5F7',
-    fontSize: 19,
+    fontSize: 17,
     fontWeight: '700',
     marginLeft: 8,
   },
   shareLabel: {
     color: '#E8EAED',
-    fontSize: 18,
+    fontSize: 16,
     marginBottom: 8,
   },
   linkField: {
@@ -441,7 +441,7 @@ const styles = StyleSheet.create({
   },
   shareButtonText: {
     color: '#A7ABB2',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     marginLeft: 8,
   },
@@ -457,8 +457,8 @@ const styles = StyleSheet.create({
   },
   noteText: {
     color: '#8A8E95',
-    fontSize: 16,
-    lineHeight: 22,
+    fontSize: 15,
+    lineHeight: 20,
     marginLeft: 8,
     flex: 1,
   },
@@ -471,7 +471,7 @@ const styles = StyleSheet.create({
   },
   doneButtonText: {
     color: '#0A0B0D',
-    fontSize: 19,
+    fontSize: 17,
     fontWeight: '700',
   },
 });
