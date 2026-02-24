@@ -11,12 +11,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
-import {
-  Camera,
-  useCameraDevice,
-  useCameraPermission,
-  useCodeScanner,
-} from 'react-native-vision-camera';
 
 import { searchUsers } from '@/api/authApi';
 import {
@@ -32,6 +26,28 @@ import { normalizeUsername, usernameKey } from '@/utils/username';
 const BRAND_YELLOW = '#FFD300';
 const CARD_BG = '#E8E8E8';
 const DARK_BG = '#050607';
+const VISION_CAMERA_UNAVAILABLE_NOTICE =
+  'QR scanning is unavailable in Expo Go. Use a development build to scan.';
+
+type VisionCameraModule = typeof import('react-native-vision-camera');
+
+let visionCameraModule: VisionCameraModule | null = null;
+try {
+  visionCameraModule = require('react-native-vision-camera') as VisionCameraModule;
+} catch {
+  // Expo Go does not provide the native Vision Camera module.
+}
+
+const CameraView = (visionCameraModule?.Camera ?? null) as React.ComponentType<any> | null;
+const useCameraDeviceCompat =
+  visionCameraModule?.useCameraDevice ?? ((_position: 'back' | 'front') => null);
+const useCameraPermissionCompat =
+  visionCameraModule?.useCameraPermission ??
+  (() => ({
+    hasPermission: false,
+    requestPermission: async () => false,
+  }));
+const useCodeScannerCompat = visionCameraModule?.useCodeScanner ?? ((_config: any) => null);
 
 const formatCardDate = (isoDate?: string) => {
   if (!isoDate) {
@@ -50,8 +66,9 @@ const formatCardDate = (isoDate?: string) => {
 const ScanScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
   const isFocused = useIsFocused();
-  const camera = useCameraDevice('back');
-  const { hasPermission, requestPermission } = useCameraPermission();
+  const isVisionCameraAvailable = !!visionCameraModule && !!CameraView;
+  const camera = useCameraDeviceCompat('back');
+  const { hasPermission, requestPermission } = useCameraPermissionCompat();
 
   const [activePayload, setActivePayload] = useState<ParsedScanPayload | null>(null);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
@@ -147,7 +164,7 @@ const ScanScreen = () => {
     [navigation, resolveUserProfile, setEphemeralNotice]
   );
 
-  const codeScanner = useCodeScanner({
+  const codeScanner = useCodeScannerCompat({
     codeTypes: ['qr'],
     onCodeScanned: (codes) => {
       if (activePayload || isResolvingUser) {
@@ -178,11 +195,20 @@ const ScanScreen = () => {
   const amount = incomingRequest?.amount ?? 0;
   const total = amount + fee;
 
-  const readyToScan = hasPermission && !!camera && isFocused && !activePayload && !isResolvingUser;
+  const readyToScan =
+    isVisionCameraAvailable &&
+    hasPermission &&
+    !!camera &&
+    isFocused &&
+    !activePayload &&
+    !isResolvingUser;
 
   const noticeText = useMemo(() => {
     if (scanNotice) {
       return scanNotice;
+    }
+    if (!isVisionCameraAvailable) {
+      return VISION_CAMERA_UNAVAILABLE_NOTICE;
     }
     if (isResolvingUser) {
       return 'Resolving profile...';
@@ -194,12 +220,12 @@ const ScanScreen = () => {
       return 'Initializing camera...';
     }
     return 'Scan a MoneyDrop, payment request, or profile QR.';
-  }, [camera, hasPermission, isResolvingUser, scanNotice]);
+  }, [camera, hasPermission, isResolvingUser, isVisionCameraAvailable, scanNotice]);
 
   return (
     <View style={styles.root}>
-      {camera ? (
-        <Camera
+      {camera && CameraView ? (
+        <CameraView
           style={StyleSheet.absoluteFill}
           device={camera}
           isActive={readyToScan}
@@ -221,23 +247,35 @@ const ScanScreen = () => {
         </TouchableOpacity>
       </SafeAreaView>
 
-      <View style={styles.scanReticleWrap}>
-        <View style={styles.scanReticle}>
-          <Corner position="topLeft" />
-          <Corner position="topRight" />
-          <Corner position="bottomLeft" />
-          <Corner position="bottomRight" />
+      {isVisionCameraAvailable ? (
+        <View style={styles.scanReticleWrap}>
+          <View style={styles.scanReticle}>
+            <Corner position="topLeft" />
+            <Corner position="topRight" />
+            <Corner position="bottomLeft" />
+            <Corner position="bottomRight" />
+          </View>
         </View>
-      </View>
+      ) : null}
 
       <View style={styles.noticePill}>
-        {!hasPermission || !camera || isResolvingUser ? (
+        {isVisionCameraAvailable && (!hasPermission || !camera || isResolvingUser) ? (
           <ActivityIndicator size="small" color={BRAND_YELLOW} />
         ) : null}
         <Text style={styles.noticeText}>{noticeText}</Text>
       </View>
 
-      {!hasPermission ? (
+      {!isVisionCameraAvailable ? (
+        <View style={styles.permissionCard}>
+          <Text style={styles.permissionTitle}>Use a Development Build</Text>
+          <Text style={styles.permissionText}>
+            Expo Go cannot load the native camera scanner module. Run `npx expo run:android` or `npx
+            expo run:ios`, then open the dev build.
+          </Text>
+        </View>
+      ) : null}
+
+      {isVisionCameraAvailable && !hasPermission ? (
         <View style={styles.permissionCard}>
           <Text style={styles.permissionTitle}>Enable Camera Access</Text>
           <Text style={styles.permissionText}>
