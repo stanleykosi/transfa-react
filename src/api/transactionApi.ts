@@ -1099,16 +1099,23 @@ export const useClaimMoneyDrop = (
   const claimMoneyDropMutation = async ({
     dropId,
     lockPassword,
+    idempotencyKey,
   }: ClaimMoneyDropPayload): Promise<ClaimMoneyDropResponse> => {
-    const payload = lockPassword ? { lock_password: lockPassword } : {};
-    const { data } = await apiClient.post<ClaimMoneyDropResponse>(
-      `/transactions/money-drops/${dropId}/claim`,
-      payload,
-      {
-        baseURL: TRANSACTION_SERVICE_URL,
-      }
-    );
-    return data;
+    try {
+      const payload = lockPassword ? { lock_password: lockPassword } : {};
+      const headers = idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined;
+      const { data } = await apiClient.post<ClaimMoneyDropResponse>(
+        `/transactions/money-drops/${dropId}/claim`,
+        payload,
+        {
+          baseURL: TRANSACTION_SERVICE_URL,
+          headers,
+        }
+      );
+      return data;
+    } catch (error) {
+      throw toReadableError(error);
+    }
   };
 
   const mutationOptions = mergeMutationOnSuccess(options, () => {

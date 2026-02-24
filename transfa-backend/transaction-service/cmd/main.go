@@ -30,6 +30,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"github.com/transfa/transaction-service/internal/api"
 	"github.com/transfa/transaction-service/internal/app"
 	"github.com/transfa/transaction-service/internal/config"
@@ -93,6 +94,31 @@ func main() {
 	// Initialize the client for the account-service.
 	accountClient := accountclient.NewClient(cfg.AccountServiceURL)
 
+	var redisClient *redis.Client
+	rateLimitingEnabled := cfg.MoneyDropClaimRateLimitPerMinute > 0 || cfg.MoneyDropDetailsRateLimitPerMinute > 0
+	if rateLimitingEnabled {
+		if strings.TrimSpace(cfg.RedisURL) == "" {
+			log.Println("level=warn component=bootstrap msg=\"redis url missing; money-drop rate limiting disabled\" env=REDIS_URL")
+		} else {
+			redisOptions, parseErr := redis.ParseURL(cfg.RedisURL)
+			if parseErr != nil {
+				log.Printf("level=warn component=bootstrap msg=\"redis url parse failed; money-drop rate limiting disabled\" err=%v", parseErr)
+			} else {
+				redisClient = redis.NewClient(redisOptions)
+				pingCtx, cancelPing := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancelPing()
+				if pingErr := redisClient.Ping(pingCtx).Err(); pingErr != nil {
+					log.Printf("level=warn component=bootstrap msg=\"redis ping failed; money-drop rate limiting disabled\" err=%v", pingErr)
+					redisClient.Close()
+					redisClient = nil
+				} else {
+					defer redisClient.Close()
+					log.Println("level=info component=bootstrap msg=\"redis connected\"")
+				}
+			}
+		}
+	}
+
 	// Initialize the data access layer (repository).
 	repository := store.NewPostgresRepository(dbpool)
 
@@ -109,6 +135,18 @@ func main() {
 		cfg.MoneyDropShareBaseURL,
 		cfg.MoneyDropPasswordKey,
 	)
+	transactionService.ConfigureMoneyDropHardening(
+		cfg.MoneyDropClaimRateLimitPerMinute,
+		cfg.MoneyDropDetailsRateLimitPerMinute,
+		cfg.MoneyDropPasswordMaxAttempts,
+		cfg.MoneyDropPasswordLockoutSeconds,
+		cfg.MoneyDropClaimIdempotencyTTLMin,
+	)
+	if redisClient != nil {
+		transactionService.SetMoneyDropRateLimiter(
+			app.NewRedisMoneyDropRateLimiter(redisClient, cfg.RedisRateLimitPrefix),
+		)
+	}
 
 	// Initialize the API handlers.
 	transactionHandlers := api.NewTransactionHandlers(transactionService, cfg.InternalAPIKey)

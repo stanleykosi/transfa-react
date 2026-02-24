@@ -390,7 +390,8 @@ type CreateMoneyDropResponse struct {
 
 // ClaimMoneyDropRequest defines claim payload. Lock password is required for password-protected drops.
 type ClaimMoneyDropRequest struct {
-	LockPassword string `json:"lock_password"`
+	LockPassword   string `json:"lock_password"`
+	IdempotencyKey string `json:"-"`
 }
 
 // ClaimMoneyDropResponse is the successful response after claiming a money drop.
@@ -410,15 +411,17 @@ type RevealMoneyDropPasswordResponse struct {
 
 // MoneyDropDetails represents the details of a money drop for display.
 type MoneyDropDetails struct {
-	ID               uuid.UUID `json:"id"`
-	Title            string    `json:"title"`
-	CreatorUsername  string    `json:"creator_username"`
-	TotalAmount      int64     `json:"total_amount"`
-	AmountPerClaim   int64     `json:"amount_per_claim"`
-	Status           string    `json:"status"`
-	IsClaimable      bool      `json:"is_claimable"`
-	RequiresPassword bool      `json:"requires_password"`
-	Message          string    `json:"message"`
+	ID                 uuid.UUID `json:"id"`
+	Title              string    `json:"title"`
+	CreatorUsername    string    `json:"creator_username"`
+	TotalAmount        int64     `json:"total_amount"`
+	AmountPerClaim     int64     `json:"amount_per_claim"`
+	ClaimsMadeCount    int       `json:"claims_made_count"`
+	TotalClaimsAllowed int       `json:"total_claims_allowed"`
+	Status             string    `json:"status"`
+	IsClaimable        bool      `json:"is_claimable"`
+	RequiresPassword   bool      `json:"requires_password"`
+	Message            string    `json:"message"`
 }
 
 type MoneyDropDashboardItem struct {

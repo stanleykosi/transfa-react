@@ -62,6 +62,14 @@ const (
 	maxMoneyDropExpiryMinutes        = 1440
 	minMoneyDropPasswordLen          = 4
 	maxMoneyDropPasswordLen          = 64
+	defaultMoneyDropClaimRateLimit   = 30
+	defaultMoneyDropDetailsRateLimit = 120
+	defaultMoneyDropPwdMaxAttempts   = 5
+	defaultMoneyDropPwdLockoutSecs   = 600
+	defaultMoneyDropIdempotencyMins  = 1440
+	defaultMoneyDropStaleClaimSecs   = 120
+	minIdempotencyKeyLen             = 8
+	maxIdempotencyKeyLen             = 128
 	moneyDropRetryPendingReason      = "refund_retry_pending"
 	moneyDropRefundPayoutInFlight    = "refund_payout_inflight"
 	moneyDropRefundPersistFailReason = "refund_persistence_failed"
@@ -104,24 +112,51 @@ var (
 	ErrInvalidMoneyDropPassword               = errors.New("drop password must be between 4 and 64 characters")
 	ErrMoneyDropPasswordRequiredForClaim      = errors.New("this money drop is password protected")
 	ErrMoneyDropPasswordMismatch              = errors.New("invalid drop password")
+	ErrMoneyDropPasswordClaimLocked           = errors.New("too many incorrect password attempts. please wait and try again")
 	ErrMoneyDropPasswordEncryptionUnavailable = errors.New("money drop password encryption is not configured")
 	ErrMoneyDropEndNotAllowed                 = errors.New("money drop cannot be ended in its current state")
+	ErrInvalidIdempotencyKey                  = errors.New("invalid idempotency key")
+	ErrMoneyDropIdempotencyConflict           = errors.New("idempotency key reuse with a different request is not allowed")
+	ErrMoneyDropIdempotencyInProgress         = errors.New("a claim with this idempotency key is already being processed")
 	usernamePattern                           = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._]{1,18}[a-z0-9])?$`)
+	idempotencyKeyPattern                     = regexp.MustCompile(`^[A-Za-z0-9:_.-]+$`)
 )
+
+type RateLimitError struct {
+	message           string
+	RetryAfterSeconds int
+}
+
+func (e *RateLimitError) Error() string {
+	if e == nil {
+		return "too many requests"
+	}
+	if strings.TrimSpace(e.message) != "" {
+		return e.message
+	}
+	return "too many requests. please try again shortly"
+}
 
 // Service provides the core business logic for transactions.
 type Service struct {
-	repo                  store.Repository
-	anchorClient          *anchorclient.Client
-	accountClient         *accountclient.Client
-	eventProducer         rmrabbit.Publisher
-	transferConsumer      *TransferStatusConsumer
-	adminAccountID        string
-	transactionFeeKobo    int64
-	moneyDropFeeKobo      int64
-	moneyDropFeePercent   float64
-	moneyDropShareBaseURL string
-	moneyDropPasswordKey  []byte
+	repo                               store.Repository
+	anchorClient                       *anchorclient.Client
+	accountClient                      *accountclient.Client
+	eventProducer                      rmrabbit.Publisher
+	transferConsumer                   *TransferStatusConsumer
+	adminAccountID                     string
+	transactionFeeKobo                 int64
+	moneyDropFeeKobo                   int64
+	moneyDropFeePercent                float64
+	moneyDropShareBaseURL              string
+	moneyDropPasswordKey               []byte
+	moneyDropClaimRateLimitPerMinute   int
+	moneyDropDetailsRateLimitPerMinute int
+	moneyDropPasswordMaxAttempts       int
+	moneyDropPasswordLockoutSeconds    int
+	moneyDropIdempotencyTTL            time.Duration
+	moneyDropIdempotencyStaleWindow    time.Duration
+	moneyDropRateLimiter               moneyDropRateLimiter
 
 	balanceFetchCircuitMu       sync.Mutex
 	balanceFetchCircuitOpenTill time.Time
@@ -164,16 +199,22 @@ func NewService(
 	}
 
 	svc := &Service{
-		repo:                  repo,
-		anchorClient:          anchor,
-		accountClient:         accountClient,
-		eventProducer:         producer,
-		adminAccountID:        adminAccountID,
-		transactionFeeKobo:    transactionFeeKobo,
-		moneyDropFeeKobo:      moneyDropFeeKobo,
-		moneyDropFeePercent:   moneyDropFeePercent,
-		moneyDropShareBaseURL: strings.TrimRight(shareBaseURL, "/"),
-		moneyDropPasswordKey:  encryptionKey,
+		repo:                               repo,
+		anchorClient:                       anchor,
+		accountClient:                      accountClient,
+		eventProducer:                      producer,
+		adminAccountID:                     adminAccountID,
+		transactionFeeKobo:                 transactionFeeKobo,
+		moneyDropFeeKobo:                   moneyDropFeeKobo,
+		moneyDropFeePercent:                moneyDropFeePercent,
+		moneyDropShareBaseURL:              strings.TrimRight(shareBaseURL, "/"),
+		moneyDropPasswordKey:               encryptionKey,
+		moneyDropClaimRateLimitPerMinute:   defaultMoneyDropClaimRateLimit,
+		moneyDropDetailsRateLimitPerMinute: defaultMoneyDropDetailsRateLimit,
+		moneyDropPasswordMaxAttempts:       defaultMoneyDropPwdMaxAttempts,
+		moneyDropPasswordLockoutSeconds:    defaultMoneyDropPwdLockoutSecs,
+		moneyDropIdempotencyTTL:            time.Duration(defaultMoneyDropIdempotencyMins) * time.Minute,
+		moneyDropIdempotencyStaleWindow:    time.Duration(defaultMoneyDropStaleClaimSecs) * time.Second,
 	}
 
 	svc.transferConsumer = NewTransferStatusConsumer(repo)
@@ -197,6 +238,34 @@ func (s *Service) GetMoneyDropFee() int64 {
 
 func (s *Service) GetMoneyDropFeePercent() float64 {
 	return s.moneyDropFeePercent
+}
+
+func (s *Service) ConfigureMoneyDropHardening(
+	claimRateLimitPerMinute int,
+	detailsRateLimitPerMinute int,
+	passwordMaxAttempts int,
+	passwordLockoutSeconds int,
+	idempotencyTTLMinutes int,
+) {
+	if claimRateLimitPerMinute > 0 {
+		s.moneyDropClaimRateLimitPerMinute = claimRateLimitPerMinute
+	}
+	if detailsRateLimitPerMinute > 0 {
+		s.moneyDropDetailsRateLimitPerMinute = detailsRateLimitPerMinute
+	}
+	if passwordMaxAttempts > 0 {
+		s.moneyDropPasswordMaxAttempts = passwordMaxAttempts
+	}
+	if passwordLockoutSeconds > 0 {
+		s.moneyDropPasswordLockoutSeconds = passwordLockoutSeconds
+	}
+	if idempotencyTTLMinutes > 0 {
+		s.moneyDropIdempotencyTTL = time.Duration(idempotencyTTLMinutes) * time.Minute
+	}
+}
+
+func (s *Service) SetMoneyDropRateLimiter(rateLimiter moneyDropRateLimiter) {
+	s.moneyDropRateLimiter = rateLimiter
 }
 
 // ResolveInternalUserID converts a Clerk user id string (e.g., "user_abc123") into the
@@ -2032,9 +2101,135 @@ func (s *Service) CreateMoneyDrop(ctx context.Context, userID uuid.UUID, req dom
 	return response, nil
 }
 
+type moneyDropRateLimiter interface {
+	ConsumeRateLimit(
+		ctx context.Context,
+		scope string,
+		subject string,
+		limit int,
+		window time.Duration,
+	) (count int, retryAfterSeconds int, err error)
+}
+
+type moneyDropPasswordAttemptStore interface {
+	GetMoneyDropPasswordClaimAttemptState(
+		ctx context.Context,
+		dropID uuid.UUID,
+		claimantID uuid.UUID,
+	) (failedAttempts int, lockedUntil *time.Time, err error)
+	RecordMoneyDropPasswordClaimFailure(
+		ctx context.Context,
+		dropID uuid.UUID,
+		claimantID uuid.UUID,
+		maxAttempts int,
+		lockoutDuration time.Duration,
+	) (failedAttempts int, lockedUntil *time.Time, err error)
+	ResetMoneyDropPasswordClaimFailures(ctx context.Context, dropID uuid.UUID, claimantID uuid.UUID) error
+}
+
+type moneyDropIdempotencyStore interface {
+	AcquireMoneyDropClaimIdempotency(
+		ctx context.Context,
+		dropID uuid.UUID,
+		claimantID uuid.UUID,
+		key string,
+		requestHash string,
+		ttl time.Duration,
+		staleWindow time.Duration,
+	) (cachedResponse *domain.ClaimMoneyDropResponse, acquired bool, err error)
+	CompleteMoneyDropClaimIdempotency(
+		ctx context.Context,
+		dropID uuid.UUID,
+		claimantID uuid.UUID,
+		key string,
+		claimTransactionID uuid.UUID,
+		response domain.ClaimMoneyDropResponse,
+	) error
+	ReleaseMoneyDropClaimIdempotency(
+		ctx context.Context,
+		dropID uuid.UUID,
+		claimantID uuid.UUID,
+		key string,
+	) error
+}
+
+func (s *Service) validateIdempotencyKey(key string) error {
+	trimmed := strings.TrimSpace(key)
+	if trimmed == "" {
+		return nil
+	}
+	if len(trimmed) < minIdempotencyKeyLen || len(trimmed) > maxIdempotencyKeyLen {
+		return ErrInvalidIdempotencyKey
+	}
+	if !idempotencyKeyPattern.MatchString(trimmed) {
+		return ErrInvalidIdempotencyKey
+	}
+	return nil
+}
+
+func (s *Service) enforceRateLimit(
+	ctx context.Context,
+	scope string,
+	subject string,
+	limit int,
+	window time.Duration,
+	message string,
+) (int, error) {
+	if limit <= 0 || strings.TrimSpace(subject) == "" {
+		return 0, nil
+	}
+
+	if s.moneyDropRateLimiter == nil {
+		return 0, nil
+	}
+
+	count, retryAfterSeconds, err := s.moneyDropRateLimiter.ConsumeRateLimit(ctx, scope, subject, limit, window)
+	if err != nil {
+		// Fail-open to protect availability if limiter storage is unavailable.
+		log.Printf("level=warn component=service flow=money_drop_rate_limit msg=\"limiter check failed\" scope=%s subject=%s err=%v", scope, subject, err)
+		return 0, nil
+	}
+
+	if count > limit {
+		return retryAfterSeconds, &RateLimitError{
+			message:           message,
+			RetryAfterSeconds: retryAfterSeconds,
+		}
+	}
+
+	return 0, nil
+}
+
+func (s *Service) EnforceMoneyDropClaimRateLimit(ctx context.Context, claimantID uuid.UUID) (int, error) {
+	return s.enforceRateLimit(
+		ctx,
+		"money_drop_claim",
+		claimantID.String(),
+		s.moneyDropClaimRateLimitPerMinute,
+		time.Minute,
+		"Too many claim attempts. Please try again shortly.",
+	)
+}
+
+func (s *Service) EnforceMoneyDropDetailsRateLimit(ctx context.Context, userID uuid.UUID) (int, error) {
+	return s.enforceRateLimit(
+		ctx,
+		"money_drop_details",
+		userID.String(),
+		s.moneyDropDetailsRateLimitPerMinute,
+		time.Minute,
+		"Too many money drop detail requests. Please try again shortly.",
+	)
+}
+
 // ClaimMoneyDrop orchestrates claiming a portion of a money drop.
 func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, dropID uuid.UUID, req domain.ClaimMoneyDropRequest) (*domain.ClaimMoneyDropResponse, error) {
 	log.Printf("level=info component=service flow=money_drop_claim msg=\"claim requested\" money_drop_id=%s claimant_id=%s", dropID, claimantID)
+
+	if err := s.validateIdempotencyKey(req.IdempotencyKey); err != nil {
+		return nil, err
+	}
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
 
 	// 1. Get drop details
 	drop, err := s.repo.FindMoneyDropByID(ctx, dropID)
@@ -2046,7 +2241,18 @@ func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, drop
 		return nil, errors.New("you cannot claim your own money drop")
 	}
 
+	passwordAttemptStore, passwordAttemptStoreAvailable := s.repo.(moneyDropPasswordAttemptStore)
 	if drop.LockEnabled {
+		if passwordAttemptStoreAvailable {
+			_, lockedUntil, lockErr := passwordAttemptStore.GetMoneyDropPasswordClaimAttemptState(ctx, dropID, claimantID)
+			if lockErr != nil {
+				return nil, fmt.Errorf("failed to load password claim lock state: %w", lockErr)
+			}
+			if lockedUntil != nil && lockedUntil.After(time.Now().UTC()) {
+				return nil, ErrMoneyDropPasswordClaimLocked
+			}
+		}
+
 		password := strings.TrimSpace(req.LockPassword)
 		if password == "" {
 			return nil, ErrMoneyDropPasswordRequiredForClaim
@@ -2055,9 +2261,88 @@ func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, drop
 			return nil, ErrMoneyDropPasswordMismatch
 		}
 		if bcrypt.CompareHashAndPassword([]byte(*drop.LockPasswordHash), []byte(password)) != nil {
+			if passwordAttemptStoreAvailable {
+				_, lockedUntil, recordErr := passwordAttemptStore.RecordMoneyDropPasswordClaimFailure(
+					ctx,
+					dropID,
+					claimantID,
+					s.moneyDropPasswordMaxAttempts,
+					time.Duration(s.moneyDropPasswordLockoutSeconds)*time.Second,
+				)
+				if recordErr != nil {
+					return nil, fmt.Errorf("failed to record password claim failure: %w", recordErr)
+				}
+				if lockedUntil != nil && lockedUntil.After(time.Now().UTC()) {
+					return nil, ErrMoneyDropPasswordClaimLocked
+				}
+			}
 			return nil, ErrMoneyDropPasswordMismatch
 		}
+
+		if passwordAttemptStoreAvailable {
+			if resetErr := passwordAttemptStore.ResetMoneyDropPasswordClaimFailures(ctx, dropID, claimantID); resetErr != nil {
+				log.Printf("level=warn component=service flow=money_drop_claim msg=\"failed to reset password attempt state after successful verification\" money_drop_id=%s claimant_id=%s err=%v", dropID, claimantID, resetErr)
+			}
+		}
 	}
+
+	var (
+		idempotencyStore    moneyDropIdempotencyStore
+		idempotencyAcquired bool
+		claimSucceeded      bool
+		claimTxID           uuid.UUID
+	)
+
+	if idempotencyKey != "" {
+		var ok bool
+		idempotencyStore, ok = s.repo.(moneyDropIdempotencyStore)
+		if ok {
+			requestHashBytes := sha256.Sum256([]byte(dropID.String()))
+			requestHash := base64.RawURLEncoding.EncodeToString(requestHashBytes[:])
+
+			cachedResponse, acquired, acquireErr := idempotencyStore.AcquireMoneyDropClaimIdempotency(
+				ctx,
+				dropID,
+				claimantID,
+				idempotencyKey,
+				requestHash,
+				s.moneyDropIdempotencyTTL,
+				s.moneyDropIdempotencyStaleWindow,
+			)
+			if acquireErr != nil {
+				if errors.Is(acquireErr, store.ErrMoneyDropClaimIdempotencyConflict) {
+					return nil, ErrMoneyDropIdempotencyConflict
+				}
+				if errors.Is(acquireErr, store.ErrMoneyDropClaimIdempotencyInProgress) {
+					return nil, ErrMoneyDropIdempotencyInProgress
+				}
+				return nil, fmt.Errorf("failed to reserve claim idempotency: %w", acquireErr)
+			}
+			if cachedResponse != nil {
+				return cachedResponse, nil
+			}
+			if !acquired {
+				return nil, ErrMoneyDropIdempotencyInProgress
+			}
+			idempotencyAcquired = true
+		} else {
+			log.Printf("level=warn component=service flow=money_drop_claim msg=\"idempotency key provided but repository does not support idempotency persistence\" money_drop_id=%s claimant_id=%s", dropID, claimantID)
+		}
+	}
+
+	defer func() {
+		if idempotencyStore == nil || !idempotencyAcquired || claimSucceeded {
+			return
+		}
+		if releaseErr := idempotencyStore.ReleaseMoneyDropClaimIdempotency(
+			context.Background(),
+			dropID,
+			claimantID,
+			idempotencyKey,
+		); releaseErr != nil {
+			log.Printf("level=warn component=service flow=money_drop_claim msg=\"failed to release idempotency reservation\" money_drop_id=%s claimant_id=%s err=%v", dropID, claimantID, releaseErr)
+		}
+	}()
 
 	// 2. Get claimant's account
 	claimantAccount, err := s.repo.FindAccountByUserID(ctx, claimantID)
@@ -2072,7 +2357,7 @@ func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, drop
 	}
 
 	// 4. Perform atomic claim in database
-	claimTxID, err := s.repo.ClaimMoneyDropAtomic(ctx, dropID, claimantID, claimantAccount.ID, moneyDropAccount.ID, drop.AmountPerClaim)
+	claimTxID, err = s.repo.ClaimMoneyDropAtomic(ctx, dropID, claimantID, claimantAccount.ID, moneyDropAccount.ID, drop.AmountPerClaim)
 	if err != nil {
 		return nil, fmt.Errorf("failed to process claim: %w", err)
 	}
@@ -2113,11 +2398,18 @@ func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, drop
 		}
 
 		log.Printf("level=warn component=service flow=money_drop_claim msg=\"payout initiation state is unknown; claim kept pending\" money_drop_id=%s claimant_id=%s claim_transaction_id=%s err=%v", dropID, claimantID, claimTxID, err)
-		return &domain.ClaimMoneyDropResponse{
+		response := &domain.ClaimMoneyDropResponse{
 			Message:         "Claim received. Payout is being processed and will reflect shortly.",
 			AmountClaimed:   drop.AmountPerClaim,
 			CreatorUsername: creator.Username,
-		}, nil
+		}
+		if idempotencyStore != nil && idempotencyAcquired {
+			if completeErr := idempotencyStore.CompleteMoneyDropClaimIdempotency(ctx, dropID, claimantID, idempotencyKey, claimTxID, *response); completeErr != nil {
+				log.Printf("level=warn component=service flow=money_drop_claim msg=\"failed to persist idempotent completion state for pending payout\" money_drop_id=%s claimant_id=%s claim_transaction_id=%s err=%v", dropID, claimantID, claimTxID, completeErr)
+			}
+		}
+		claimSucceeded = true
+		return response, nil
 	}
 	anchorTransferID := strings.TrimSpace(transferResp.Data.ID)
 	transferType := "book"
@@ -2165,6 +2457,13 @@ func (s *Service) ClaimMoneyDrop(ctx context.Context, claimantID uuid.UUID, drop
 		CreatorUsername: creator.Username,
 	}
 
+	if idempotencyStore != nil && idempotencyAcquired {
+		if completeErr := idempotencyStore.CompleteMoneyDropClaimIdempotency(ctx, dropID, claimantID, idempotencyKey, claimTxID, *response); completeErr != nil {
+			log.Printf("level=warn component=service flow=money_drop_claim msg=\"failed to persist idempotent completion state\" money_drop_id=%s claimant_id=%s claim_transaction_id=%s err=%v", dropID, claimantID, claimTxID, completeErr)
+		}
+	}
+	claimSucceeded = true
+
 	log.Printf("level=info component=service flow=money_drop_claim msg=\"claim completed\" money_drop_id=%s claimant_id=%s", dropID, claimantID)
 	return response, nil
 }
@@ -2182,15 +2481,17 @@ func (s *Service) GetMoneyDropDetails(ctx context.Context, dropID uuid.UUID) (*d
 	}
 
 	details := &domain.MoneyDropDetails{
-		ID:               drop.ID,
-		Title:            drop.Title,
-		CreatorUsername:  creator.Username,
-		TotalAmount:      drop.TotalAmount,
-		AmountPerClaim:   drop.AmountPerClaim,
-		Status:           drop.Status,
-		IsClaimable:      false,
-		RequiresPassword: drop.LockEnabled,
-		Message:          "",
+		ID:                 drop.ID,
+		Title:              drop.Title,
+		CreatorUsername:    creator.Username,
+		TotalAmount:        drop.TotalAmount,
+		AmountPerClaim:     drop.AmountPerClaim,
+		ClaimsMadeCount:    drop.ClaimsMadeCount,
+		TotalClaimsAllowed: drop.TotalClaimsAllowed,
+		Status:             drop.Status,
+		IsClaimable:        false,
+		RequiresPassword:   drop.LockEnabled,
+		Message:            "",
 	}
 
 	// Determine if drop is claimable

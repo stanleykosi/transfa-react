@@ -28,6 +28,18 @@ import (
 	"github.com/transfa/transaction-service/internal/store"
 )
 
+func (h *TransactionHandlers) writeRateLimitError(w http.ResponseWriter, err error) bool {
+	var rateLimitErr *app.RateLimitError
+	if !errors.As(err, &rateLimitErr) {
+		return false
+	}
+	if rateLimitErr.RetryAfterSeconds > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(rateLimitErr.RetryAfterSeconds))
+	}
+	h.writeError(w, http.StatusTooManyRequests, rateLimitErr.Error())
+	return true
+}
+
 // CreateMoneyDropHandler handles requests to create a new money drop.
 func (h *TransactionHandlers) CreateMoneyDropHandler(w http.ResponseWriter, r *http.Request) {
 	// Retrieve the authenticated user's ID from the context.
@@ -134,6 +146,13 @@ func (h *TransactionHandlers) ClaimMoneyDropHandler(w http.ResponseWriter, r *ht
 		return
 	}
 
+	if _, err := h.service.EnforceMoneyDropClaimRateLimit(r.Context(), claimantID); err != nil {
+		if h.writeRateLimitError(w, err) {
+			return
+		}
+		log.Printf("level=warn component=api endpoint=claim_money_drop outcome=rate_limit_check_failed claimant_id=%s err=%v", claimantID, err)
+	}
+
 	// Get drop ID from URL parameter
 	dropIDStr := chi.URLParam(r, "drop_id")
 	dropID, err := uuid.Parse(dropIDStr)
@@ -149,12 +168,27 @@ func (h *TransactionHandlers) ClaimMoneyDropHandler(w http.ResponseWriter, r *ht
 			return
 		}
 	}
+	req.IdempotencyKey = strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 
 	// Process the claim
 	response, err := h.service.ClaimMoneyDrop(r.Context(), claimantID, dropID, req)
 	if err != nil {
 		log.Printf("level=warn component=api endpoint=claim_money_drop outcome=failed claimant_id=%s drop_id=%s err=%v", claimantID, dropID, err)
-		h.writeError(w, http.StatusBadRequest, err.Error())
+		if h.writeRateLimitError(w, err) {
+			return
+		}
+		switch {
+		case errors.Is(err, app.ErrMoneyDropPasswordClaimLocked):
+			h.writeError(w, http.StatusLocked, err.Error())
+		case errors.Is(err, app.ErrMoneyDropIdempotencyInProgress):
+			h.writeError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, app.ErrMoneyDropIdempotencyConflict):
+			h.writeError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, app.ErrInvalidIdempotencyKey):
+			h.writeError(w, http.StatusBadRequest, err.Error())
+		default:
+			h.writeError(w, http.StatusBadRequest, err.Error())
+		}
 		return
 	}
 
@@ -163,6 +197,18 @@ func (h *TransactionHandlers) ClaimMoneyDropHandler(w http.ResponseWriter, r *ht
 
 // GetMoneyDropDetailsHandler handles requests to get details about a money drop.
 func (h *TransactionHandlers) GetMoneyDropDetailsHandler(w http.ResponseWriter, r *http.Request) {
+	userID, statusCode, message := h.resolveAuthenticatedInternalUserID(r)
+	if statusCode != 0 {
+		h.writeError(w, statusCode, message)
+		return
+	}
+	if _, err := h.service.EnforceMoneyDropDetailsRateLimit(r.Context(), userID); err != nil {
+		if h.writeRateLimitError(w, err) {
+			return
+		}
+		log.Printf("level=warn component=api endpoint=get_money_drop_details outcome=rate_limit_check_failed user_id=%s err=%v", userID, err)
+	}
+
 	// Get drop ID from URL parameter
 	dropIDStr := chi.URLParam(r, "drop_id")
 	dropID, err := uuid.Parse(dropIDStr)

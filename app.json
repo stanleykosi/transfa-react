@@ -2,6 +2,7 @@
   "expo": {
     "name": "TransfaApp",
     "slug": "transfa-app",
+    "scheme": "transfa",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -9,10 +10,31 @@
     "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.transfaapp"
+      "bundleIdentifier": "com.transfaapp",
+      "associatedDomains": ["applinks:trytransfa.com", "applinks:www.trytransfa.com"]
     },
     "android": {
-      "package": "com.transfaapp"
+      "package": "com.transfaapp",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "category": ["BROWSABLE", "DEFAULT"],
+          "data": [
+            {
+              "scheme": "https",
+              "host": "trytransfa.com"
+            },
+            {
+              "scheme": "https",
+              "host": "www.trytransfa.com"
+            },
+            {
+              "scheme": "transfa"
+            }
+          ]
+        }
+      ]
     },
     "plugins": [
       "expo-secure-store",

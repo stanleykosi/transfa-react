@@ -534,6 +534,7 @@ export interface MoneyDropResponse {
 export interface ClaimMoneyDropPayload {
   dropId: string;
   lockPassword?: string;
+  idempotencyKey?: string;
 }
 
 export interface ClaimMoneyDropResponse {
@@ -557,6 +558,8 @@ export interface MoneyDropDetails {
   creator_username: string;
   total_amount: number;
   amount_per_claim: number;
+  claims_made_count: number;
+  total_claims_allowed: number;
   status: 'active' | 'completed' | 'expired_and_refunded';
   is_claimable: boolean;
   requires_password: boolean;

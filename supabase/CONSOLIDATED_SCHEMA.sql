@@ -488,6 +488,60 @@ CREATE INDEX idx_money_drop_claims_drop_claimed_at ON public.money_drop_claims(d
 COMMENT ON TABLE public.money_drop_claims IS 'A ledger of successful claims for a Money Drop, ensuring one claim per person.';
 COMMENT ON COLUMN public.money_drop_claims.claimant_id IS 'The user who successfully claimed from the drop.';
 
+CREATE TABLE public.money_drop_claim_password_attempts (
+    drop_id UUID NOT NULL REFERENCES public.money_drops(id) ON DELETE CASCADE,
+    claimant_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    last_failed_at TIMESTAMPTZ,
+    locked_until TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (drop_id, claimant_id),
+    CONSTRAINT chk_money_drop_claim_password_attempts_non_negative CHECK (failed_attempts >= 0)
+);
+
+CREATE INDEX idx_money_drop_claim_password_attempts_claimant
+ON public.money_drop_claim_password_attempts(claimant_id, updated_at DESC);
+
+COMMENT ON TABLE public.money_drop_claim_password_attempts IS 'Tracks failed password attempts per claimant/drop to enforce distributed lockouts.';
+COMMENT ON COLUMN public.money_drop_claim_password_attempts.locked_until IS 'Claim attempts are blocked until this timestamp when set in the future.';
+
+CREATE TRIGGER set_money_drop_claim_password_attempts_updated_at
+BEFORE UPDATE ON public.money_drop_claim_password_attempts
+FOR EACH ROW
+EXECUTE FUNCTION public.trigger_set_timestamp();
+
+CREATE TABLE public.money_drop_claim_idempotency (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    drop_id UUID NOT NULL REFERENCES public.money_drops(id) ON DELETE CASCADE,
+    claimant_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    idempotency_key TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'processing',
+    response_payload JSONB,
+    claim_transaction_id UUID REFERENCES public.transactions(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL DEFAULT NOW() + INTERVAL '24 hours',
+    CONSTRAINT uq_money_drop_claim_idempotency_claimant_key UNIQUE (claimant_id, idempotency_key),
+    CONSTRAINT chk_money_drop_claim_idempotency_status CHECK (status IN ('processing', 'completed'))
+);
+
+CREATE INDEX idx_money_drop_claim_idempotency_expires_at
+ON public.money_drop_claim_idempotency(expires_at);
+
+CREATE INDEX idx_money_drop_claim_idempotency_claimant_updated
+ON public.money_drop_claim_idempotency(claimant_id, updated_at DESC);
+
+COMMENT ON TABLE public.money_drop_claim_idempotency IS 'Durable idempotency records for money drop claim retries.';
+COMMENT ON COLUMN public.money_drop_claim_idempotency.request_hash IS 'Stable hash of request semantics to prevent unsafe key reuse.';
+COMMENT ON COLUMN public.money_drop_claim_idempotency.response_payload IS 'Cached successful claim response for deterministic retry responses.';
+
+CREATE TRIGGER set_money_drop_claim_idempotency_updated_at
+BEFORE UPDATE ON public.money_drop_claim_idempotency
+FOR EACH ROW
+EXECUTE FUNCTION public.trigger_set_timestamp();
+
 -- Payment Requests
 CREATE TABLE public.payment_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -630,6 +684,8 @@ ALTER TABLE public.platform_fee_invoices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.platform_fee_attempts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.money_drops ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.money_drop_claims ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.money_drop_claim_password_attempts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.money_drop_claim_idempotency ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payment_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.in_app_notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transfer_lists ENABLE ROW LEVEL SECURITY;
@@ -763,6 +819,16 @@ USING (
         WHERE md.id = money_drop_claims.drop_id AND u.clerk_user_id = auth.uid()::text
     )
 );
+
+CREATE POLICY "Service role can manage money drop claim password attempts."
+ON public.money_drop_claim_password_attempts FOR ALL
+USING (auth.role() = 'service_role')
+WITH CHECK (auth.role() = 'service_role');
+
+CREATE POLICY "Service role can manage money drop claim idempotency."
+ON public.money_drop_claim_idempotency FOR ALL
+USING (auth.role() = 'service_role')
+WITH CHECK (auth.role() = 'service_role');
 
 -- Payment requests policy
 CREATE POLICY "Users can manage their own payment requests."

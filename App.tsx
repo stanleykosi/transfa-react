@@ -10,32 +10,67 @@
  * - @react-navigation/native: Provides the NavigationContainer to manage the app's navigation stack.
  * - expo-secure-store: Used by Clerk for secure token storage.
  * - RootNavigator: The main navigator component that decides which screen stack to show.
- *
- * @notes
- * - The `ClerkProvider` requires the `publishableKey` from your Clerk dashboard.
- * - The `tokenCache` is configured to use `expo-secure-store` for securely persisting
- *   authentication tokens on the device, as per security best practices.
- * - The `QueryClient` is instantiated here and passed to the `QueryClientProvider`,
- *   making server state management available throughout the component tree.
  */
 
-import React from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { NavigationContainer } from '@react-navigation/native';
-import RootNavigator from '@/navigation/RootNavigator';
+import {
+  NavigationContainer,
+  type NavigationContainerRef,
+  type ParamListBase,
+} from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { Linking } from 'react-native';
+
 import ClerkProvider from '@/providers/ClerkProvider';
+import RootNavigator from '@/navigation/RootNavigator';
+import { useAuth } from '@/hooks/useAuth';
 
-// Initialize the QueryClient for TanStack Query
 const queryClient = new QueryClient();
-
-// Retrieve the Clerk Publishable Key from environment variables.
-// It's crucial to have this in a .env file and not hardcoded.
 const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
-
-// For development purposes, we'll use a placeholder key if none is provided
-// In production, this should always be set
 const PUBLISHABLE_KEY = CLERK_PUBLISHABLE_KEY || 'pk_test_placeholder_key_for_development';
+const moneyDropUUIDPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+const parseMoneyDropIdFromURL = (incomingUrl: string): string | null => {
+  const normalizedURL = incomingUrl.trim();
+  if (!normalizedURL) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(normalizedURL);
+    const candidates = [
+      parsed.searchParams.get('drop_id'),
+      parsed.searchParams.get('money_drop_id'),
+    ];
+
+    const pathSegments = parsed.pathname
+      .split('/')
+      .map((segment) => segment.trim())
+      .filter(Boolean);
+
+    if (pathSegments.length > 0) {
+      candidates.push(pathSegments[pathSegments.length - 1]);
+    }
+
+    for (const candidate of candidates) {
+      const cleaned = candidate?.trim() ?? '';
+      if (moneyDropUUIDPattern.test(cleaned)) {
+        return cleaned;
+      }
+    }
+  } catch {
+    // Ignore parsing errors and continue with regex fallback.
+  }
+
+  const queryMatch = normalizedURL.match(/[?&](?:drop_id|money_drop_id)=([0-9a-fA-F-]{36})/);
+  if (queryMatch && moneyDropUUIDPattern.test(queryMatch[1])) {
+    return queryMatch[1];
+  }
+
+  return null;
+};
 
 if (!CLERK_PUBLISHABLE_KEY) {
   console.warn(
@@ -43,16 +78,86 @@ if (!CLERK_PUBLISHABLE_KEY) {
   );
 }
 
+function AppRoot(): React.JSX.Element {
+  const { isLoaded, isSignedIn } = useAuth();
+  const navigationRef = useRef<NavigationContainerRef<ParamListBase> | null>(null);
+  const pendingDropIdRef = useRef<string | null>(null);
+
+  const navigateToClaimDrop = useCallback(
+    (dropId: string) => {
+      const nav = navigationRef.current;
+      if (!nav || !nav.isReady() || !isLoaded || !isSignedIn) {
+        pendingDropIdRef.current = dropId;
+        return;
+      }
+
+      pendingDropIdRef.current = null;
+      nav.navigate('ClaimDrop', { dropId });
+    },
+    [isLoaded, isSignedIn]
+  );
+
+  const flushPendingDropLink = useCallback(() => {
+    if (!pendingDropIdRef.current || !isLoaded || !isSignedIn) {
+      return;
+    }
+    navigateToClaimDrop(pendingDropIdRef.current);
+  }, [isLoaded, isSignedIn, navigateToClaimDrop]);
+
+  const handleIncomingURL = useCallback(
+    (url: string) => {
+      const dropId = parseMoneyDropIdFromURL(url);
+      if (!dropId) {
+        return;
+      }
+      navigateToClaimDrop(dropId);
+    },
+    [navigateToClaimDrop]
+  );
+
+  useEffect(() => {
+    Linking.getInitialURL()
+      .then((url) => {
+        if (url) {
+          handleIncomingURL(url);
+        }
+      })
+      .catch((error) => {
+        console.warn('Failed to read initial URL:', error);
+      });
+
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      handleIncomingURL(url);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [handleIncomingURL]);
+
+  useEffect(() => {
+    flushPendingDropLink();
+  }, [flushPendingDropLink]);
+
+  return (
+    <QueryClientProvider client={queryClient}>
+      <SafeAreaProvider>
+        <NavigationContainer
+          ref={navigationRef}
+          onReady={flushPendingDropLink}
+          onStateChange={flushPendingDropLink}
+        >
+          <RootNavigator />
+        </NavigationContainer>
+      </SafeAreaProvider>
+    </QueryClientProvider>
+  );
+}
+
 function App(): React.JSX.Element {
   return (
     <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
-      <QueryClientProvider client={queryClient}>
-        <SafeAreaProvider>
-          <NavigationContainer>
-            <RootNavigator />
-          </NavigationContainer>
-        </SafeAreaProvider>
-      </QueryClientProvider>
+      <AppRoot />
     </ClerkProvider>
   );
 }
