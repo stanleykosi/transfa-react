@@ -20,6 +20,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 
 import { useUserSearch } from '@/api/userDiscoveryApi';
 import {
+  fetchTransactionStatus,
   useAccountBalance,
   useBulkP2PTransfer,
   useP2PTransfer,
@@ -56,6 +57,7 @@ type ResultState = {
     fee: number;
     description: string;
     recipientUsername: string;
+    initialStatus?: 'completed' | 'failed';
   }>;
   failures: BulkP2PTransferFailure[];
 };
@@ -68,6 +70,69 @@ const MAX_RECIPIENTS = 10;
 const NARRATION_SUGGESTIONS = ['Gift', 'Payment', 'Refund', 'Rent', 'School Fees'];
 
 const rnBiometrics = new ReactNativeBiometrics();
+
+const toReceiptInitialStatus = (
+  status?: string
+): AppStackParamList['TransferStatus']['initialStatus'] => {
+  const normalized = (status ?? 'pending').toLowerCase();
+  if (normalized === 'completed' || normalized === 'successful' || normalized === 'success') {
+    return 'completed';
+  }
+  if (normalized === 'failed' || normalized === 'failure' || normalized === 'cancelled') {
+    return 'failed';
+  }
+  if (normalized === 'processing' || normalized === 'initiated') {
+    return 'processing';
+  }
+  return 'pending';
+};
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const MIN_PROCESSING_CARD_MS = 700;
+
+const ensureMinimumProcessingDisplay = async (startedAt: number) => {
+  const elapsed = Date.now() - startedAt;
+  if (elapsed < MIN_PROCESSING_CARD_MS) {
+    await sleep(MIN_PROCESSING_CARD_MS - elapsed);
+  }
+};
+
+const waitForSingleTransferSettlement = async (
+  transactionId: string,
+  initialStatus?: string
+): Promise<{ status: 'completed' | 'failed'; failureReason?: string }> => {
+  const status = toReceiptInitialStatus(initialStatus);
+  if (status === 'completed') {
+    return { status: 'completed' };
+  }
+  if (status === 'failed') {
+    return { status: 'failed' };
+  }
+
+  const timeoutAt = Date.now() + 60000;
+  while (Date.now() < timeoutAt) {
+    await sleep(1500);
+    try {
+      const { data } = await fetchTransactionStatus(transactionId);
+      const current = toReceiptInitialStatus(data?.status);
+      if (current === 'completed') {
+        return { status: 'completed' };
+      }
+      if (current === 'failed') {
+        return {
+          status: 'failed',
+          failureReason: data?.failure_reason || data?.anchor_reason || data?.status,
+        };
+      }
+    } catch {
+      // Keep polling until timeout so transient network errors do not break submission UX.
+    }
+  }
+
+  throw new Error(
+    'Transfer is still processing on the server. Please wait a moment and check History.'
+  );
+};
 
 const parseAmountInputToKobo = (value: string): number => {
   const normalized = value.replace(/,/g, '').trim();
@@ -320,10 +385,15 @@ const PayUserScreen = () => {
     setAuthError(null);
   };
 
-  const buildBulkReceipts = (
+  const waitForBulkTransferSettlement = async (
     pending: TransferDraft[],
     response: BulkP2PTransferResponse
-  ): ResultState['receipts'] => {
+  ): Promise<{
+    receipts: ResultState['receipts'];
+    failures: BulkP2PTransferFailure[];
+  }> => {
+    const receipts: ResultState['receipts'] = [];
+    const failures: BulkP2PTransferFailure[] = [...response.failed_transfers];
     const failedUsernames = new Set(
       response.failed_transfers.map((entry) => usernameKey(entry.recipient_username))
     );
@@ -332,17 +402,123 @@ const PayUserScreen = () => {
       (entry) => !failedUsernames.has(usernameKey(entry.recipient.username))
     );
 
-    return response.successful_transfers.map((transfer, index) => {
-      const draft = successfulDrafts[index];
+    const pendingChecks = new Map<
+      string,
+      {
+        transactionId: string;
+        amount: number;
+        fee: number;
+        description: string;
+        recipientUsername: string;
+        fallbackFailureReason: string;
+      }
+    >();
 
-      return {
-        transactionId: transfer.transaction_id,
-        amount: transfer.amount ?? draft?.amountKobo ?? 0,
-        fee: transfer.fee ?? transferFeeKobo,
-        description: draft?.narration ?? '',
-        recipientUsername: normalizeUsername(draft?.recipient.username ?? ''),
-      };
+    response.successful_transfers.forEach((transfer, index) => {
+      const draft = successfulDrafts[index];
+      const transactionId = transfer.transaction_id;
+      const amount = transfer.amount ?? draft?.amountKobo ?? 0;
+      const fee = transfer.fee ?? transferFeeKobo;
+      const description = draft?.narration ?? '';
+      const recipientUsername = normalizeUsername(draft?.recipient.username ?? '');
+      const fallbackFailureReason = transfer.message || transfer.status || 'Transfer failed.';
+
+      const initialStatus = toReceiptInitialStatus(transfer.status);
+      if (initialStatus === 'completed') {
+        receipts.push({
+          transactionId,
+          amount,
+          fee,
+          description,
+          recipientUsername,
+          initialStatus: 'completed',
+        });
+        return;
+      }
+
+      if (initialStatus === 'failed') {
+        failures.push({
+          recipient_username: recipientUsername || 'unknown',
+          amount,
+          description,
+          error: fallbackFailureReason,
+        });
+        return;
+      }
+
+      pendingChecks.set(transactionId, {
+        transactionId,
+        amount,
+        fee,
+        description,
+        recipientUsername,
+        fallbackFailureReason,
+      });
     });
+
+    const timeoutAt = Date.now() + 60000;
+
+    while (pendingChecks.size > 0 && Date.now() < timeoutAt) {
+      await sleep(1500);
+      const ids = Array.from(pendingChecks.keys());
+      const updates = await Promise.all(
+        ids.map(async (transactionId) => {
+          try {
+            const { data } = await fetchTransactionStatus(transactionId);
+            return { transactionId, data };
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      updates.forEach((update) => {
+        if (!update) {
+          return;
+        }
+
+        const candidate = pendingChecks.get(update.transactionId);
+        if (!candidate) {
+          return;
+        }
+
+        const status = toReceiptInitialStatus(update.data?.status);
+        if (status === 'completed') {
+          receipts.push({
+            transactionId: candidate.transactionId,
+            amount: candidate.amount,
+            fee: candidate.fee,
+            description: candidate.description,
+            recipientUsername: candidate.recipientUsername,
+            initialStatus: 'completed',
+          });
+          pendingChecks.delete(candidate.transactionId);
+          return;
+        }
+
+        if (status === 'failed') {
+          failures.push({
+            recipient_username: candidate.recipientUsername || 'unknown',
+            amount: candidate.amount,
+            description: candidate.description,
+            error:
+              update.data?.failure_reason ||
+              update.data?.anchor_reason ||
+              update.data?.status ||
+              candidate.fallbackFailureReason,
+          });
+          pendingChecks.delete(candidate.transactionId);
+        }
+      });
+    }
+
+    if (pendingChecks.size > 0) {
+      throw new Error(
+        'Some transfers are still processing on the server. Please wait a moment and check History.'
+      );
+    }
+
+    return { receipts, failures };
   };
 
   const openResultModal = (result: ResultState) => {
@@ -361,6 +537,9 @@ const PayUserScreen = () => {
     }
 
     setAuthError(null);
+    setFormError(null);
+    setAuthVisible(false);
+    const processingStartedAt = Date.now();
     setProcessingVisible(true);
 
     try {
@@ -373,9 +552,27 @@ const PayUserScreen = () => {
           transaction_pin: transactionPin,
         });
 
-        setAuthVisible(false);
+        const settlement = await waitForSingleTransferSettlement(
+          response.transaction_id,
+          response.status
+        );
+
         setSavedTransfers([]);
         clearComposer();
+
+        if (settlement.status === 'failed') {
+          openResultModal({
+            type: 'failure',
+            title: 'Transfer Failed',
+            message:
+              settlement.failureReason ||
+              response.message ||
+              'The transfer could not be completed.',
+            failures: [],
+            receipts: [],
+          });
+          return;
+        }
 
         openResultModal({
           type: 'success',
@@ -389,6 +586,7 @@ const PayUserScreen = () => {
               fee: response.fee ?? transferFeeKobo,
               description: entry.narration,
               recipientUsername: normalizeUsername(entry.recipient.username),
+              initialStatus: 'completed',
             },
           ],
         });
@@ -405,12 +603,10 @@ const PayUserScreen = () => {
         transaction_pin: transactionPin,
       });
 
-      const receipts = buildBulkReceipts(transfers, bulkResponse);
-      const failures = bulkResponse.failed_transfers;
+      const settlement = await waitForBulkTransferSettlement(transfers, bulkResponse);
+      const { receipts, failures } = settlement;
 
-      setAuthVisible(false);
-
-      if (bulkResponse.status === 'completed') {
+      if (receipts.length > 0 && failures.length === 0) {
         setSavedTransfers([]);
         clearComposer();
         openResultModal({
@@ -423,7 +619,7 @@ const PayUserScreen = () => {
         return;
       }
 
-      if (bulkResponse.status === 'partial_failed') {
+      if (receipts.length > 0 && failures.length > 0) {
         // Keep failed recipients in composer for quick retry.
         const failedSet = new Set(
           failures.map((failure) => usernameKey(failure.recipient_username))
@@ -447,32 +643,25 @@ const PayUserScreen = () => {
       openResultModal({
         type: 'failure',
         title: 'Transfer Failed',
-        message: failures[0]?.error || bulkResponse.message || 'No transfers were processed.',
+        message: failures[0]?.error || bulkResponse.message || 'No transfer was completed.',
         receipts,
         failures,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Transfer failed. Please try again.';
       const normalized = message.toLowerCase();
-      const shouldShowInlineError = !isAuthVisible;
 
       if (normalized.includes('invalid transaction pin') || normalized.includes('unauthorized')) {
-        if (shouldShowInlineError) {
-          setFormError('Wrong PIN. Please try again.');
-        } else {
-          setAuthError('Wrong PIN. Please try again.');
-        }
+        setAuthMode('pin');
+        setAuthVisible(true);
+        setAuthError('Wrong PIN. Please try again.');
       } else if (normalized.includes('pin is not set')) {
-        setAuthVisible(false);
         navigation.navigate('CreatePin');
       } else {
-        if (shouldShowInlineError) {
-          setFormError(message);
-        } else {
-          setAuthError(message);
-        }
+        setFormError(message);
       }
     } finally {
+      await ensureMinimumProcessingDisplay(processingStartedAt);
       setProcessingVisible(false);
       setPinValue('');
     }
@@ -1172,6 +1361,7 @@ const PayUserScreen = () => {
                     description: first.description,
                     recipientUsername: first.recipientUsername,
                     transferType: 'p2p',
+                    initialStatus: first.initialStatus ?? 'completed',
                   });
                 }}
               >

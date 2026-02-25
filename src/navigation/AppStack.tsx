@@ -95,7 +95,7 @@ export type AppStackParamList = {
     description?: string;
     recipientUsername?: string;
     transferType?: string;
-    initialStatus?: 'pending' | 'failed';
+    initialStatus?: 'pending' | 'processing' | 'completed' | 'failed';
     failureReason?: string;
   };
   MultiTransferReceipts: {
@@ -105,6 +105,7 @@ export type AppStackParamList = {
       fee: number;
       description: string;
       recipientUsername: string;
+      initialStatus?: 'completed' | 'failed';
     }>;
     failures?: Array<{
       recipient_username: string;

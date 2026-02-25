@@ -20,6 +20,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 
 import { useListBeneficiaries } from '@/api/accountApi';
 import {
+  fetchTransactionStatus,
   useAccountBalance,
   useSelfTransfer,
   useTransactionFees,
@@ -27,6 +28,7 @@ import {
 } from '@/api/transactionApi';
 import type { Beneficiary } from '@/types/api';
 import type { AppNavigationProp } from '@/types/navigation';
+import type { AppStackParamList } from '@/navigation/AppStack';
 import { useSecurityStore } from '@/store/useSecurityStore';
 import { formatCurrency, nairaToKobo } from '@/utils/formatCurrency';
 import { normalizeUsername } from '@/utils/username';
@@ -37,6 +39,69 @@ const CARD_BG = 'rgba(255,255,255,0.08)';
 const CARD_BORDER = 'rgba(255,255,255,0.06)';
 
 const rnBiometrics = new ReactNativeBiometrics();
+
+const toReceiptInitialStatus = (
+  status?: string
+): AppStackParamList['TransferStatus']['initialStatus'] => {
+  const normalized = (status ?? 'pending').toLowerCase();
+  if (normalized === 'completed' || normalized === 'successful' || normalized === 'success') {
+    return 'completed';
+  }
+  if (normalized === 'failed' || normalized === 'failure' || normalized === 'cancelled') {
+    return 'failed';
+  }
+  if (normalized === 'processing' || normalized === 'initiated') {
+    return 'processing';
+  }
+  return 'pending';
+};
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const MIN_PROCESSING_CARD_MS = 700;
+
+const ensureMinimumProcessingDisplay = async (startedAt: number) => {
+  const elapsed = Date.now() - startedAt;
+  if (elapsed < MIN_PROCESSING_CARD_MS) {
+    await sleep(MIN_PROCESSING_CARD_MS - elapsed);
+  }
+};
+
+const waitForSingleTransferSettlement = async (
+  transactionId: string,
+  initialStatus?: string
+): Promise<{ status: 'completed' | 'failed'; failureReason?: string }> => {
+  const status = toReceiptInitialStatus(initialStatus);
+  if (status === 'completed') {
+    return { status: 'completed' };
+  }
+  if (status === 'failed') {
+    return { status: 'failed' };
+  }
+
+  const timeoutAt = Date.now() + 60000;
+  while (Date.now() < timeoutAt) {
+    await sleep(1500);
+    try {
+      const { data } = await fetchTransactionStatus(transactionId);
+      const current = toReceiptInitialStatus(data?.status);
+      if (current === 'completed') {
+        return { status: 'completed' };
+      }
+      if (current === 'failed') {
+        return {
+          status: 'failed',
+          failureReason: data?.failure_reason || data?.anchor_reason || data?.status,
+        };
+      }
+    } catch {
+      // Keep polling until timeout so transient network issues do not break UX.
+    }
+  }
+
+  throw new Error(
+    'Transfer is still processing on the server. Please wait a moment and check History.'
+  );
+};
 
 type ResultState = {
   type: 'success' | 'failure';
@@ -179,6 +244,9 @@ const SelfTransferScreen = () => {
     const description = buildWithdrawalDescription(selectedBeneficiary);
 
     setAuthError(null);
+    setFormError(null);
+    setAuthVisible(false);
+    const processingStartedAt = Date.now();
     setProcessingVisible(true);
 
     try {
@@ -189,9 +257,22 @@ const SelfTransferScreen = () => {
         transaction_pin: transactionPin,
       });
 
-      setAuthVisible(false);
+      const settlement = await waitForSingleTransferSettlement(
+        response.transaction_id,
+        response.status
+      );
+
       setAmountInput('');
-      setFormError(null);
+
+      if (settlement.status === 'failed') {
+        setResultState({
+          type: 'failure',
+          title: 'Transfer Failed',
+          message:
+            settlement.failureReason || response.message || 'The transfer could not be completed.',
+        });
+        return;
+      }
 
       setResultState({
         type: 'success',
@@ -208,6 +289,8 @@ const SelfTransferScreen = () => {
       const normalized = message.toLowerCase();
 
       if (normalized.includes('invalid transaction pin') || normalized.includes('unauthorized')) {
+        setAuthMode('pin');
+        setAuthVisible(true);
         setAuthError('Wrong PIN. Please try again.');
         return;
       }
@@ -228,6 +311,7 @@ const SelfTransferScreen = () => {
         message,
       });
     } finally {
+      await ensureMinimumProcessingDisplay(processingStartedAt);
       setProcessingVisible(false);
       setPinValue('');
     }
@@ -691,6 +775,7 @@ const SelfTransferScreen = () => {
                     fee,
                     description,
                     transferType: 'self_transfer',
+                    initialStatus: 'completed',
                   });
                 }}
               >
