@@ -7,6 +7,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/transfa/scheduler-service/internal/config"
 	"github.com/transfa/scheduler-service/internal/domain"
@@ -15,6 +16,7 @@ import (
 // Repository defines database operations needed by the jobs.
 type Repository interface {
 	GetExpiredAndCompletedMoneyDrops(ctx context.Context) ([]domain.MoneyDrop, error)
+	HasPendingMoneyDropClaimReconciliationCandidates(ctx context.Context, olderThan time.Time) (bool, error)
 }
 
 // TransactionClient defines the interface for communicating with the transaction service.
@@ -142,6 +144,15 @@ func (j *Jobs) ProcessMoneyDropExpiry() {
 func (j *Jobs) ProcessMoneyDropClaimReconciliation() {
 	j.logger.Info("starting money drop claim reconciliation job")
 	ctx := context.Background()
+
+	cutoff := time.Now().UTC().Add(-2 * time.Minute)
+	hasCandidates, err := j.repo.HasPendingMoneyDropClaimReconciliationCandidates(ctx, cutoff)
+	if err != nil {
+		j.logger.Warn("failed to pre-check money drop claim reconciliation candidates; continuing", "error", err)
+	} else if !hasCandidates {
+		j.logger.Info("no pending money drop claim reconciliation candidates; skipping")
+		return
+	}
 
 	const limit = 100
 	if err := j.txClient.ReconcileMoneyDropClaims(ctx, limit); err != nil {

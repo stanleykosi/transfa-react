@@ -6,6 +6,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/transfa/scheduler-service/internal/domain"
@@ -14,6 +15,41 @@ import (
 // Repository handles database operations for the scheduler.
 type Repository struct {
 	db *pgxpool.Pool
+}
+
+// HasPendingMoneyDropClaimReconciliationCandidates checks whether there are stale
+// pending claim payouts eligible for automatic reconciliation retry.
+func (r *Repository) HasPendingMoneyDropClaimReconciliationCandidates(ctx context.Context, olderThan time.Time) (bool, error) {
+	if olderThan.IsZero() {
+		olderThan = time.Now().UTC().Add(-2 * time.Minute)
+	}
+
+	query := `
+		SELECT EXISTS (
+			SELECT 1
+			FROM transactions t
+			INNER JOIN accounts src ON src.id = t.source_account_id
+			INNER JOIN accounts dest ON dest.id = t.destination_account_id
+			WHERE t.type = 'money_drop_claim'
+			  AND t.status = 'pending'
+			  AND COALESCE(BTRIM(t.anchor_transfer_id), '') = ''
+			  AND COALESCE(t.anchor_reason, '') LIKE '%state:reconcile_retry_requested%'
+			  AND COALESCE(t.anchor_reason, '') NOT LIKE '%state:transfer_initiated%'
+			  AND COALESCE(t.anchor_reason, '') NOT LIKE '%state:reconcile_retry_initiated%'
+			  AND COALESCE(t.anchor_reason, '') NOT LIKE '%state:reconcile_retry_inflight%'
+			  AND t.destination_account_id IS NOT NULL
+			  AND t.updated_at <= $1
+			  AND src.anchor_account_id <> ''
+			  AND dest.anchor_account_id <> ''
+			LIMIT 1
+		)
+	`
+
+	var hasCandidates bool
+	if err := r.db.QueryRow(ctx, query, olderThan).Scan(&hasCandidates); err != nil {
+		return false, err
+	}
+	return hasCandidates, nil
 }
 
 // NewRepository creates a new repository.

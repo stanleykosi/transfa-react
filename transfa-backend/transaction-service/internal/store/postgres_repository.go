@@ -2057,7 +2057,7 @@ func (r *PostgresRepository) CreateInAppNotification(ctx context.Context, item d
                 id, user_id, category, type, title, body, status,
                 related_entity_type, related_entity_id, data, dedupe_key, read_at
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12)
             ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
         `
 		_, err = r.db.Exec(ctx, query,
@@ -2070,7 +2070,7 @@ func (r *PostgresRepository) CreateInAppNotification(ctx context.Context, item d
 			item.Status,
 			item.RelatedEntityType,
 			item.RelatedEntityID,
-			dataJSON,
+			string(dataJSON),
 			item.DedupeKey,
 			item.ReadAt,
 		)
@@ -2082,7 +2082,7 @@ func (r *PostgresRepository) CreateInAppNotification(ctx context.Context, item d
             id, user_id, category, type, title, body, status,
             related_entity_type, related_entity_id, data, dedupe_key, read_at
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12)
     `
 	_, err = r.db.Exec(ctx, query,
 		item.ID,
@@ -2094,7 +2094,7 @@ func (r *PostgresRepository) CreateInAppNotification(ctx context.Context, item d
 		item.Status,
 		item.RelatedEntityType,
 		item.RelatedEntityID,
-		dataJSON,
+		string(dataJSON),
 		item.DedupeKey,
 		item.ReadAt,
 	)

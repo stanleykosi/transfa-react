@@ -93,13 +93,26 @@ func (c *TransferStatusConsumer) processEvent(ctx context.Context, event domain.
 		return nil
 	}
 
+	reason := event.Reason
+	if shouldIgnoreTransferStatusTransition(tx.Status, status) {
+		log.Printf(
+			"level=info component=transfer_consumer msg=\"ignoring out-of-order transfer status transition\" transaction_id=%s current_status=%s incoming_status=%s anchor_transfer_id=%s",
+			tx.ID,
+			tx.Status,
+			status,
+			event.AnchorTransferID,
+		)
+		status = ""
+		reason = ""
+	}
+
 	metadata := store.UpdateTransactionMetadataParams{
 		Status:           optionalString(status),
 		AnchorTransferID: optionalString(event.AnchorTransferID),
 		TransferType:     optionalString(transferType),
-		FailureReason:    optionalString(event.Reason),
+		FailureReason:    optionalString(reason),
 		AnchorSessionID:  optionalString(event.SessionID),
-		AnchorReason:     optionalString(event.Reason),
+		AnchorReason:     optionalString(reason),
 	}
 	// money_drop_claim uses anchor_reason as a deterministic state token (`md_drop:<id>;state:<...>`).
 	// Do not overwrite it with provider webhook free-text reasons.
@@ -437,9 +450,26 @@ func (c *TransferStatusConsumer) handleSuccess(ctx context.Context, tx *domain.T
 	return nil
 }
 
+func shouldIgnoreTransferStatusTransition(currentStatus, incomingStatus string) bool {
+	current := normalizeStatus(currentStatus)
+	if !isTransferStatusTerminal(current) {
+		return false
+	}
+	if incomingStatus == "" {
+		return false
+	}
+	return incomingStatus != current
+}
+
+func isTransferStatusTerminal(status string) bool {
+	return status == "completed" || status == "failed"
+}
+
 func normalizeStatus(status string) string {
 	status = strings.TrimSpace(strings.ToLower(status))
 	switch status {
+	case "completed":
+		return "completed"
 	case "successful", "success":
 		return "completed"
 	case "failed", "failure", "reversed":
