@@ -121,6 +121,40 @@ export interface SecurityStatusResponse {
   transaction_pin_set: boolean;
 }
 
+export interface KycStageStatus {
+  status: string;
+  reason?: string;
+  updated_at?: string;
+}
+
+export interface KycStatusResponse {
+  current_tier: 1 | 2 | 3;
+  stages: {
+    tier1?: KycStageStatus;
+    tier2?: KycStageStatus;
+    tier3?: KycStageStatus;
+  };
+}
+
+export interface Tier3UpgradePayload {
+  id_type: 'DRIVERS_LICENSE' | 'VOTERS_CARD' | 'PASSPORT' | 'NATIONAL_ID' | 'NIN_SLIP';
+  id_number: string;
+  expiry_date: string; // YYYY-MM-DD
+}
+
+export interface Tier3UpgradeResponse {
+  status: string;
+}
+
+export interface CompletePinChangePayload {
+  current_pin: string;
+  new_pin: string;
+}
+
+export interface CompletePinChangeResponse {
+  status: string;
+}
+
 export interface Tier2VerificationPayload {
   dob: string;
   gender: 'male' | 'female';
@@ -179,6 +213,18 @@ export interface AddBeneficiaryPayload {
   account_number: string;
   bank_code: string;
   transaction_pin: string;
+}
+
+export interface VerifyBeneficiaryAccountPayload {
+  account_number: string;
+  bank_code: string;
+}
+
+export interface VerifyBeneficiaryAccountResponse {
+  account_name: string;
+  account_number: string;
+  bank_code: string;
+  bank_name: string;
 }
 
 // Represents a single bank from the banks list.
@@ -297,11 +343,6 @@ export interface ReceivingPreference {
 export interface UpdateReceivingPreferencePayload {
   use_external_account: boolean;
   default_beneficiary_id?: string;
-}
-
-// Payload for setting default beneficiary
-export interface SetDefaultBeneficiaryPayload {
-  beneficiary_id: string;
 }
 
 // Account balance information

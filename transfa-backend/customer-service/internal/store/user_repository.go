@@ -18,6 +18,8 @@ package store
 import (
 	"context"
 	"log"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -31,7 +33,80 @@ type UserRepository interface {
 	FindUserIDByAnchorCustomerID(ctx context.Context, anchorCustomerID string) (string, error)
 	EnsureOnboardingStatusTable(ctx context.Context) error
 	UpsertOnboardingStatus(ctx context.Context, userID, stage, status string, reason *string) error
+	InferTierStageFromOnboarding(ctx context.Context, userID string) (string, error)
 	UserHasAccount(ctx context.Context, userID string) (bool, error)
+}
+
+type onboardingStageRecord struct {
+	stage     string
+	status    string
+	updatedAt time.Time
+}
+
+func isActiveTierStatus(status string) bool {
+	normalizedStatus := strings.ToLower(strings.TrimSpace(status))
+	return normalizedStatus == "pending" ||
+		normalizedStatus == "processing" ||
+		normalizedStatus == "manual_review" ||
+		normalizedStatus == "awaiting_document" ||
+		normalizedStatus == "reenter_information"
+}
+
+func inferTierStageFromRecords(records []onboardingStageRecord) string {
+	if len(records) == 0 {
+		return ""
+	}
+
+	latestByStage := map[string]onboardingStageRecord{}
+	for _, rec := range records {
+		if rec.stage != "tier2" && rec.stage != "tier3" {
+			continue
+		}
+
+		existing, ok := latestByStage[rec.stage]
+		if !ok || rec.updatedAt.After(existing.updatedAt) {
+			latestByStage[rec.stage] = rec
+		}
+	}
+
+	tier2, hasTier2 := latestByStage["tier2"]
+	tier3, hasTier3 := latestByStage["tier3"]
+	if !hasTier2 && !hasTier3 {
+		return ""
+	}
+	if hasTier2 && !hasTier3 {
+		return "tier2"
+	}
+	if hasTier3 && !hasTier2 {
+		return "tier3"
+	}
+
+	tier2Active := hasTier2 && isActiveTierStatus(tier2.status)
+	tier3Active := hasTier3 && isActiveTierStatus(tier3.status)
+	switch {
+	case tier2Active && !tier3Active:
+		return "tier2"
+	case tier3Active && !tier2Active:
+		return "tier3"
+	case tier2Active && tier3Active:
+		// Both tiers are active. Favor the freshest stage to keep status updates flowing.
+		return pickLatestTierStage(tier2, tier3)
+	}
+
+	// Both tiers are terminal. Favor the freshest stage for deterministic routing.
+	return pickLatestTierStage(tier2, tier3)
+}
+
+func pickLatestTierStage(tier2 onboardingStageRecord, tier3 onboardingStageRecord) string {
+	switch {
+	case tier3.updatedAt.After(tier2.updatedAt):
+		return "tier3"
+	case tier2.updatedAt.After(tier3.updatedAt):
+		return "tier2"
+	default:
+		// Same timestamp is rare; prefer higher tier to avoid down-level routing.
+		return "tier3"
+	}
 }
 
 // PostgresUserRepository is the PostgreSQL implementation of the UserRepository.
@@ -166,6 +241,43 @@ func (r *PostgresUserRepository) UpsertOnboardingStatus(ctx context.Context, use
 		return err
 	}
 	return nil
+}
+
+// InferTierStageFromOnboarding infers whether an incoming stage-less identification update
+// belongs to tier2 or tier3 by inspecting current onboarding states.
+func (r *PostgresUserRepository) InferTierStageFromOnboarding(ctx context.Context, userID string) (string, error) {
+	query := `
+		SELECT stage, status, updated_at
+		FROM onboarding_status
+		WHERE user_id = $1
+		  AND stage IN ('tier2', 'tier3')
+	`
+
+	rows, err := r.db.Query(ctx, query, userID)
+	if err != nil {
+		log.Printf("Error inferring tier stage for user %s: %v", userID, err)
+		return "", err
+	}
+	defer rows.Close()
+
+	records := make([]onboardingStageRecord, 0, 2)
+	for rows.Next() {
+		var rec onboardingStageRecord
+		if err := rows.Scan(&rec.stage, &rec.status, &rec.updatedAt); err != nil {
+			log.Printf("Error scanning onboarding stage for user %s: %v", userID, err)
+			return "", err
+		}
+		records = append(records, rec)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("Error iterating onboarding stages for user %s: %v", userID, err)
+		return "", err
+	}
+	if len(records) == 0 {
+		return "", nil
+	}
+
+	return inferTierStageFromRecords(records), nil
 }
 
 // UserHasAccount checks whether the user already has a deposit account.

@@ -1,371 +1,284 @@
-/**
- * @description
- * This screen allows users to manage their receiving preferences for incoming transfers.
- * Users can toggle between receiving transfers to their internal wallet or external account,
- * and set their default beneficiary account (for subscribed users).
- *
- * Key features:
- * - Toggle between internal wallet and external account for receiving transfers
- * - Set default beneficiary account (for subscribed users with multiple accounts)
- * - Display current receiving preference status
- * - Apply platform fee gating for external transfers
- *
- * @dependencies
- * - react, react-native: For UI components and state management.
- * - @react-navigation/native: For navigation actions.
- * - @/components/*: Reusable UI components.
- * - @/api/transactionApi: For receiving preference and default beneficiary management.
- * - @/api/accountApi: For listing beneficiaries.
- */
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Alert, ScrollView, TouchableOpacity, Switch } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import ScreenWrapper from '@/components/ScreenWrapper';
-import { theme } from '@/constants/theme';
+import React, { useMemo } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
+
 import { useReceivingPreference, useUpdateReceivingPreference } from '@/api/transactionApi';
-import { useDefaultBeneficiary, useSetDefaultBeneficiary } from '@/api/transactionApi';
 import { useListBeneficiaries } from '@/api/accountApi';
-import { usePlatformFeeStatus } from '@/api/platformFeeApi';
-import { Beneficiary } from '@/types/api';
-import BeneficiaryDropdown from '@/components/BeneficiaryDropdown';
+import theme from '@/constants/theme';
+
+const BRAND_YELLOW = '#FFD400';
+const BG_BOTTOM = '#060708';
+const { fontSizes, fontWeights, spacing } = theme;
 
 const ReceivingPreferencesScreen = () => {
   const navigation = useNavigation();
-  const [useExternalAccount, setUseExternalAccount] = useState(false);
-  const [selectedDefaultBeneficiary, setSelectedDefaultBeneficiary] = useState<Beneficiary | null>(
-    null
-  );
 
-  // Fetch current preferences and beneficiaries
-  const { data: receivingPreference, isLoading: isLoadingPreference } = useReceivingPreference();
-  const { data: defaultBeneficiary, isLoading: isLoadingDefault } = useDefaultBeneficiary();
-  const { data: beneficiaries, isLoading: isLoadingBeneficiaries } = useListBeneficiaries();
-  const { data: platformFeeStatus } = usePlatformFeeStatus();
+  const { data: receivingPreference, isLoading: loadingPreference } = useReceivingPreference();
+  const { data: beneficiaries, isLoading: loadingBeneficiaries } = useListBeneficiaries();
 
-  // Mutations for updating preferences
-  const { mutate: updateReceivingPreference, isPending: isUpdatingPreference } =
-    useUpdateReceivingPreference({
-      onSuccess: () => {
-        Alert.alert('Success', 'Receiving preference updated successfully');
-      },
-      onError: (error) => {
-        Alert.alert('Error', error.message || 'Failed to update receiving preference');
-      },
-    });
-
-  const { mutate: setDefaultBeneficiary, isPending: isSettingDefault } = useSetDefaultBeneficiary({
-    onSuccess: () => {
-      Alert.alert('Success', 'Default beneficiary updated successfully');
-    },
+  const updateMutation = useUpdateReceivingPreference({
     onError: (error) => {
-      Alert.alert('Error', error.message || 'Failed to set default beneficiary');
+      Alert.alert('Update failed', error.message || 'Unable to update receiving destination.');
     },
   });
 
-  // Update local state when data is fetched
-  useEffect(() => {
-    if (receivingPreference) {
-      setUseExternalAccount(receivingPreference.use_external_account);
+  const selectedExternalBeneficiaryId = useMemo(() => {
+    if (!receivingPreference?.use_external_account) {
+      return null;
     }
-  }, [receivingPreference]);
-
-  useEffect(() => {
-    if (defaultBeneficiary) {
-      setSelectedDefaultBeneficiary(defaultBeneficiary);
-    }
-  }, [defaultBeneficiary]);
-
-  const isDelinquent = platformFeeStatus?.is_delinquent || false;
-  const isWithinGrace = platformFeeStatus?.is_within_grace ?? true;
-  const effectiveExternalAccount = useExternalAccount && !isDelinquent;
-
-  const handleToggleReceivingPreference = (value: boolean) => {
-    if (value && isDelinquent) {
-      Alert.alert(
-        'Platform Fee Overdue',
-        'External transfers are disabled until your platform fee is settled. Incoming funds will be routed to your Transfa wallet.',
-        [{ text: 'Use Internal Wallet', style: 'cancel' }]
-      );
-      return;
+    const preferredByPreferenceId = beneficiaries?.find(
+      (item) => item.id === receivingPreference.default_beneficiary_id
+    );
+    if (preferredByPreferenceId) {
+      return preferredByPreferenceId.id;
     }
 
-    setUseExternalAccount(value);
+    const legacyPreferred = beneficiaries?.find((item) => item.is_default);
+    return legacyPreferred?.id || beneficiaries?.[0]?.id || null;
+  }, [
+    beneficiaries,
+    receivingPreference?.default_beneficiary_id,
+    receivingPreference?.use_external_account,
+  ]);
 
-    // If switching to external account and no default beneficiary is set,
-    // and user has beneficiaries, set the first one as default
-    if (value && !selectedDefaultBeneficiary && beneficiaries && beneficiaries.length > 0) {
-      const firstBeneficiary = beneficiaries[0];
-      setSelectedDefaultBeneficiary(firstBeneficiary);
-      updateReceivingPreference({
-        use_external_account: value,
-        default_beneficiary_id: firstBeneficiary.id,
-      });
-    } else {
-      updateReceivingPreference({
-        use_external_account: value,
-        default_beneficiary_id: value ? selectedDefaultBeneficiary?.id : undefined,
-      });
-    }
+  const selectInAppWallet = () => {
+    updateMutation.mutate({ use_external_account: false });
   };
 
-  const handleSetDefaultBeneficiary = (beneficiary: Beneficiary) => {
-    setSelectedDefaultBeneficiary(beneficiary);
-    setDefaultBeneficiary({ beneficiary_id: beneficiary.id });
+  const selectExternal = (beneficiaryId: string) => {
+    updateMutation.mutate({
+      use_external_account: true,
+      default_beneficiary_id: beneficiaryId,
+    });
   };
 
-  const isLoading = isLoadingPreference || isLoadingDefault || isLoadingBeneficiaries;
+  const isLoading = loadingPreference || loadingBeneficiaries;
 
   return (
-    <ScreenWrapper>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={24} color={theme.colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.title}>Receiving Preferences</Text>
-        <View style={{ width: 24 }} />
-      </View>
+    <View style={styles.root}>
+      <LinearGradient
+        colors={['#1B1C1E', '#111214', BG_BOTTOM]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={StyleSheet.absoluteFillObject}
+      />
 
-      <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-        {isLoading ? (
-          <View style={styles.loadingContainer}>
-            <Text style={styles.loadingText}>Loading preferences...</Text>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={24} color="#ECECEC" />
+          </TouchableOpacity>
+
+          <Text style={styles.title}>Receiving Destination</Text>
+
+          <View style={styles.noticeCard}>
+            <Ionicons name="warning" size={18} color={BRAND_YELLOW} />
+            <Text style={styles.noticeText}>
+              Funds are received and stored in the destination account you select.
+            </Text>
           </View>
-        ) : (
-          <View>
-            {/* Receiving Account Toggle */}
-            <View style={styles.preferenceCard}>
-              <View style={styles.preferenceHeader}>
-                <View style={styles.preferenceIcon}>
-                  <Ionicons name="wallet-outline" size={24} color={theme.colors.primary} />
-                </View>
-                <View style={styles.preferenceContent}>
-                  <Text style={styles.preferenceTitle}>Receiving Account</Text>
-                  <Text style={styles.preferenceDescription}>
-                    Choose where incoming transfers should be received
-                  </Text>
-                </View>
-              </View>
 
-              <View style={styles.toggleContainer}>
-                <View style={styles.toggleOption}>
-                  <Text
-                    style={[
-                      styles.toggleLabel,
-                      !effectiveExternalAccount && styles.activeToggleLabel,
-                    ]}
-                  >
-                    Internal Wallet
-                  </Text>
-                  <Text style={styles.toggleDescription}>
-                    Receive transfers in your Transfa wallet
-                  </Text>
-                </View>
-
-                <Switch
-                  value={effectiveExternalAccount}
-                  onValueChange={handleToggleReceivingPreference}
-                  trackColor={{ false: theme.colors.border, true: theme.colors.primary }}
-                  thumbColor={
-                    effectiveExternalAccount
-                      ? theme.colors.textOnPrimary
-                      : theme.colors.textSecondary
-                  }
-                  disabled={isUpdatingPreference || isDelinquent}
-                />
-
-                <View style={styles.toggleOption}>
-                  <Text
-                    style={[
-                      styles.toggleLabel,
-                      effectiveExternalAccount && styles.activeToggleLabel,
-                    ]}
-                  >
-                    External Account
-                  </Text>
-                  <Text style={styles.toggleDescription}>
-                    {isDelinquent
-                      ? 'External transfers are disabled until your platform fee is paid.'
-                      : 'Receive transfers directly to your bank account'}
-                  </Text>
-                </View>
-              </View>
+          {isLoading ? (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator size="small" color={BRAND_YELLOW} />
             </View>
+          ) : (
+            <>
+              <TouchableOpacity
+                style={[
+                  styles.destinationRow,
+                  !receivingPreference?.use_external_account && styles.destinationRowActive,
+                ]}
+                onPress={selectInAppWallet}
+                disabled={updateMutation.isPending}
+              >
+                <Text style={styles.destinationTitle}>In-App Wallet</Text>
+                <Radio checked={!receivingPreference?.use_external_account} />
+              </TouchableOpacity>
 
-            {/* Default Beneficiary Selection */}
-            {useExternalAccount && (
-              <View style={styles.preferenceCard}>
-                <View style={styles.preferenceHeader}>
-                  <View style={styles.preferenceIcon}>
-                    <Ionicons name="business-outline" size={24} color={theme.colors.primary} />
-                  </View>
-                  <View style={styles.preferenceContent}>
-                    <Text style={styles.preferenceTitle}>Default External Account</Text>
-                    <Text style={styles.preferenceDescription}>
-                      Select which external account to use for incoming transfers
-                    </Text>
-                  </View>
-                </View>
+              <Text style={styles.sectionTitle}>External Account</Text>
 
-                <BeneficiaryDropdown
-                  beneficiaries={beneficiaries || []}
-                  selectedBeneficiary={selectedDefaultBeneficiary}
-                  onSelectBeneficiary={handleSetDefaultBeneficiary}
-                  isLoading={isSettingDefault}
-                  placeholder="Select default account"
-                />
-              </View>
-            )}
+              {(beneficiaries || []).map((beneficiary) => {
+                const checked = Boolean(
+                  receivingPreference?.use_external_account &&
+                    selectedExternalBeneficiaryId === beneficiary.id
+                );
 
-            {/* Current Status */}
-            <View style={styles.statusCard}>
-              <Text style={styles.statusTitle}>Current Setup</Text>
-              <View style={styles.statusRow}>
-                <Text style={styles.statusLabel}>Receiving transfers to:</Text>
-                <Text style={styles.statusValue}>
-                  {effectiveExternalAccount
-                    ? selectedDefaultBeneficiary
-                      ? `${selectedDefaultBeneficiary.account_name} (${selectedDefaultBeneficiary.bank_name})`
-                      : 'External account (not set)'
-                    : 'Internal Transfa wallet'}
+                return (
+                  <TouchableOpacity
+                    key={beneficiary.id}
+                    style={styles.externalCard}
+                    onPress={() => selectExternal(beneficiary.id)}
+                    disabled={updateMutation.isPending}
+                  >
+                    <View style={styles.externalTextWrap}>
+                      <Text style={styles.externalName}>{beneficiary.account_name}</Text>
+                      <Text style={styles.externalNumber}>{beneficiary.account_number_masked}</Text>
+                      <Text style={styles.externalBank}>{beneficiary.bank_name}</Text>
+                    </View>
+                    <Radio checked={checked} />
+                  </TouchableOpacity>
+                );
+              })}
+
+              {(beneficiaries || []).length === 0 ? (
+                <Text style={styles.emptyText}>
+                  No linked external account yet. Link an account to use external destination.
                 </Text>
-              </View>
-              <View style={styles.statusRow}>
-                <Text style={styles.statusLabel}>Platform fee status:</Text>
-                <Text style={styles.statusValue}>
-                  {isDelinquent ? 'Delinquent' : isWithinGrace ? 'Active' : 'Pending'}
-                </Text>
-              </View>
-            </View>
-          </View>
-        )}
-      </ScrollView>
-    </ScreenWrapper>
+              ) : null}
+            </>
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </View>
   );
 };
 
+const Radio = ({ checked }: { checked: boolean }) => (
+  <View style={[styles.radioOuter, checked && styles.radioOuterChecked]}>
+    {checked ? <View style={styles.radioInner} /> : null}
+  </View>
+);
+
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingBottom: theme.spacing.s24,
+  root: {
+    flex: 1,
+    backgroundColor: '#090A0B',
+  },
+  safeArea: {
+    flex: 1,
+  },
+  content: {
+    paddingHorizontal: spacing.s20,
+    paddingBottom: spacing.s32,
   },
   backButton: {
-    padding: theme.spacing.s4,
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
   },
   title: {
-    fontSize: theme.fontSizes['2xl'],
-    fontWeight: theme.fontWeights.bold,
-    color: theme.colors.textPrimary,
-  },
-  container: {
-    flexGrow: 1,
-    paddingTop: theme.spacing.s16,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    fontSize: theme.fontSizes.base,
-    color: theme.colors.textSecondary,
-  },
-  preferenceCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radii.lg,
-    padding: theme.spacing.s16,
-    marginBottom: theme.spacing.s16,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-  preferenceHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: theme.spacing.s16,
-  },
-  preferenceIcon: {
-    backgroundColor: '#F0F2FF',
-    padding: theme.spacing.s8,
-    borderRadius: theme.radii.full,
-    marginRight: theme.spacing.s12,
-  },
-  preferenceContent: {
-    flex: 1,
-  },
-  preferenceTitle: {
-    fontSize: theme.fontSizes.lg,
-    fontWeight: theme.fontWeights.semibold,
-    color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.s4,
-  },
-  preferenceDescription: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.textSecondary,
-    lineHeight: 20,
-  },
-  toggleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  toggleOption: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  toggleLabel: {
-    fontSize: theme.fontSizes.sm,
-    fontWeight: theme.fontWeights.medium,
-    color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.s4,
-  },
-  activeToggleLabel: {
-    color: theme.colors.primary,
-    fontWeight: theme.fontWeights.semibold,
-  },
-  toggleDescription: {
-    fontSize: theme.fontSizes.xs,
-    color: theme.colors.textSecondary,
+    marginTop: 18,
+    color: '#F2F2F2',
+    fontSize: fontSizes['3xl'],
+    fontWeight: fontWeights.bold,
     textAlign: 'center',
-    lineHeight: 16,
+    marginBottom: 20,
   },
-  statusCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radii.lg,
-    padding: theme.spacing.s16,
-    marginTop: theme.spacing.s8,
+  noticeCard: {
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: theme.colors.border,
+    borderColor: 'rgba(255,255,255,0.16)',
+    borderStyle: 'dashed',
+    backgroundColor: 'rgba(0,0,0,0.22)',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
   },
-  statusTitle: {
-    fontSize: theme.fontSizes.lg,
-    fontWeight: theme.fontWeights.semibold,
-    color: theme.colors.textPrimary,
-    marginBottom: theme.spacing.s12,
+  noticeText: {
+    color: '#AEB1B7',
+    fontSize: fontSizes.sm,
+    lineHeight: 19,
+    flex: 1,
   },
-  statusRow: {
+  loadingWrap: {
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  destinationRow: {
+    minHeight: 52,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: theme.spacing.s8,
+    alignItems: 'center',
   },
-  statusLabel: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.textSecondary,
+  destinationRowActive: {
+    borderColor: BRAND_YELLOW,
+  },
+  destinationTitle: {
+    color: '#ECECEC',
+    fontSize: fontSizes.base,
+    fontWeight: fontWeights.medium,
+  },
+  sectionTitle: {
+    marginTop: 14,
+    marginBottom: 8,
+    color: '#ECECEF',
+    fontSize: fontSizes.base,
+    fontWeight: fontWeights.medium,
+  },
+  externalCard: {
+    minHeight: 84,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    marginBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  externalTextWrap: {
     flex: 1,
   },
-  statusValue: {
-    fontSize: theme.fontSizes.sm,
-    color: theme.colors.textPrimary,
-    fontWeight: theme.fontWeights.medium,
-    flex: 1,
-    textAlign: 'right',
+  externalName: {
+    color: '#F0F0F1',
+    fontSize: fontSizes.base,
+    fontWeight: fontWeights.semibold,
+  },
+  externalNumber: {
+    marginTop: 2,
+    color: '#9A9DA3',
+    fontSize: fontSizes.sm,
+  },
+  externalBank: {
+    marginTop: 2,
+    color: '#C7C9CD',
+    fontSize: fontSizes.sm,
+  },
+  radioOuter: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: '#A3A6AC',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioOuterChecked: {
+    borderColor: BRAND_YELLOW,
+  },
+  radioInner: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: BRAND_YELLOW,
+  },
+  emptyText: {
+    color: '#A8ABB0',
+    fontSize: fontSizes.sm,
+    marginTop: 10,
   },
 });
 

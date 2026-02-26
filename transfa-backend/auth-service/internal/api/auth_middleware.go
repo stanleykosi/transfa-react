@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,14 @@ type contextKey string
 
 const clerkUserIDContextKey contextKey = "clerkUserID"
 const clerkEmailContextKey contextKey = "clerkEmail"
+const clerkSessionSecurityContextKey contextKey = "clerkSessionSecurity"
+
+// ClerkSessionSecurity stores token-level session verification freshness metadata.
+// Values are derived from Clerk JWT claims and can be used for step-up checks.
+type ClerkSessionSecurity struct {
+	FirstFactorAgeMinutes  *int64
+	SecondFactorAgeMinutes *int64
+}
 
 // AuthMiddlewareConfig controls how incoming requests are authenticated.
 type AuthMiddlewareConfig struct {
@@ -63,7 +72,7 @@ func ClerkAuthMiddleware(cfg AuthMiddlewareConfig) func(http.Handler) http.Handl
 					return
 				}
 
-				userID, tokenEmail, err := verifier.validateToken(
+				userID, tokenEmail, sessionSecurity, err := verifier.validateToken(
 					r.Context(),
 					tokenString,
 					strings.TrimSpace(cfg.ExpectedAudience),
@@ -88,6 +97,9 @@ func ClerkAuthMiddleware(cfg AuthMiddlewareConfig) func(http.Handler) http.Handl
 				ctx := context.WithValue(r.Context(), clerkUserIDContextKey, userID)
 				if email != "" {
 					ctx = context.WithValue(ctx, clerkEmailContextKey, email)
+				}
+				if sessionSecurity != nil {
+					ctx = context.WithValue(ctx, clerkSessionSecurityContextKey, sessionSecurity)
 				}
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
@@ -121,6 +133,17 @@ func GetClerkUserEmail(ctx context.Context) (string, bool) {
 	return email, ok
 }
 
+// GetClerkSessionSecurity returns Clerk verification freshness metadata from context.
+func GetClerkSessionSecurity(ctx context.Context) (*ClerkSessionSecurity, bool) {
+	security, ok := ctx.Value(clerkSessionSecurityContextKey).(*ClerkSessionSecurity)
+	return security, ok
+}
+
+// WithClerkSessionSecurity stores Clerk verification freshness metadata in context.
+func WithClerkSessionSecurity(ctx context.Context, security *ClerkSessionSecurity) context.Context {
+	return context.WithValue(ctx, clerkSessionSecurityContextKey, security)
+}
+
 func bearerToken(authHeader string) (string, bool) {
 	if !strings.HasPrefix(authHeader, "Bearer ") {
 		return "", false
@@ -139,7 +162,7 @@ func (v *jwksVerifier) validateToken(
 	tokenString string,
 	expectedAudience string,
 	expectedIssuer string,
-) (string, string, error) {
+) (string, string, *ClerkSessionSecurity, error) {
 	parser := jwt.NewParser(jwt.WithValidMethods([]string{"RS256"}), jwt.WithLeeway(30*time.Second))
 	claims := jwt.MapClaims{}
 
@@ -151,28 +174,28 @@ func (v *jwksVerifier) validateToken(
 		return v.getPublicKey(ctx, kid)
 	})
 	if err != nil || !token.Valid {
-		return "", "", errors.New("token validation failed")
+		return "", "", nil, errors.New("token validation failed")
 	}
 
 	if expectedIssuer != "" {
 		issuer, ok := claims["iss"].(string)
 		if !ok || issuer != expectedIssuer {
-			return "", "", errors.New("issuer mismatch")
+			return "", "", nil, errors.New("issuer mismatch")
 		}
 	}
 
 	if expectedAudience != "" {
 		if !verifyAudienceClaim(claims["aud"], expectedAudience) {
-			return "", "", errors.New("audience mismatch")
+			return "", "", nil, errors.New("audience mismatch")
 		}
 	}
 
 	sub, ok := claims["sub"].(string)
 	if !ok || strings.TrimSpace(sub) == "" {
-		return "", "", errors.New("subject claim missing")
+		return "", "", nil, errors.New("subject claim missing")
 	}
 
-	return sub, extractEmailClaim(claims), nil
+	return sub, extractEmailClaim(claims), extractSessionSecurity(claims), nil
 }
 
 func verifyAudienceClaim(audClaim any, expected string) bool {
@@ -323,4 +346,90 @@ func extractEmailClaim(claims jwt.MapClaims) string {
 	}
 
 	return ""
+}
+
+func extractSessionSecurity(claims jwt.MapClaims) *ClerkSessionSecurity {
+	security := &ClerkSessionSecurity{}
+
+	fvaClaim, hasFVA := claims["fva"]
+	if !hasFVA {
+		if nested, ok := claims["https://clerk.dev/claims"].(map[string]any); ok {
+			if nestedFVA, ok := nested["fva"]; ok {
+				fvaClaim = nestedFVA
+				hasFVA = true
+			}
+		}
+	}
+	if hasFVA {
+		if firstAge, secondAge, parsed := parseFVAClaim(fvaClaim); parsed {
+			security.FirstFactorAgeMinutes = firstAge
+			security.SecondFactorAgeMinutes = secondAge
+		}
+	}
+
+	if security.FirstFactorAgeMinutes == nil && security.SecondFactorAgeMinutes == nil {
+		return nil
+	}
+
+	return security
+}
+
+func parseInt64Claim(value any) (int64, bool) {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), true
+	case int32:
+		return int64(typed), true
+	case int64:
+		return typed, true
+	case float32:
+		return int64(typed), true
+	case float64:
+		return int64(typed), true
+	case json.Number:
+		parsed, err := typed.Int64()
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" {
+			return 0, false
+		}
+		parsed, err := strconv.ParseInt(trimmed, 10, 64)
+		if err != nil {
+			return 0, false
+		}
+		return parsed, true
+	default:
+		return 0, false
+	}
+}
+
+func parseFVAClaim(value any) (*int64, *int64, bool) {
+	list, ok := value.([]any)
+	if !ok || len(list) == 0 {
+		return nil, nil, false
+	}
+
+	var firstFactorAge *int64
+	var secondFactorAge *int64
+
+	if len(list) >= 1 {
+		if parsed, ok := parseInt64Claim(list[0]); ok {
+			firstFactorAge = &parsed
+		}
+	}
+	if len(list) >= 2 {
+		if parsed, ok := parseInt64Claim(list[1]); ok {
+			secondFactorAge = &parsed
+		}
+	}
+
+	if firstFactorAge == nil && secondFactorAge == nil {
+		return nil, nil, false
+	}
+
+	return firstFactorAge, secondFactorAge, true
 }

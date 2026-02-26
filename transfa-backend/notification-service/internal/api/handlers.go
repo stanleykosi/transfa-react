@@ -71,6 +71,110 @@ func extractReason(attrs map[string]interface{}) string {
 	return ""
 }
 
+func inferTierStageFromAttrs(attrs map[string]interface{}) string {
+	if attrs == nil {
+		return ""
+	}
+
+	if stage := normalizeTierStageLabel(toString(attrs["stage"])); stage != "" {
+		return stage
+	}
+	if stage := normalizeTierStageLabel(toString(attrs["level"])); stage != "" {
+		return stage
+	}
+	if stage := normalizeTierStageLabel(toString(attrs["verificationLevel"])); stage != "" {
+		return stage
+	}
+
+	if verification, ok := attrs["verification"].(map[string]interface{}); ok {
+		if stage := normalizeTierStageLabel(toString(verification["level"])); stage != "" {
+			return stage
+		}
+		if stage := normalizeTierStageLabel(toString(verification["verificationLevel"])); stage != "" {
+			return stage
+		}
+	}
+	if stage := normalizeTierStageLabel(toString(attrs["kycTier"])); stage != "" {
+		return stage
+	}
+	if stage := normalizeTierStageLabel(toString(attrs["kyc_level"])); stage != "" {
+		return stage
+	}
+
+	// With supportIncluded enabled, verification payloads may expose level-specific objects.
+	if _, ok := attrs["level3"]; ok {
+		return "tier3"
+	}
+	if _, ok := attrs["level2"]; ok {
+		return "tier2"
+	}
+	if _, ok := attrs["level1"]; ok {
+		return "tier1"
+	}
+
+	return ""
+}
+
+func inferTierStageFromEvent(event domain.AnchorWebhookEvent) string {
+	if stage := inferTierStageFromAttrs(event.Data.Attributes); stage != "" {
+		return stage
+	}
+
+	for _, included := range event.Included {
+		if stage := inferTierStageFromAttrs(included.Attributes); stage != "" {
+			return stage
+		}
+	}
+
+	return ""
+}
+
+func inferTierStatusFromAttrs(attrs map[string]interface{}) string {
+	if attrs == nil {
+		return ""
+	}
+
+	for _, key := range []string{"status", "kycStatus", "verificationStatus", "state"} {
+		if value := strings.TrimSpace(toString(attrs[key])); value != "" {
+			return value
+		}
+	}
+
+	if verification, ok := attrs["verification"].(map[string]interface{}); ok {
+		for _, key := range []string{"status", "state"} {
+			if value := strings.TrimSpace(toString(verification[key])); value != "" {
+				return value
+			}
+		}
+	}
+
+	return ""
+}
+
+func normalizeTierStageLabel(raw string) string {
+	normalized := strings.ToUpper(strings.TrimSpace(raw))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	normalized = strings.ReplaceAll(normalized, " ", "_")
+	normalized = strings.TrimPrefix(normalized, "KYC_")
+	switch normalized {
+	case "TIER_1", "TIER1", "1":
+		return "tier1"
+	case "TIER_2", "TIER2", "2":
+		return "tier2"
+	case "TIER_3", "TIER3", "3":
+		return "tier3"
+	default:
+		return ""
+	}
+}
+
+func toString(value interface{}) string {
+	if typed, ok := value.(string); ok {
+		return typed
+	}
+	return ""
+}
+
 // NewWebhookHandler creates a new handler for the webhook endpoint.
 func NewWebhookHandler(producer *rabbitmq.EventProducer, secret string, anchorAPIKey string, anchorAPIBaseURL string) *WebhookHandler {
 	anchorAPIBaseURL = strings.TrimSpace(anchorAPIBaseURL)
@@ -680,13 +784,16 @@ func (h *WebhookHandler) routeEvent(ctx context.Context, event domain.AnchorWebh
 
 func (h *WebhookHandler) buildCustomerEvent(event domain.AnchorWebhookEvent, anchorCustomerID string) (string, any, bool) {
 	eventRouting := map[string]string{
-		"customer.identification.approved":            "customer.verified",
+		"customer.identification.approved":            "customer.tier.status",
 		"customer.identification.rejected":            "customer.tier.status",
 		"customer.identification.manualReview":        "customer.tier.status",
 		"customer.identification.awaitingDocument":    "customer.tier.status",
+		"customer.identification.awaiting_document":   "customer.tier.status",
 		"customer.identification.reenter_information": "customer.tier.status",
+		"customer.identification.reenterInformation":  "customer.tier.status",
 		"customer.identification.pending":             "customer.tier.status",
 		"customer.identification.error":               "customer.tier.status",
+		"kyc.status.update":                           "customer.tier.status",
 		"customer.created":                            "customer.tier.status",
 		"account.initiated":                           "account.lifecycle",
 		"account.opened":                              "account.lifecycle",
@@ -698,25 +805,47 @@ func (h *WebhookHandler) buildCustomerEvent(event domain.AnchorWebhookEvent, anc
 	}
 
 	var message any
+	stage := inferTierStageFromEvent(event)
 	switch event.Event {
 	case "customer.identification.approved":
-		message = domain.CustomerVerifiedEvent{AnchorCustomerID: anchorCustomerID}
+		message = domain.CustomerTierStatusEvent{
+			AnchorCustomerID: anchorCustomerID,
+			Stage:            stage,
+			Status:           "completed",
+		}
 	case "customer.identification.rejected":
 		reason := extractReason(event.Data.Attributes)
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: "tier2", Status: "rejected", Reason: nullableString(reason)}
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: stage, Status: "rejected", Reason: nullableString(reason)}
 	case "customer.identification.manualReview":
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: "tier2", Status: "manual_review"}
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: stage, Status: "manual_review"}
 	case "customer.identification.awaitingDocument":
+		fallthrough
+	case "customer.identification.awaiting_document":
 		reason := extractReason(event.Data.Attributes)
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: "tier2", Status: "awaiting_document", Reason: nullableString(reason)}
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: stage, Status: "awaiting_document", Reason: nullableString(reason)}
 	case "customer.identification.reenter_information":
+		fallthrough
+	case "customer.identification.reenterInformation":
 		reason := extractReason(event.Data.Attributes)
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: "tier2", Status: "reenter_information", Reason: nullableString(reason)}
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: stage, Status: "reenter_information", Reason: nullableString(reason)}
 	case "customer.identification.pending":
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: "tier2", Status: "pending"}
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: stage, Status: "pending"}
 	case "customer.identification.error":
 		reason := extractReason(event.Data.Attributes)
-		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: "tier2", Status: "error", Reason: nullableString(reason)}
+		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: stage, Status: "error", Reason: nullableString(reason)}
+	case "kyc.status.update":
+		status := inferTierStatusFromAttrs(event.Data.Attributes)
+		if strings.TrimSpace(status) == "" {
+			// Ignore malformed updates without status to avoid downstream ambiguity.
+			return "", nil, false
+		}
+		reason := extractReason(event.Data.Attributes)
+		message = domain.CustomerTierStatusEvent{
+			AnchorCustomerID: anchorCustomerID,
+			Stage:            stage,
+			Status:           status,
+			Reason:           nullableString(reason),
+		}
 	case "customer.created":
 		message = domain.CustomerTierStatusEvent{AnchorCustomerID: anchorCustomerID, Stage: "tier1", Status: "created"}
 	case "account.initiated":

@@ -126,10 +126,11 @@ func main() {
 		tier2Queue := "customer_service_tier2_requested"
 		bindings := map[string]func([]byte) bool{
 			"tier2.verification.requested": eventHandler.HandleTier2VerificationRequestedEvent,
+			"tier3.verification.requested": eventHandler.HandleTier3VerificationRequestedEvent,
 		}
 		log.Printf("Starting consumer for tier2 queue '%s'...", tier2Queue)
 		if err := consumer.ConsumeWithBindings("customer_events", tier2Queue, bindings); err != nil {
-			log.Fatalf("Tier2 consumer error: %v", err)
+			log.Fatalf("Tier verification consumer error: %v", err)
 		}
 	}()
 

@@ -53,6 +53,7 @@ func NewRouter(cfg *config.Config, service *app.AccountService) http.Handler {
 		r.Use(appmiddleware.AuthMiddleware(cfg))
 
 		r.Route("/beneficiaries", func(r chi.Router) {
+			r.Post("/verify", beneficiaryHandler.VerifyBeneficiaryAccount)
 			r.Post("/", beneficiaryHandler.CreateBeneficiary)
 			r.Get("/", beneficiaryHandler.ListBeneficiaries)
 			r.Delete("/{id}", beneficiaryHandler.DeleteBeneficiary)

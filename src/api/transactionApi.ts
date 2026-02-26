@@ -35,7 +35,6 @@ import {
   Beneficiary,
   ReceivingPreference,
   UpdateReceivingPreferencePayload,
-  SetDefaultBeneficiaryPayload,
   AccountBalance,
   PaymentRequest,
   PrimaryAccountDetails,
@@ -78,7 +77,6 @@ const TRANSACTIONS_QUERY_KEY = 'transactions';
 const TRANSACTIONS_WITH_USER_QUERY_KEY = 'transactions-with-user';
 const BENEFICIARIES_QUERY_KEY = 'beneficiaries';
 const RECEIVING_PREFERENCE_QUERY_KEY = 'receiving-preference';
-const DEFAULT_BENEFICIARY_QUERY_KEY = 'default-beneficiary';
 const ACCOUNT_BALANCE_QUERY_KEY = 'account-balance';
 const PAYMENT_REQUESTS_QUERY_KEY = 'paymentRequests';
 const INCOMING_PAYMENT_REQUESTS_QUERY_KEY = 'incomingPaymentRequests';
@@ -294,54 +292,6 @@ export const useUpdateReceivingPreference = (
   return useMutation<void, Error, UpdateReceivingPreferencePayload>({
     ...mutationOptions,
     mutationFn: updateReceivingPreferenceMutation,
-  });
-};
-
-/**
- * Custom hook to fetch the user's default beneficiary.
- * @returns A TanStack Query object containing the default beneficiary.
- */
-export const useDefaultBeneficiary = () => {
-  const fetchDefaultBeneficiary = async (): Promise<Beneficiary> => {
-    const { data } = await apiClient.get<Beneficiary>('/transactions/beneficiaries/default', {
-      baseURL: TRANSACTION_SERVICE_URL,
-    });
-    return data;
-  };
-
-  return useQuery<Beneficiary, Error>({
-    queryKey: [DEFAULT_BENEFICIARY_QUERY_KEY],
-    queryFn: fetchDefaultBeneficiary,
-  });
-};
-
-/**
- * Custom hook to set the user's default beneficiary.
- * @param options Optional mutation options.
- * @returns A TanStack Mutation object for setting default beneficiary.
- */
-export const useSetDefaultBeneficiary = (
-  options?: UseMutationOptions<void, Error, SetDefaultBeneficiaryPayload>
-) => {
-  const queryClient = useQueryClient();
-
-  const setDefaultBeneficiaryMutation = async (
-    payload: SetDefaultBeneficiaryPayload
-  ): Promise<void> => {
-    await apiClient.put('/transactions/beneficiaries/default', payload, {
-      baseURL: TRANSACTION_SERVICE_URL,
-    });
-  };
-
-  const mutationOptions = mergeMutationOnSuccess(options, () => {
-    // Invalidate both default beneficiary and beneficiaries list
-    queryClient.invalidateQueries({ queryKey: [DEFAULT_BENEFICIARY_QUERY_KEY] });
-    queryClient.invalidateQueries({ queryKey: [BENEFICIARIES_QUERY_KEY] });
-  });
-
-  return useMutation<void, Error, SetDefaultBeneficiaryPayload>({
-    ...mutationOptions,
-    mutationFn: setDefaultBeneficiaryMutation,
   });
 };
 

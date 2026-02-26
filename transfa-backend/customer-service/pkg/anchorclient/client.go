@@ -104,8 +104,8 @@ func (c *Client) TriggerIndividualKYC(ctx context.Context, customerID string, re
 	}
 	defer resp.Body.Close()
 
-	// Anchor returns 200 OK on a successful trigger.
-	if resp.StatusCode != http.StatusOK {
+	// Anchor can return 200 OK or 202 Accepted depending on verification level.
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
 		return c.handleErrorResponse(resp)
 	}
 

@@ -37,6 +37,14 @@ type Tier2VerificationRequestedEvent struct {
 	Gender           string `json:"gender"`
 }
 
+type Tier3VerificationRequestedEvent struct {
+	UserID           string `json:"user_id"`
+	AnchorCustomerID string `json:"anchor_customer_id"`
+	IDType           string `json:"id_type"`
+	IDNumber         string `json:"id_number"`
+	ExpiryDate       string `json:"expiry_date"`
+}
+
 type Tier1ProfileUpdateRequestedEvent struct {
 	UserID           string                 `json:"user_id"`
 	AnchorCustomerID string                 `json:"anchor_customer_id"`

@@ -49,6 +49,50 @@ type CreateBeneficiaryRequest struct {
 	TransactionPIN string `json:"transaction_pin"`
 }
 
+type VerifyBeneficiaryAccountRequest struct {
+	AccountNumber string `json:"account_number"`
+	BankCode      string `json:"bank_code"`
+}
+
+// VerifyBeneficiaryAccount resolves account details before linking a beneficiary.
+func (h *BeneficiaryHandler) VerifyBeneficiaryAccount(w http.ResponseWriter, r *http.Request) {
+	userID := middleware.GetUserIDFromContext(r.Context())
+	if userID == "" {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req VerifyBeneficiaryAccountRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	output, err := h.service.VerifyBeneficiaryAccount(r.Context(), app.VerifyBeneficiaryAccountInput{
+		UserID:        userID,
+		AccountNumber: req.AccountNumber,
+		BankCode:      req.BankCode,
+	})
+	if err != nil {
+		if errors.Is(err, app.ErrUserNotFound) {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, app.ErrInvalidBeneficiaryVerificationInput) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if errors.Is(err, app.ErrBeneficiaryVerificationProvider) {
+			http.Error(w, "Failed to verify beneficiary account. Please try again.", http.StatusBadGateway)
+			return
+		}
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, output)
+}
+
 // CreateBeneficiary handles the creation of a new beneficiary.
 func (h *BeneficiaryHandler) CreateBeneficiary(w http.ResponseWriter, r *http.Request) {
 	userID := middleware.GetUserIDFromContext(r.Context())

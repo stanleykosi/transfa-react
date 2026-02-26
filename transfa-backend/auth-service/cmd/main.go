@@ -131,6 +131,8 @@ func main() {
 		log.Println("Outbox dispatcher started")
 	}
 
+	pinChangeReverificationMaxAgeSeconds := parseEnvPositiveInt("PIN_CHANGE_REVERIFICATION_MAX_AGE_SECONDS", 600, 3600)
+
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -187,6 +189,109 @@ func main() {
 		r.Post("/onboarding", onboardingHandler.ServeHTTP)
 		r.Post("/onboarding/tier1/update", onboardingHandler.HandleTier1Update)
 		r.Post("/onboarding/tier2", onboardingHandler.HandleTier2)
+		r.Post("/onboarding/tier3", func(w http.ResponseWriter, r *http.Request) {
+			existing, statusCode, err := resolveAuthenticatedUser(r, userRepo)
+			if err != nil || existing == nil {
+				writeError(w, statusCode, err)
+				return
+			}
+
+			if existing.AnchorCustomerID == nil || strings.TrimSpace(*existing.AnchorCustomerID) == "" {
+				writeError(w, http.StatusPreconditionFailed, errors.New("tier 1 verification incomplete"))
+				return
+			}
+			tier2Ready, err := canStartTier3Upgrade(r.Context(), dbpool, existing.ID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			if !tier2Ready {
+				writeError(w, http.StatusPreconditionFailed, errors.New("tier 2 verification incomplete"))
+				return
+			}
+
+			tier3Status, _, err := getOnboardingStageStatus(r.Context(), dbpool, existing.ID, "tier3")
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			normalizedTier3Status := strings.ToLower(strings.TrimSpace(tier3Status))
+			switch normalizedTier3Status {
+			case "pending", "processing", "manual_review", "awaiting_document":
+				writeJSON(w, http.StatusAccepted, map[string]string{"status": "tier3_processing"})
+				return
+			case "completed", "approved":
+				writeJSON(w, http.StatusOK, map[string]string{"status": "tier3_completed"})
+				return
+			}
+
+			var body struct {
+				IDType     string `json:"id_type"`
+				IDNumber   string `json:"id_number"`
+				ExpiryDate string `json:"expiry_date"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				writeError(w, http.StatusBadRequest, errors.New("invalid request body"))
+				return
+			}
+
+			idType := strings.ToUpper(strings.TrimSpace(body.IDType))
+			idNumber := strings.TrimSpace(body.IDNumber)
+			expiryDate := strings.TrimSpace(body.ExpiryDate)
+
+			if idType == "" || idNumber == "" || expiryDate == "" {
+				writeError(w, http.StatusBadRequest, errors.New("id_type, id_number and expiry_date are required"))
+				return
+			}
+			if !isSupportedTier3IDType(idType) {
+				writeError(w, http.StatusBadRequest, errors.New("unsupported id_type"))
+				return
+			}
+			if len(idNumber) < 4 || len(idNumber) > 64 {
+				writeError(w, http.StatusBadRequest, errors.New("id_number must be between 4 and 64 characters"))
+				return
+			}
+
+			normalizedExpiryDate, err := normalizeISODate(expiryDate)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+			expiry, parseErr := time.Parse("2006-01-02", normalizedExpiryDate)
+			if parseErr != nil {
+				writeError(w, http.StatusBadRequest, errors.New("expiry_date must be in YYYY-MM-DD format"))
+				return
+			}
+			today := time.Now().UTC().Truncate(24 * time.Hour)
+			if expiry.Before(today) {
+				writeError(w, http.StatusBadRequest, errors.New("expiry_date cannot be in the past"))
+				return
+			}
+
+			event := domain.Tier3VerificationRequestedEvent{
+				UserID:           existing.ID,
+				AnchorCustomerID: strings.TrimSpace(*existing.AnchorCustomerID),
+				IDType:           idType,
+				IDNumber:         idNumber,
+				ExpiryDate:       normalizedExpiryDate,
+			}
+
+			if err := userRepo.UpsertOnboardingStatusAndEnqueueEvent(
+				r.Context(),
+				existing.ID,
+				"tier3",
+				"pending",
+				nil,
+				"customer_events",
+				"tier3.verification.requested",
+				event,
+			); err != nil {
+				writeError(w, http.StatusInternalServerError, errors.New("failed to queue tier3 verification"))
+				return
+			}
+
+			writeJSON(w, http.StatusAccepted, map[string]string{"status": "tier3_processing"})
+		})
 		r.Post("/onboarding/progress", onboardingHandler.HandleSaveProgress)
 		r.Post("/onboarding/progress/clear", onboardingHandler.HandleClearProgress)
 
@@ -250,6 +355,80 @@ func main() {
 
 			writeJSON(w, http.StatusOK, map[string]bool{
 				"transaction_pin_set": hasTransactionPIN,
+			})
+		})
+
+		r.Get("/me/kyc-status", func(w http.ResponseWriter, r *http.Request) {
+			existing, statusCode, err := resolveAuthenticatedUser(r, userRepo)
+			if err != nil || existing == nil {
+				writeError(w, statusCode, err)
+				return
+			}
+
+			stageStatus := map[string]map[string]any{
+				"tier1": {"status": "pending"},
+				"tier2": {"status": "pending"},
+				"tier3": {"status": "pending"},
+			}
+
+			rows, err := dbpool.Query(
+				r.Context(),
+				`SELECT stage, status, reason, updated_at
+				   FROM onboarding_status
+				  WHERE user_id = $1
+				    AND stage IN ('tier1', 'tier2', 'tier3')`,
+				existing.ID,
+			)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			defer rows.Close()
+			hasTier2Record := false
+
+			for rows.Next() {
+				var (
+					stage     string
+					status    string
+					reason    *string
+					updatedAt time.Time
+				)
+				if err := rows.Scan(&stage, &status, &reason, &updatedAt); err != nil {
+					writeError(w, http.StatusInternalServerError, err)
+					return
+				}
+
+				entry := map[string]any{
+					"status":     strings.ToLower(strings.TrimSpace(status)),
+					"updated_at": updatedAt.UTC().Format(time.RFC3339),
+				}
+				if reason != nil && strings.TrimSpace(*reason) != "" {
+					entry["reason"] = *reason
+				}
+				stageStatus[stage] = entry
+				if stage == "tier2" {
+					hasTier2Record = true
+				}
+			}
+			if err := rows.Err(); err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			hasAccount := false
+			if !hasTier2Record {
+				// Legacy fallback: historically an account could imply tier2 completion.
+				hasAccount, err = userHasAccount(r.Context(), dbpool, existing.ID)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, err)
+					return
+				}
+			}
+			currentTier := determineCurrentKYCTier(stageStatus, hasTier2Record, hasAccount)
+
+			writeJSON(w, http.StatusOK, map[string]any{
+				"current_tier": currentTier,
+				"stages":       stageStatus,
 			})
 		})
 
@@ -410,6 +589,129 @@ func main() {
 			}
 
 			writeJSON(w, http.StatusOK, map[string]string{"status": "transaction_pin_set"})
+		})
+
+		r.Post("/me/pin-change/complete", func(w http.ResponseWriter, r *http.Request) {
+			existing, statusCode, err := resolveAuthenticatedUser(r, userRepo)
+			if err != nil || existing == nil {
+				writeError(w, statusCode, err)
+				return
+			}
+
+			var body struct {
+				CurrentPin string `json:"current_pin"`
+				NewPin     string `json:"new_pin"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				writeError(w, http.StatusBadRequest, errors.New("invalid request body"))
+				return
+			}
+
+			currentPin := strings.TrimSpace(body.CurrentPin)
+			newPin := strings.TrimSpace(body.NewPin)
+			if currentPin == "" || newPin == "" {
+				writeError(w, http.StatusBadRequest, errors.New("current_pin and new_pin are required"))
+				return
+			}
+			if !pinPattern.MatchString(currentPin) {
+				writeError(w, http.StatusBadRequest, errors.New("current_pin must be exactly 4 digits"))
+				return
+			}
+			if err := validateTransactionPIN(newPin); err != nil {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+			if err := requireFreshPinChangeReverification(
+				r.Context(),
+				pinChangeReverificationMaxAgeSeconds,
+				cfg.AllowInsecureHeaderAuth,
+			); err != nil {
+				writeError(w, http.StatusPreconditionFailed, err)
+				return
+			}
+
+			tx, err := dbpool.Begin(r.Context())
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+			defer tx.Rollback(r.Context())
+
+			now := time.Now().UTC()
+
+			var (
+				storedHash     string
+				failedAttempts int
+				lockedUntil    *time.Time
+			)
+			if err := tx.QueryRow(
+				r.Context(),
+				`SELECT transaction_pin_hash, failed_attempts, locked_until
+				   FROM user_security_credentials
+				  WHERE user_id = $1
+				  FOR UPDATE`,
+				existing.ID,
+			).Scan(&storedHash, &failedAttempts, &lockedUntil); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					writeError(w, http.StatusPreconditionFailed, errors.New("transaction pin is not set"))
+					return
+				}
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			if lockedUntil != nil && lockedUntil.After(now) {
+				writeError(w, http.StatusLocked, errors.New("transaction pin is temporarily locked"))
+				return
+			}
+
+			if bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(currentPin)) != nil {
+				if err := recordFailedTransactionPINAttemptTx(r.Context(), tx, existing.ID, now); err != nil {
+					writeError(w, http.StatusInternalServerError, err)
+					return
+				}
+				if err := tx.Commit(r.Context()); err != nil {
+					writeError(w, http.StatusInternalServerError, err)
+					return
+				}
+				writeError(w, http.StatusUnauthorized, errors.New("current pin is invalid"))
+				return
+			}
+
+			if bcrypt.CompareHashAndPassword([]byte(storedHash), []byte(newPin)) == nil {
+				writeError(w, http.StatusBadRequest, errors.New("new pin must be different from current pin"))
+				return
+			}
+
+			newHash, err := bcrypt.GenerateFromPassword([]byte(newPin), bcrypt.DefaultCost)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			if _, err := tx.Exec(
+				r.Context(),
+				`UPDATE user_security_credentials
+				    SET transaction_pin_hash = $2,
+				        pin_set_at = NOW(),
+				        failed_attempts = 0,
+				        last_failed_at = NULL,
+				        locked_until = NULL,
+				        updated_at = NOW()
+				  WHERE user_id = $1`,
+				existing.ID,
+				string(newHash),
+			); err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			if err := tx.Commit(r.Context()); err != nil {
+				writeError(w, http.StatusInternalServerError, err)
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]string{"status": "transaction_pin_changed"})
 		})
 
 		r.Get("/me/primary-account", func(w http.ResponseWriter, r *http.Request) {
@@ -962,6 +1264,186 @@ func getPrimaryAccount(ctx context.Context, dbpool *pgxpool.Pool, userID string)
 		return nil, nil, err
 	}
 	return accountNumber, bankName, nil
+}
+
+func requireFreshPinChangeReverification(
+	ctx context.Context,
+	maxAgeSeconds int,
+	allowInsecureHeaderFallback bool,
+) error {
+	if maxAgeSeconds <= 0 {
+		maxAgeSeconds = 600
+	}
+
+	security, ok := api.GetClerkSessionSecurity(ctx)
+	if !ok || security == nil {
+		if allowInsecureHeaderFallback {
+			return nil
+		}
+		return errors.New("recent reverification is required to change transaction pin")
+	}
+
+	maxAgeDuration := time.Duration(maxAgeSeconds) * time.Second
+
+	if security.FirstFactorAgeMinutes != nil {
+		ageMinutes := *security.FirstFactorAgeMinutes
+		if ageMinutes >= 0 && time.Duration(ageMinutes)*time.Minute <= maxAgeDuration {
+			return nil
+		}
+	}
+
+	if security.SecondFactorAgeMinutes != nil {
+		ageMinutes := *security.SecondFactorAgeMinutes
+		if ageMinutes >= 0 && time.Duration(ageMinutes)*time.Minute <= maxAgeDuration {
+			return nil
+		}
+	}
+
+	return errors.New("recent reverification is required to change transaction pin")
+}
+
+func determineCurrentKYCTier(
+	stageStatus map[string]map[string]any,
+	hasTier2Record bool,
+	hasAccount bool,
+) int {
+	tier3Status := strings.ToLower(strings.TrimSpace(toString(stageStatus["tier3"]["status"])))
+	if tier3Status == "completed" || tier3Status == "approved" {
+		return 3
+	}
+
+	tier2Status := strings.ToLower(strings.TrimSpace(toString(stageStatus["tier2"]["status"])))
+	if tier2Status == "completed" || tier2Status == "approved" {
+		return 2
+	}
+
+	if !hasTier2Record && hasAccount {
+		return 2
+	}
+
+	return 1
+}
+
+func getOnboardingStageStatus(
+	ctx context.Context,
+	dbpool *pgxpool.Pool,
+	userID string,
+	stage string,
+) (string, *string, error) {
+	var (
+		status string
+		reason *string
+	)
+	err := dbpool.QueryRow(
+		ctx,
+		`SELECT status, reason
+		   FROM onboarding_status
+		  WHERE user_id = $1
+		    AND stage = $2`,
+		userID,
+		stage,
+	).Scan(&status, &reason)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil, nil
+		}
+		return "", nil, err
+	}
+
+	return strings.ToLower(strings.TrimSpace(status)), reason, nil
+}
+
+func canStartTier3Upgrade(ctx context.Context, dbpool *pgxpool.Pool, userID string) (bool, error) {
+	tier2Status, _, err := getOnboardingStageStatus(ctx, dbpool, userID, "tier2")
+	if err != nil {
+		return false, err
+	}
+
+	switch tier2Status {
+	case "approved", "completed":
+		return true, nil
+	}
+
+	// Legacy support: account existence implies prior tier2 completion.
+	hasAccount, err := userHasAccount(ctx, dbpool, userID)
+	if err != nil {
+		return false, err
+	}
+	return hasAccount, nil
+}
+
+func parseEnvPositiveInt(key string, fallback int, max int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return fallback
+	}
+	if value > max {
+		return max
+	}
+	return value
+}
+
+func isSupportedTier3IDType(idType string) bool {
+	switch strings.ToUpper(strings.TrimSpace(idType)) {
+	case "DRIVERS_LICENSE", "VOTERS_CARD", "PASSPORT", "NATIONAL_ID", "NIN_SLIP":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeISODate(value string) (string, error) {
+	parsed, err := time.Parse("2006-01-02", strings.TrimSpace(value))
+	if err != nil {
+		return "", errors.New("date must be in YYYY-MM-DD format")
+	}
+	return parsed.UTC().Format("2006-01-02"), nil
+}
+
+func recordFailedTransactionPINAttemptTx(ctx context.Context, tx pgx.Tx, userID string, now time.Time) error {
+	var failedAttempts int
+	if err := tx.QueryRow(
+		ctx,
+		`SELECT failed_attempts FROM user_security_credentials WHERE user_id = $1`,
+		userID,
+	).Scan(&failedAttempts); err != nil {
+		return err
+	}
+
+	nextAttempts := failedAttempts + 1
+	var lockedUntil interface{}
+	if nextAttempts >= 5 {
+		lockUntilValue := now.Add(15 * time.Minute)
+		lockedUntil = lockUntilValue
+	}
+
+	_, err := tx.Exec(
+		ctx,
+		`UPDATE user_security_credentials
+		    SET failed_attempts = $2,
+		        last_failed_at = NOW(),
+		        locked_until = $3,
+		        updated_at = NOW()
+		  WHERE user_id = $1`,
+		userID,
+		nextAttempts,
+		lockedUntil,
+	)
+	return err
+}
+
+func toString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return ""
+	}
 }
 
 func writeJSON(w http.ResponseWriter, statusCode int, payload any) {

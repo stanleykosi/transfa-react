@@ -34,8 +34,11 @@ const (
 )
 
 var (
-	ErrInvalidTransactionPIN = errors.New("invalid transaction pin")
-	ErrTransactionPINLocked  = errors.New("transaction pin temporarily locked")
+	ErrInvalidTransactionPIN               = errors.New("invalid transaction pin")
+	ErrTransactionPINLocked                = errors.New("transaction pin temporarily locked")
+	ErrInvalidBeneficiaryVerificationInput = errors.New("account number and bank code are required")
+	ErrBeneficiaryVerificationProvider     = errors.New("beneficiary account verification provider failure")
+	ErrBeneficiaryVerificationInternal     = errors.New("beneficiary account verification internal failure")
 )
 
 // AccountService provides methods for managing accounts and beneficiaries.
@@ -63,6 +66,19 @@ type CreateBeneficiaryInput struct {
 	AccountNumber  string
 	BankCode       string
 	TransactionPIN string
+}
+
+type VerifyBeneficiaryAccountInput struct {
+	UserID        string
+	AccountNumber string
+	BankCode      string
+}
+
+type VerifyBeneficiaryAccountOutput struct {
+	AccountName   string `json:"account_name"`
+	AccountNumber string `json:"account_number"`
+	BankCode      string `json:"bank_code"`
+	BankName      string `json:"bank_name"`
 }
 
 // VerifyTransactionPIN validates user-provided PIN against server-side hash and lockout state.
@@ -182,6 +198,46 @@ func (s *AccountService) CreateBeneficiary(ctx context.Context, input CreateBene
 	}
 
 	return s.beneficiaryRepo.CreateBeneficiary(ctx, beneficiary)
+}
+
+// VerifyBeneficiaryAccount resolves account name and bank metadata before account linking.
+// This endpoint is intentionally PIN-less because it does not mutate state.
+func (s *AccountService) VerifyBeneficiaryAccount(ctx context.Context, input VerifyBeneficiaryAccountInput) (*VerifyBeneficiaryAccountOutput, error) {
+	input.AccountNumber = strings.TrimSpace(input.AccountNumber)
+	input.BankCode = strings.TrimSpace(input.BankCode)
+
+	if input.AccountNumber == "" || input.BankCode == "" {
+		return nil, ErrInvalidBeneficiaryVerificationInput
+	}
+
+	// Ensure the user exists and can access this endpoint.
+	if _, err := s.accountRepo.FindUserIDByClerkUserID(ctx, input.UserID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrUserNotFound
+		}
+		return nil, fmt.Errorf("%w: %v", ErrBeneficiaryVerificationInternal, err)
+	}
+
+	verifyResp, err := s.anchorClient.VerifyBankAccount(ctx, input.BankCode, input.AccountNumber)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrBeneficiaryVerificationProvider, err)
+	}
+
+	accountName := strings.TrimSpace(verifyResp.Data.Attributes.AccountName)
+	if accountName == "" || accountName == "N/A" || accountName == "Unknown" {
+		suffix := input.AccountNumber
+		if len(input.AccountNumber) > 4 {
+			suffix = input.AccountNumber[len(input.AccountNumber)-4:]
+		}
+		accountName = fmt.Sprintf("Account ending in %s", suffix)
+	}
+
+	return &VerifyBeneficiaryAccountOutput{
+		AccountName:   accountName,
+		AccountNumber: input.AccountNumber,
+		BankCode:      input.BankCode,
+		BankName:      s.getBankNameFromCode(ctx, input.BankCode),
+	}, nil
 }
 
 // ListBeneficiaries retrieves all beneficiaries for a user.

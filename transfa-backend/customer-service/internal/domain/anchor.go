@@ -81,6 +81,7 @@ type IndividualKYCAttributes struct {
 	Level  string     `json:"level"` // e.g., "TIER_1" or "TIER_2"
 	Level1 *KYCLevel1 `json:"level1,omitempty"`
 	Level2 *KYCLevel2 `json:"level2,omitempty"`
+	Level3 *KYCLevel3 `json:"level3,omitempty"`
 }
 
 // KYCLevel1 contains the specific details required for a Tier 1 KYC check.
@@ -95,4 +96,10 @@ type KYCLevel2 struct {
 	BVN         string `json:"bvn"`
 	DateOfBirth string `json:"dateOfBirth"`
 	Gender      string `json:"gender"`
+}
+
+type KYCLevel3 struct {
+	IDType     string `json:"idType"`
+	IDNumber   string `json:"idNumber"`
+	ExpiryDate string `json:"expiryDate"`
 }

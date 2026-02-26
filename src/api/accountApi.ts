@@ -23,7 +23,13 @@ import apiClient from './apiClient';
 
 // Account service URL from environment variables
 const ACCOUNT_SERVICE_URL = process.env.EXPO_PUBLIC_ACCOUNT_SERVICE_URL;
-import { Beneficiary, AddBeneficiaryPayload, BanksResponse } from '@/types/api';
+import {
+  Beneficiary,
+  AddBeneficiaryPayload,
+  BanksResponse,
+  VerifyBeneficiaryAccountPayload,
+  VerifyBeneficiaryAccountResponse,
+} from '@/types/api';
 
 // Define query keys for caching and invalidation.
 const BENEFICIARIES_QUERY_KEY = 'beneficiaries';
@@ -116,6 +122,35 @@ export const useDeleteBeneficiary = (options?: UseMutationOptions<void, Error, s
       // After deleting a beneficiary, invalidate the list to update the UI.
       queryClient.invalidateQueries({ queryKey: [BENEFICIARIES_QUERY_KEY] });
     },
+    ...options,
+  });
+};
+
+/**
+ * Resolve account details before linking a new beneficiary.
+ */
+export const useVerifyBeneficiaryAccount = (
+  options?: UseMutationOptions<
+    VerifyBeneficiaryAccountResponse,
+    Error,
+    VerifyBeneficiaryAccountPayload
+  >
+) => {
+  const verifyBeneficiaryMutation = async (
+    payload: VerifyBeneficiaryAccountPayload
+  ): Promise<VerifyBeneficiaryAccountResponse> => {
+    const { data } = await apiClient.post<VerifyBeneficiaryAccountResponse>(
+      '/beneficiaries/verify',
+      payload,
+      {
+        baseURL: ACCOUNT_SERVICE_URL,
+      }
+    );
+    return data;
+  };
+
+  return useMutation<VerifyBeneficiaryAccountResponse, Error, VerifyBeneficiaryAccountPayload>({
+    mutationFn: verifyBeneficiaryMutation,
     ...options,
   });
 };

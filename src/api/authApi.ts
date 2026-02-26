@@ -22,11 +22,16 @@ import {
   OnboardingPayload,
   OnboardingProgressPayload,
   OnboardingResponse,
+  CompletePinChangePayload,
+  CompletePinChangeResponse,
+  KycStatusResponse,
   SecurityStatusResponse,
   SetTransactionPinPayload,
   SetTransactionPinResponse,
   SetUsernamePayload,
   SetUsernameResponse,
+  Tier3UpgradePayload,
+  Tier3UpgradeResponse,
   Tier1ProfileUpdatePayload,
   Tier1ProfileUpdateResponse,
   Tier2VerificationPayload,
@@ -103,6 +108,28 @@ export const submitTransactionPinSetup = async (
 
 export const fetchSecurityStatus = async (): Promise<SecurityStatusResponse> => {
   const { data } = await apiClient.get<SecurityStatusResponse>('/me/security-status');
+  return data;
+};
+
+export const fetchKycStatus = async (): Promise<KycStatusResponse> => {
+  const { data } = await apiClient.get<KycStatusResponse>('/me/kyc-status');
+  return data;
+};
+
+export const submitTier3Upgrade = async (
+  payload: Tier3UpgradePayload
+): Promise<Tier3UpgradeResponse> => {
+  const { data } = await apiClient.post<Tier3UpgradeResponse>('/onboarding/tier3', payload);
+  return data;
+};
+
+export const completePinChange = async (
+  payload: CompletePinChangePayload
+): Promise<CompletePinChangeResponse> => {
+  const { data } = await apiClient.post<CompletePinChangeResponse>(
+    '/me/pin-change/complete',
+    payload
+  );
   return data;
 };
 

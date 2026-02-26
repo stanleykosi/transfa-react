@@ -389,6 +389,63 @@ func (h *UserEventHandler) HandleTier2VerificationRequestedEvent(body []byte) bo
 	return true
 }
 
+func (h *UserEventHandler) HandleTier3VerificationRequestedEvent(body []byte) bool {
+	var event domain.Tier3VerificationRequestedEvent
+	if err := json.Unmarshal(body, &event); err != nil {
+		log.Printf("Error unmarshaling tier3.verification.requested event: %v", err)
+		return true
+	}
+
+	if event.UserID == "" {
+		var err error
+		event.UserID, err = h.repo.FindUserIDByAnchorCustomerID(context.Background(), event.AnchorCustomerID)
+		if err != nil || event.UserID == "" {
+			log.Printf("Invalid tier3.verification.requested event: missing user or anchor customer ID")
+			return true
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier3", "processing", nil); err != nil {
+		log.Printf("Failed to mark tier3 processing for user %s: %v", event.UserID, err)
+	}
+
+	req := domain.AnchorIndividualKYCRequest{
+		Data: domain.RequestData{
+			Type: "Verification",
+			Attributes: domain.IndividualKYCAttributes{
+				Level: "TIER_3",
+				Level3: &domain.KYCLevel3{
+					IDType:     strings.ToUpper(strings.TrimSpace(event.IDType)),
+					IDNumber:   strings.TrimSpace(event.IDNumber),
+					ExpiryDate: strings.TrimSpace(event.ExpiryDate),
+				},
+			},
+		},
+	}
+
+	if err := h.anchorClient.TriggerIndividualKYC(ctx, event.AnchorCustomerID, req); err != nil {
+		lowerErr := strings.ToLower(err.Error())
+		if strings.Contains(lowerErr, "status 412") && strings.Contains(lowerErr, "kyc already completed") {
+			log.Printf("Tier3 KYC already completed on Anchor for user %s. Marking as completed.", event.UserID)
+			if err := h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier3", "completed", nil); err != nil {
+				log.Printf("Failed to mark tier3 completed for user %s: %v", event.UserID, err)
+			}
+			return true
+		}
+
+		log.Printf("ERROR: Failed to trigger Anchor Tier3 KYC for user %s: %v", event.UserID, err)
+		reason := fmt.Sprintf("Failed to trigger Anchor Tier3 KYC: %v", err)
+		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier3", "failed", &reason)
+		return false
+	}
+
+	log.Printf("Successfully triggered Anchor Tier3 KYC for user %s", event.UserID)
+	return true
+}
+
 func (h *UserEventHandler) triggerAccountRecovery(event domain.Tier2VerificationRequestedEvent) {
 	if h.publisher == nil {
 		return
@@ -468,39 +525,191 @@ func (h *UserEventHandler) HandleTierStatusEvent(body []byte) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
+	stageFromFallback := false
+	if stage == "" {
+		inferredStage, err := h.repo.InferTierStageFromOnboarding(ctx, event.UserID)
+		if err != nil {
+			log.Printf("Failed to infer stage for customer.tier.status user %s: %v", event.UserID, err)
+			return false
+		}
+		if inferredStage == "" {
+			stage = defaultTierStageForStatus(event.Status, normalizedStatus)
+			stageFromFallback = true
+			log.Printf(
+				"customer.tier.status stage was missing for user %s; using fallback stage=%s status=%q",
+				event.UserID,
+				stage,
+				event.Status,
+			)
+		} else {
+			stage = inferredStage
+		}
+	}
+
 	if err := h.repo.UpsertOnboardingStatus(ctx, event.UserID, stage, normalizedStatus, event.Reason); err != nil {
 		log.Printf("Failed to persist tier status %s/%s for user %s: %v", stage, normalizedStatus, event.UserID, err)
 		return false
+	}
+
+	if shouldPublishCustomerVerifiedForTier2(stage, normalizedStatus, stageFromFallback) {
+		if err := h.publishCustomerVerifiedForTier2(ctx, event); err != nil {
+			log.Printf("Failed to publish customer.verified for user %s after tier2 %s: %v", event.UserID, normalizedStatus, err)
+			return false
+		}
+	} else if stage == "tier2" && (normalizedStatus == "completed" || normalizedStatus == "approved") && stageFromFallback {
+		log.Printf(
+			"Skipping customer.verified publish for user %s: tier2 stage came from fallback inference",
+			event.UserID,
+		)
 	}
 
 	log.Printf("Updated onboarding status for user %s -> %s/%s", event.UserID, stage, normalizedStatus)
 	return true
 }
 
-func normalizeTierStage(stage, status string) string {
-	normalizedStage := strings.ToLower(strings.TrimSpace(stage))
-	switch normalizedStage {
-	case "tier1", "tier2":
-		return normalizedStage
+func (h *UserEventHandler) publishCustomerVerifiedForTier2(ctx context.Context, event TierStatusEvent) error {
+	if h.publisher == nil {
+		return nil
 	}
 
-	normalizedStatus := strings.ToLower(strings.TrimSpace(status))
-	if strings.HasPrefix(normalizedStatus, "tier1_") {
-		return "tier1"
+	anchorCustomerID := strings.TrimSpace(event.AnchorCustomerID)
+	if anchorCustomerID == "" {
+		anchorIDPtr, err := h.repo.GetAnchorCustomerIDByUserID(ctx, event.UserID)
+		if err != nil {
+			return err
+		}
+		if anchorIDPtr != nil {
+			anchorCustomerID = strings.TrimSpace(*anchorIDPtr)
+		}
 	}
-	return "tier2"
+
+	if anchorCustomerID == "" {
+		log.Printf("Skipping customer.verified publish for user %s: anchor customer ID is unavailable", event.UserID)
+		return nil
+	}
+
+	payload := map[string]string{
+		"anchor_customer_id": anchorCustomerID,
+		"user_id":            event.UserID,
+		"source":             "tier_status",
+	}
+
+	return h.publisher.Publish(ctx, "customer_events", "customer.verified", payload)
+}
+
+func normalizeTierStage(stage, status string) string {
+	normalizedStage := strings.ToLower(strings.TrimSpace(stage))
+	normalizedStage = strings.ReplaceAll(normalizedStage, "-", "_")
+	normalizedStage = strings.TrimPrefix(normalizedStage, "kyc_")
+	switch normalizedStage {
+	case "tier1", "tier_1", "1":
+		return "tier1"
+	case "tier2", "tier_2", "2":
+		return "tier2"
+	case "tier3", "tier_3", "3":
+		return "tier3"
+	}
+
+	if fromStatus := stageFromStatusPrefix(status); fromStatus != "" {
+		return fromStatus
+	}
+	return ""
 }
 
 func normalizeTierStatus(status string) string {
 	normalized := strings.ToLower(strings.TrimSpace(status))
-	normalized = strings.TrimPrefix(normalized, "tier1_")
-	normalized = strings.TrimPrefix(normalized, "tier2_")
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	normalized = strings.ReplaceAll(normalized, " ", "_")
+	for strings.Contains(normalized, "__") {
+		normalized = strings.ReplaceAll(normalized, "__", "_")
+	}
+
+	for _, prefix := range []string{
+		"kyc_status_",
+		"kyc_tier_1_",
+		"kyc_tier_2_",
+		"kyc_tier_3_",
+		"kyc_tier1_",
+		"kyc_tier2_",
+		"kyc_tier3_",
+		"tier_1_",
+		"tier_2_",
+		"tier_3_",
+		"tier1_",
+		"tier2_",
+		"tier3_",
+	} {
+		normalized = strings.TrimPrefix(normalized, prefix)
+	}
+
+	switch normalized {
+	case "manualreview":
+		normalized = "manual_review"
+	case "awaitingdocument":
+		normalized = "awaiting_document"
+	case "reenterinformation":
+		normalized = "reenter_information"
+	case "systemerror":
+		normalized = "system_error"
+	case "ratelimited":
+		normalized = "rate_limited"
+	}
+
 	switch normalized {
 	case "created", "pending", "processing", "completed", "failed", "error", "manual_review", "rejected", "rate_limited", "system_error", "approved", "awaiting_document", "reenter_information":
 		return normalized
 	default:
 		return ""
 	}
+}
+
+func stageFromStatusPrefix(status string) string {
+	normalized := strings.ToLower(strings.TrimSpace(status))
+	normalized = strings.ReplaceAll(normalized, "-", "_")
+	normalized = strings.ReplaceAll(normalized, " ", "_")
+
+	switch {
+	case strings.HasPrefix(normalized, "tier1_"),
+		strings.HasPrefix(normalized, "tier_1_"),
+		strings.HasPrefix(normalized, "kyc_tier1_"),
+		strings.HasPrefix(normalized, "kyc_tier_1_"):
+		return "tier1"
+	case strings.HasPrefix(normalized, "tier2_"),
+		strings.HasPrefix(normalized, "tier_2_"),
+		strings.HasPrefix(normalized, "kyc_tier2_"),
+		strings.HasPrefix(normalized, "kyc_tier_2_"):
+		return "tier2"
+	case strings.HasPrefix(normalized, "tier3_"),
+		strings.HasPrefix(normalized, "tier_3_"),
+		strings.HasPrefix(normalized, "kyc_tier3_"),
+		strings.HasPrefix(normalized, "kyc_tier_3_"):
+		return "tier3"
+	default:
+		return ""
+	}
+}
+
+func defaultTierStageForStatus(rawStatus string, normalizedStatus string) string {
+	if stage := stageFromStatusPrefix(rawStatus); stage != "" {
+		return stage
+	}
+	if normalizedStatus == "created" {
+		return "tier1"
+	}
+
+	// Anchor status updates without explicit stage historically map to tier2.
+	return "tier2"
+}
+
+func shouldPublishCustomerVerifiedForTier2(stage string, normalizedStatus string, stageFromFallback bool) bool {
+	if stage != "tier2" {
+		return false
+	}
+	if normalizedStatus != "completed" && normalizedStatus != "approved" {
+		return false
+	}
+	// Only publish provisioning signal when tier2 stage is explicitly known.
+	return !stageFromFallback
 }
 
 // createPersonalCustomer handles the logic for creating an IndividualCustomer on Anchor.

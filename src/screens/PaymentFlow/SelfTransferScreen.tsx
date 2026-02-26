@@ -507,7 +507,7 @@ const SelfTransferScreen = () => {
                 onPress={() =>
                   navigation.navigate('AppTabs', {
                     screen: 'Settings',
-                    params: { screen: 'AddBeneficiary' },
+                    params: { screen: 'LinkAccountPin' },
                   })
                 }
                 style={styles.linkAccountButton}
