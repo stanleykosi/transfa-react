@@ -6,12 +6,16 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "main": "index.js",
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.transfaapp",
-      "associatedDomains": ["applinks:trytransfa.com", "applinks:www.trytransfa.com"]
+      "associatedDomains": [
+        "applinks:trytransfa.com",
+        "applinks:www.trytransfa.com"
+      ]
     },
     "android": {
       "package": "com.transfaapp",
@@ -19,7 +23,10 @@
         {
           "action": "VIEW",
           "autoVerify": true,
-          "category": ["BROWSABLE", "DEFAULT"],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ],
           "data": [
             {
               "scheme": "https",
@@ -44,7 +51,9 @@
           "photosPermission": "Allow Transfa to save request QR codes to your photo library.",
           "savePhotosPermission": "Allow Transfa to save request QR codes to your photo library."
         }
-      ]
+      ],
+      "expo-web-browser",
+      "expo-font"
     ],
     "extra": {
       "eas": {

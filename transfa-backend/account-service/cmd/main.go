@@ -49,6 +49,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("cannot load config: %v", err)
 	}
+	if cfg.ClerkJWKSURL == "" {
+		log.Fatal("CLERK_JWKS_URL must be configured")
+	}
+	if cfg.InternalAPIKey == "" {
+		log.Fatal("INTERNAL_API_KEY must be configured")
+	}
 
 	// Establish database connection pool with better configuration.
 	dbConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)

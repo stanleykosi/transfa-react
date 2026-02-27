@@ -18,7 +18,7 @@ import (
 
 var (
 	bvnPattern   = regexp.MustCompile(`^[0-9]{11}$`)
-	phonePattern = regexp.MustCompile(`^\+?[0-9]{7,15}$`)
+	phonePattern = regexp.MustCompile(`^0[0-9]{10}$`)
 )
 
 // OnboardingHandler handles the user onboarding process.
@@ -426,7 +426,7 @@ func normalizeAndValidateOnboardingRequest(req *domain.OnboardingRequest) error 
 		return errors.New("email must be a valid email address")
 	}
 	if !phonePattern.MatchString(req.PhoneNumber) {
-		return errors.New("phone_number must be a valid international phone number")
+		return errors.New("phone_number must be a valid Nigerian phone number (e.g. 07012345678)")
 	}
 
 	req.UserType = normalizedUserType
@@ -619,14 +619,20 @@ func normalizePhone(value string) string {
 	}
 
 	var b strings.Builder
-	for idx, ch := range trimmed {
+	for _, ch := range trimmed {
 		if ch >= '0' && ch <= '9' {
-			b.WriteRune(ch)
-			continue
-		}
-		if ch == '+' && idx == 0 {
 			b.WriteRune(ch)
 		}
 	}
-	return b.String()
+
+	digits := b.String()
+	if strings.HasPrefix(digits, "2340") && len(digits) == 14 {
+		digits = digits[3:]
+	} else if strings.HasPrefix(digits, "234") && len(digits) == 13 {
+		digits = "0" + digits[3:]
+	} else if len(digits) == 10 {
+		digits = "0" + digits
+	}
+
+	return digits
 }

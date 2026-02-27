@@ -92,8 +92,11 @@ func main() {
 		cfg.ServerPort = "8080"
 	}
 
-	if strings.TrimSpace(cfg.ClerkJWKSURL) == "" && !cfg.AllowInsecureHeaderAuth {
-		log.Fatal("CLERK_JWKS_URL is required when ALLOW_INSECURE_HEADER_AUTH is false")
+	if cfg.AllowInsecureHeaderAuth {
+		log.Fatal("ALLOW_INSECURE_HEADER_AUTH is no longer supported and must be false")
+	}
+	if strings.TrimSpace(cfg.ClerkJWKSURL) == "" {
+		log.Fatal("CLERK_JWKS_URL is required")
 	}
 
 	dbConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
@@ -158,10 +161,9 @@ func main() {
 
 	onboardingHandler := api.NewOnboardingHandler(userRepo)
 	authMiddleware := api.ClerkAuthMiddleware(api.AuthMiddlewareConfig{
-		JWKSURL:             cfg.ClerkJWKSURL,
-		ExpectedAudience:    cfg.ClerkAudience,
-		ExpectedIssuer:      cfg.ClerkIssuer,
-		AllowHeaderFallback: cfg.AllowInsecureHeaderAuth,
+		JWKSURL:          cfg.ClerkJWKSURL,
+		ExpectedAudience: cfg.ClerkAudience,
+		ExpectedIssuer:   cfg.ClerkIssuer,
 	})
 
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -624,7 +626,6 @@ func main() {
 			if err := requireFreshPinChangeReverification(
 				r.Context(),
 				pinChangeReverificationMaxAgeSeconds,
-				cfg.AllowInsecureHeaderAuth,
 			); err != nil {
 				writeError(w, http.StatusPreconditionFailed, err)
 				return
@@ -1269,7 +1270,6 @@ func getPrimaryAccount(ctx context.Context, dbpool *pgxpool.Pool, userID string)
 func requireFreshPinChangeReverification(
 	ctx context.Context,
 	maxAgeSeconds int,
-	allowInsecureHeaderFallback bool,
 ) error {
 	if maxAgeSeconds <= 0 {
 		maxAgeSeconds = 600
@@ -1277,9 +1277,6 @@ func requireFreshPinChangeReverification(
 
 	security, ok := api.GetClerkSessionSecurity(ctx)
 	if !ok || security == nil {
-		if allowInsecureHeaderFallback {
-			return nil
-		}
 		return errors.New("recent reverification is required to change transaction pin")
 	}
 

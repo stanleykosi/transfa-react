@@ -12,17 +12,10 @@ func int64Ptr(value int64) *int64 {
 }
 
 func TestRequireFreshPinChangeReverification(t *testing.T) {
-	t.Run("rejects when freshness metadata is missing and fallback is disabled", func(t *testing.T) {
-		err := requireFreshPinChangeReverification(context.Background(), 600, false)
+	t.Run("rejects when freshness metadata is missing", func(t *testing.T) {
+		err := requireFreshPinChangeReverification(context.Background(), 600)
 		if err == nil {
 			t.Fatalf("expected error when reverification metadata is missing")
-		}
-	})
-
-	t.Run("allows when freshness metadata is missing and insecure fallback is enabled", func(t *testing.T) {
-		err := requireFreshPinChangeReverification(context.Background(), 600, true)
-		if err != nil {
-			t.Fatalf("expected success with insecure fallback enabled, got %v", err)
 		}
 	})
 
@@ -30,7 +23,7 @@ func TestRequireFreshPinChangeReverification(t *testing.T) {
 		ctx := api.WithClerkSessionSecurity(context.Background(), &api.ClerkSessionSecurity{
 			FirstFactorAgeMinutes: int64Ptr(4),
 		})
-		err := requireFreshPinChangeReverification(ctx, 600, false)
+		err := requireFreshPinChangeReverification(ctx, 600)
 		if err != nil {
 			t.Fatalf("expected success for fresh first factor age, got %v", err)
 		}
@@ -40,7 +33,7 @@ func TestRequireFreshPinChangeReverification(t *testing.T) {
 		ctx := api.WithClerkSessionSecurity(context.Background(), &api.ClerkSessionSecurity{
 			SecondFactorAgeMinutes: int64Ptr(5),
 		})
-		err := requireFreshPinChangeReverification(ctx, 600, false)
+		err := requireFreshPinChangeReverification(ctx, 600)
 		if err != nil {
 			t.Fatalf("expected success for fresh second factor age, got %v", err)
 		}
@@ -51,7 +44,7 @@ func TestRequireFreshPinChangeReverification(t *testing.T) {
 			FirstFactorAgeMinutes:  int64Ptr(20),
 			SecondFactorAgeMinutes: int64Ptr(20),
 		})
-		err := requireFreshPinChangeReverification(ctx, 600, false)
+		err := requireFreshPinChangeReverification(ctx, 600)
 		if err == nil {
 			t.Fatalf("expected error for stale factor verification ages")
 		}

@@ -33,6 +33,7 @@ type Config struct {
 	AnchorAPIKey                       string  `mapstructure:"ANCHOR_API_KEY"`
 	ClerkJWKSURL                       string  `mapstructure:"CLERK_JWKS_URL"`
 	AccountServiceURL                  string  `mapstructure:"ACCOUNT_SERVICE_URL"`
+	AccountServiceInternalAPIKey       string  `mapstructure:"ACCOUNT_SERVICE_INTERNAL_API_KEY"`
 	AdminAccountID                     string  `mapstructure:"ADMIN_ACCOUNT_ID"`
 	InternalAPIKey                     string  `mapstructure:"INTERNAL_API_KEY"`
 	P2PTransactionFeeKobo              int64   `mapstructure:"P2P_TRANSACTION_FEE_KOBO"`
@@ -86,6 +87,7 @@ func LoadConfig(path string) (config Config, err error) {
 	_ = viper.BindEnv("ANCHOR_API_KEY")
 	_ = viper.BindEnv("CLERK_JWKS_URL")
 	_ = viper.BindEnv("ACCOUNT_SERVICE_URL")
+	_ = viper.BindEnv("ACCOUNT_SERVICE_INTERNAL_API_KEY")
 	_ = viper.BindEnv("ADMIN_ACCOUNT_ID")
 	_ = viper.BindEnv("INTERNAL_API_KEY", "INTERNAL_API_KEY", "TRANSACTION_SERVICE_INTERNAL_API_KEY")
 	_ = viper.BindEnv("P2P_TRANSACTION_FEE_KOBO")
@@ -124,6 +126,10 @@ func LoadConfig(path string) (config Config, err error) {
 	}
 	if strings.TrimSpace(config.InternalAPIKey) == "" {
 		config.InternalAPIKey = strings.TrimSpace(os.Getenv("TRANSACTION_SERVICE_INTERNAL_API_KEY"))
+	}
+	config.AccountServiceInternalAPIKey = strings.TrimSpace(config.AccountServiceInternalAPIKey)
+	if config.AccountServiceInternalAPIKey == "" {
+		config.AccountServiceInternalAPIKey = config.InternalAPIKey
 	}
 	config.RedisURL = strings.TrimSpace(config.RedisURL)
 	config.RedisRateLimitPrefix = strings.TrimSpace(config.RedisRateLimitPrefix)

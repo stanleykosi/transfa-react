@@ -32,10 +32,9 @@ type ClerkSessionSecurity struct {
 
 // AuthMiddlewareConfig controls how incoming requests are authenticated.
 type AuthMiddlewareConfig struct {
-	JWKSURL             string
-	ExpectedAudience    string
-	ExpectedIssuer      string
-	AllowHeaderFallback bool
+	JWKSURL          string
+	ExpectedAudience string
+	ExpectedIssuer   string
 }
 
 type jwksVerifier struct {
@@ -58,7 +57,6 @@ func newJWKSVerifier(jwksURL string) *jwksVerifier {
 }
 
 // ClerkAuthMiddleware validates Clerk JWTs and injects the Clerk user ID into context.
-// For controlled local environments, header fallback can be enabled via config.
 func ClerkAuthMiddleware(cfg AuthMiddlewareConfig) func(http.Handler) http.Handler {
 	verifier := newJWKSVerifier(cfg.JWKSURL)
 
@@ -103,17 +101,6 @@ func ClerkAuthMiddleware(cfg AuthMiddlewareConfig) func(http.Handler) http.Handl
 				}
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
-			}
-
-			if cfg.AllowHeaderFallback {
-				if userID := strings.TrimSpace(r.Header.Get("X-Clerk-User-Id")); userID != "" {
-					ctx := context.WithValue(r.Context(), clerkUserIDContextKey, userID)
-					if email := strings.ToLower(strings.TrimSpace(r.Header.Get("X-User-Email"))); email != "" {
-						ctx = context.WithValue(ctx, clerkEmailContextKey, email)
-					}
-					next.ServeHTTP(w, r.WithContext(ctx))
-					return
-				}
 			}
 
 			http.Error(w, "Authorization required", http.StatusUnauthorized)

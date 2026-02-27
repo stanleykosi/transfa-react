@@ -41,6 +41,7 @@ func NewRouter(cfg *config.Config, service *app.AccountService) http.Handler {
 
 	// Internal routes (no authentication required for service-to-service communication)
 	r.Route("/internal", func(r chi.Router) {
+		r.Use(appmiddleware.InternalAuthMiddleware(cfg.InternalAPIKey))
 		r.Route("/accounts", func(r chi.Router) {
 			r.Post("/money-drop", internalAccountHandler.CreateMoneyDropAccount)
 		})

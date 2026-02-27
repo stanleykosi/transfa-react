@@ -8,12 +8,15 @@ import "github.com/spf13/viper"
 
 // Config holds all configuration for the application.
 type Config struct {
-	ServerPort        string `mapstructure:"SERVER_PORT"`
-	DatabaseURL       string `mapstructure:"DATABASE_URL"`
-	ClerkJWKSURL      string `mapstructure:"CLERK_JWKS_URL"`
-	AnchorAPIKey      string `mapstructure:"ANCHOR_API_KEY"`
-	AnchorAPIBaseURL  string `mapstructure:"ANCHOR_API_BASE_URL"`
-	RabbitMQURL       string `mapstructure:"RABBITMQ_URL"`
+	ServerPort       string `mapstructure:"SERVER_PORT"`
+	DatabaseURL      string `mapstructure:"DATABASE_URL"`
+	ClerkJWKSURL     string `mapstructure:"CLERK_JWKS_URL"`
+	ClerkAudience    string `mapstructure:"CLERK_AUDIENCE"`
+	ClerkIssuer      string `mapstructure:"CLERK_ISSUER"`
+	AnchorAPIKey     string `mapstructure:"ANCHOR_API_KEY"`
+	AnchorAPIBaseURL string `mapstructure:"ANCHOR_API_BASE_URL"`
+	RabbitMQURL      string `mapstructure:"RABBITMQ_URL"`
+	InternalAPIKey   string `mapstructure:"INTERNAL_API_KEY"`
 }
 
 // LoadConfig reads configuration from environment variables.
@@ -26,9 +29,12 @@ func LoadConfig() (config Config, err error) {
 	_ = viper.BindEnv("PORT")
 	_ = viper.BindEnv("DATABASE_URL")
 	_ = viper.BindEnv("CLERK_JWKS_URL")
+	_ = viper.BindEnv("CLERK_AUDIENCE")
+	_ = viper.BindEnv("CLERK_ISSUER")
 	_ = viper.BindEnv("ANCHOR_API_KEY")
 	_ = viper.BindEnv("ANCHOR_API_BASE_URL")
 	_ = viper.BindEnv("RABBITMQ_URL")
+	_ = viper.BindEnv("INTERNAL_API_KEY")
 
 	err = viper.Unmarshal(&config)
 	if err != nil {

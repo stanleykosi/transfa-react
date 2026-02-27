@@ -91,8 +91,17 @@ func main() {
 	// Initialize the client for the Anchor BaaS API.
 	anchorClient := anchorclient.NewClient(cfg.AnchorAPIBaseURL, cfg.AnchorAPIKey)
 
-	// Initialize the client for the account-service.
-	accountClient := accountclient.NewClient(cfg.AccountServiceURL)
+	// Initialize the client for the account-service. Missing account-service config should not
+	// prevent transaction-service from booting; money-drop account provisioning will degrade.
+	var accountClient *accountclient.Client
+	if strings.TrimSpace(cfg.AccountServiceURL) == "" || strings.TrimSpace(cfg.AccountServiceInternalAPIKey) == "" {
+		log.Printf("level=warn component=bootstrap msg=\"account-service client not configured; money-drop account provisioning disabled\" account_service_url_set=%t account_service_internal_key_set=%t",
+			strings.TrimSpace(cfg.AccountServiceURL) != "",
+			strings.TrimSpace(cfg.AccountServiceInternalAPIKey) != "",
+		)
+	} else {
+		accountClient = accountclient.NewClient(cfg.AccountServiceURL, cfg.AccountServiceInternalAPIKey)
+	}
 
 	var redisClient *redis.Client
 	rateLimitingEnabled := cfg.MoneyDropClaimRateLimitPerMinute > 0 || cfg.MoneyDropDetailsRateLimitPerMinute > 0

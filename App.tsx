@@ -25,6 +25,7 @@ import { Linking } from 'react-native';
 import ClerkProvider from '@/providers/ClerkProvider';
 import RootNavigator from '@/navigation/RootNavigator';
 import { useAuth } from '@/hooks/useAuth';
+import { useSecurityStore } from '@/store/useSecurityStore';
 
 const queryClient = new QueryClient();
 const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
@@ -79,9 +80,13 @@ if (!CLERK_PUBLISHABLE_KEY) {
 }
 
 function AppRoot(): React.JSX.Element {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useAuth();
   const navigationRef = useRef<NavigationContainerRef<ParamListBase> | null>(null);
   const pendingDropIdRef = useRef<string | null>(null);
+  const previousUserRef = useRef<string | null>(null);
+  const setSecurityStoreActiveUserId = useSecurityStore((state) => state.setActiveUserId);
+
+  const activeUserId = isSignedIn && userId ? userId : null;
 
   const navigateToClaimDrop = useCallback(
     (dropId: string) => {
@@ -114,6 +119,26 @@ function AppRoot(): React.JSX.Element {
     },
     [navigateToClaimDrop]
   );
+
+  useEffect(() => {
+    if (!isLoaded) {
+      return;
+    }
+
+    const previousUserId = previousUserRef.current;
+    if (previousUserId !== activeUserId) {
+      queryClient.cancelQueries();
+      queryClient.clear();
+      previousUserRef.current = activeUserId;
+      if (!activeUserId) {
+        pendingDropIdRef.current = null;
+      }
+    }
+
+    setSecurityStoreActiveUserId(activeUserId).catch((error) => {
+      console.warn('Failed to scope security state to authenticated user', error);
+    });
+  }, [activeUserId, isLoaded, setSecurityStoreActiveUserId]);
 
   useEffect(() => {
     Linking.getInitialURL()

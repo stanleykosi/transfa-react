@@ -70,6 +70,9 @@ func LoadConfig() (config Config, err error) {
 	if config.TransactionServiceInternalAPIKey == "" {
 		missing = append(missing, "TRANSACTION_SERVICE_INTERNAL_API_KEY (or INTERNAL_API_KEY)")
 	}
+	if config.InternalAPIKey == "" {
+		missing = append(missing, "INTERNAL_API_KEY")
+	}
 	if len(missing) > 0 {
 		return config, fmt.Errorf("missing required configuration: %s", strings.Join(missing, ", "))
 	}

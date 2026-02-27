@@ -7,6 +7,7 @@ package api
 import (
 	"context"
 	"crypto/rsa"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -98,17 +99,19 @@ func ClerkAuthMiddleware(jwksURL string) func(http.Handler) http.Handler {
 	}
 }
 
-// InternalAuthMiddleware validates optional internal API key for server-to-server calls.
+// InternalAuthMiddleware validates internal API key for server-to-server calls.
 func InternalAuthMiddleware(requiredKey string) func(http.Handler) http.Handler {
+	normalizedRequiredKey := strings.TrimSpace(requiredKey)
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if requiredKey == "" {
-				next.ServeHTTP(w, r)
+			if normalizedRequiredKey == "" {
+				http.Error(w, "Internal API key is not configured", http.StatusServiceUnavailable)
 				return
 			}
 
-			provided := r.Header.Get("X-Internal-API-Key")
-			if provided == "" || provided != requiredKey {
+			provided := strings.TrimSpace(r.Header.Get("X-Internal-API-Key"))
+			if provided == "" || subtle.ConstantTimeCompare([]byte(provided), []byte(normalizedRequiredKey)) != 1 {
 				http.Error(w, "Unauthorized", http.StatusUnauthorized)
 				return
 			}

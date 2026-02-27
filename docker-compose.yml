@@ -65,6 +65,8 @@ services:
     environment:
       DATABASE_URL: postgresql://transfa_user:transfa_password@postgres:5432/transfa?sslmode=disable
       RABBITMQ_URL: amqp://transfa_user:transfa_password@rabbitmq:5672/
+      INTERNAL_API_KEY: local-account-internal-key
+      CLERK_JWKS_URL: https://your-clerk-instance/.well-known/jwks.json
       ANCHOR_API_BASE_URL: https://api.anchor.ng
       ANCHOR_API_KEY: your_anchor_api_key
     depends_on:
@@ -127,6 +129,9 @@ services:
     environment:
       DATABASE_URL: postgresql://transfa_user:transfa_password@postgres:5432/transfa?sslmode=disable
       RABBITMQ_URL: amqp://transfa_user:transfa_password@rabbitmq:5672/
+      ACCOUNT_SERVICE_URL: http://account-service:8080
+      ACCOUNT_SERVICE_INTERNAL_API_KEY: local-account-internal-key
+      INTERNAL_API_KEY: local-transaction-internal-key
       ANCHOR_API_BASE_URL: https://api.anchor.ng
       ANCHOR_API_KEY: your_anchor_api_key
       SERVER_PORT: 8083

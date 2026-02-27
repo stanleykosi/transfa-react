@@ -109,6 +109,9 @@ func (h *TransactionHandlers) CreateMoneyDropHandler(w http.ResponseWriter, r *h
 		case errors.Is(err, app.ErrMoneyDropPasswordEncryptionUnavailable):
 			h.writeError(w, http.StatusServiceUnavailable, "Locked money drops are temporarily unavailable")
 			return
+		case errors.Is(err, app.ErrMoneyDropAccountProvisioningUnavailable):
+			h.writeError(w, http.StatusServiceUnavailable, "Money drop account provisioning is temporarily unavailable")
+			return
 		case strings.Contains(err.Error(), "must be divisible equally"),
 			strings.Contains(err.Error(), "insufficient funds"):
 			h.writeError(w, http.StatusBadRequest, err.Error())

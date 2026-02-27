@@ -27,6 +27,11 @@ import {
   submitTier2Verification,
 } from '@/api/authApi';
 import { OnboardingPayload } from '@/types/api';
+import {
+  isValidAnchorNigerianPhoneNumber,
+  normalizeNigerianPhoneInput,
+  toAnchorNigerianPhoneNumber,
+} from '@/utils/phone';
 
 type UserType = 'personal' | 'merchant';
 type OnboardingRoute = RouteProp<AppStackParamList, 'OnboardingForm'>;
@@ -49,22 +54,6 @@ const TransfaMark = () => {
 };
 
 const cleanDigits = (value: string): string => value.replace(/\D/g, '');
-
-const normalizeLocalPhone = (value: string): string => {
-  const digits = cleanDigits(value);
-  if (digits.startsWith('234')) {
-    return digits.slice(3);
-  }
-  if (digits.startsWith('0')) {
-    return digits.slice(1);
-  }
-  return digits;
-};
-
-const buildPhoneNumberForApi = (localPhone: string): string => {
-  const normalized = normalizeLocalPhone(localPhone);
-  return `${NIGERIA_DIAL_CODE}${normalized}`;
-};
 
 const parseDobToApiFormat = (value: string): string | null => {
   const trimmed = value.trim();
@@ -131,7 +120,7 @@ const OnboardingFormScreen = () => {
   const [middleName, setMiddleName] = useState('');
   const [maidenName, setMaidenName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState(
-    normalizeLocalPhone(user?.primaryPhoneNumber?.phoneNumber || '')
+    normalizeNigerianPhoneInput(user?.primaryPhoneNumber?.phoneNumber || '')
   );
 
   const [addressLine1, setAddressLine1] = useState('');
@@ -143,7 +132,10 @@ const OnboardingFormScreen = () => {
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [gender, setGender] = useState('');
 
-  const normalizedPhoneForApi = useMemo(() => buildPhoneNumberForApi(phoneNumber), [phoneNumber]);
+  const normalizedPhoneForApi = useMemo(
+    () => toAnchorNigerianPhoneNumber(phoneNumber),
+    [phoneNumber]
+  );
 
   const applyDraft = (draft?: Record<string, unknown>) => {
     if (!draft) {
@@ -177,7 +169,7 @@ const OnboardingFormScreen = () => {
       setMaidenName(nextMaidenName);
     }
     if (nextPhone) {
-      setPhoneNumber(normalizeLocalPhone(nextPhone));
+      setPhoneNumber(normalizeNigerianPhoneInput(nextPhone));
     }
     if (nextAddressLine1) {
       setAddressLine1(nextAddressLine1);
@@ -376,8 +368,7 @@ const OnboardingFormScreen = () => {
       return false;
     }
 
-    const localDigits = normalizeLocalPhone(phoneNumber);
-    if (localDigits.length < 7 || localDigits.length > 11) {
+    if (!isValidAnchorNigerianPhoneNumber(phoneNumber)) {
       Alert.alert('Invalid phone', 'Enter a valid Nigerian phone number.');
       return false;
     }
@@ -461,6 +452,10 @@ const OnboardingFormScreen = () => {
 
     const normalizedDob = validateStepThree();
     if (!normalizedDob) {
+      return;
+    }
+    if (!normalizedPhoneForApi) {
+      Alert.alert('Invalid phone', 'Enter a valid Nigerian phone number.');
       return;
     }
 
@@ -699,10 +694,11 @@ const OnboardingFormScreen = () => {
                       <TextInput
                         style={styles.phoneInput}
                         value={phoneNumber}
-                        onChangeText={setPhoneNumber}
+                        onChangeText={(value) => setPhoneNumber(normalizeNigerianPhoneInput(value))}
                         placeholder="8012345678"
                         placeholderTextColor="#707070"
                         keyboardType="number-pad"
+                        maxLength={10}
                       />
                     </View>
                   </>

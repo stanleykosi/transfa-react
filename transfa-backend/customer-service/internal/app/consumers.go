@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -31,6 +32,8 @@ import (
 	"github.com/transfa/customer-service/internal/store"
 	"github.com/transfa/customer-service/pkg/anchorclient"
 )
+
+var anchorNigerianPhonePattern = regexp.MustCompile(`^0[0-9]{10}$`)
 
 // UserEventHandler handles processing of user-related events.
 type UserEventHandler struct {
@@ -246,6 +249,12 @@ func (h *UserEventHandler) HandleTier1ProfileUpdateRequestedEvent(body []byte) b
 		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", &reason)
 		return true
 	}
+	normalizedPhoneNumber, err := normalizeAnchorNigerianPhone(phoneNumber)
+	if err != nil {
+		reason := err.Error()
+		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", &reason)
+		return true
+	}
 	addressLine1, err := requireKYCString(event.KYCData, "addressLine1")
 	if err != nil {
 		reason := err.Error()
@@ -292,7 +301,7 @@ func (h *UserEventHandler) HandleTier1ProfileUpdateRequestedEvent(body []byte) b
 					MaidenName: maidenName,
 				},
 				Email:       email,
-				PhoneNumber: phoneNumber,
+				PhoneNumber: normalizedPhoneNumber,
 				Address: domain.Address{
 					AddressLine1: addressLine1,
 					AddressLine2: addressLine2,
@@ -721,6 +730,10 @@ func (h *UserEventHandler) createPersonalCustomer(ctx context.Context, event dom
 	if fullName == "" || email == "" || phoneNumber == "" {
 		return "", fmt.Errorf("missing required fields (fullName, email, phoneNumber) in KYCData")
 	}
+	normalizedPhoneNumber, err := normalizeAnchorNigerianPhone(phoneNumber)
+	if err != nil {
+		return "", err
+	}
 
 	// Split full name into first and last name as Anchor expects at least firstName and lastName
 	firstName := fullName
@@ -758,7 +771,7 @@ func (h *UserEventHandler) createPersonalCustomer(ctx context.Context, event dom
 			Attributes: domain.IndividualCustomerAttributes{
 				FullName:    domain.FullName{FirstName: firstName, LastName: lastName},
 				Email:       email,
-				PhoneNumber: phoneNumber,
+				PhoneNumber: normalizedPhoneNumber,
 				Address: domain.Address{
 					AddressLine1: addressLine1,
 					AddressLine2: addressLine2,
@@ -790,6 +803,10 @@ func (h *UserEventHandler) createPersonalCustomerWithIdempotency(ctx context.Con
 
 	if firstName == "" || lastName == "" || email == "" || phoneNumber == "" {
 		return "", fmt.Errorf("missing required fields (firstName, lastName, email, phoneNumber) in KYCData")
+	}
+	normalizedPhoneNumber, err := normalizeAnchorNigerianPhone(phoneNumber)
+	if err != nil {
+		return "", err
 	}
 	addressLine1, err := requireKYCString(event.KYCData, "addressLine1")
 	if err != nil {
@@ -824,7 +841,7 @@ func (h *UserEventHandler) createPersonalCustomerWithIdempotency(ctx context.Con
 					MaidenName: maidenName,
 				},
 				Email:       email,
-				PhoneNumber: phoneNumber,
+				PhoneNumber: normalizedPhoneNumber,
 				Address: domain.Address{
 					AddressLine1: addressLine1,
 					AddressLine2: addressLine2,
@@ -862,6 +879,35 @@ func optionalKYCString(values map[string]interface{}, key string) (string, bool)
 		return "", false
 	}
 	return trimmed, true
+}
+
+func normalizeAnchorNigerianPhone(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "", fmt.Errorf("phoneNumber is required")
+	}
+
+	var b strings.Builder
+	for _, ch := range trimmed {
+		if ch >= '0' && ch <= '9' {
+			b.WriteRune(ch)
+		}
+	}
+
+	digits := b.String()
+	if strings.HasPrefix(digits, "2340") && len(digits) == 14 {
+		digits = digits[3:]
+	} else if strings.HasPrefix(digits, "234") && len(digits) == 13 {
+		digits = "0" + digits[3:]
+	} else if len(digits) == 10 {
+		digits = "0" + digits
+	}
+
+	if !anchorNigerianPhonePattern.MatchString(digits) {
+		return "", fmt.Errorf("invalid phoneNumber format in KYCData")
+	}
+
+	return digits, nil
 }
 
 func ptr(s string) *string { return &s }

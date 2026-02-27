@@ -149,3 +149,56 @@ func TestShouldPublishCustomerVerifiedForTier2(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeAnchorNigerianPhone(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    string
+		wantErr bool
+	}{
+		{
+			name:  "normalizes_plus_234",
+			input: "+2348181664488",
+			want:  "08181664488",
+		},
+		{
+			name:  "normalizes_plain_234",
+			input: "2348181664488",
+			want:  "08181664488",
+		},
+		{
+			name:  "keeps_local_11_digits",
+			input: "08181664488",
+			want:  "08181664488",
+		},
+		{
+			name:  "normalizes_local_10_digits",
+			input: "8181664488",
+			want:  "08181664488",
+		},
+		{
+			name:    "rejects_invalid_phone",
+			input:   "12345",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeAnchorNigerianPhone(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("normalizeAnchorNigerianPhone(%q) expected error, got nil", tt.input)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("normalizeAnchorNigerianPhone(%q) unexpected error: %v", tt.input, err)
+			}
+			if got != tt.want {
+				t.Fatalf("normalizeAnchorNigerianPhone(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}

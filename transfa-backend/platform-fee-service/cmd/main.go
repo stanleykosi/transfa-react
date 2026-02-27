@@ -33,6 +33,10 @@ func main() {
 		logger.Error("failed to load configuration", "error", err)
 		os.Exit(1)
 	}
+	if cfg.InternalAPIKey == "" {
+		logger.Error("missing required internal API key", "env", "INTERNAL_API_KEY")
+		os.Exit(1)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

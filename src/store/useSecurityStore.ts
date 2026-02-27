@@ -6,8 +6,10 @@ import { fetchSecurityStatus } from '@/api/authApi';
 const PIN_KEY = 'com.transfaapp.pin';
 
 interface SecurityState {
+  activeUserId: string | null;
   isPinSet: boolean;
   biometricsEnabled: boolean;
+  setActiveUserId: (userId: string | null) => Promise<void>;
   checkPinStatus: () => Promise<void>;
   getPin: () => Promise<string | null>;
   setPin: (pin: string) => Promise<void>;
@@ -16,49 +18,66 @@ interface SecurityState {
   setBiometricsEnabled: (enabled: boolean) => void;
 }
 
-const getStoredPin = async (): Promise<string | null> => {
+const pinStorageKeyForUser = (userId: string): string => `${PIN_KEY}:${userId}`;
+
+const getStoredPin = async (userId: string): Promise<string | null> => {
   if (Platform.OS === 'web') {
     return null;
   }
 
-  return SecureStore.getItemAsync(PIN_KEY, {
-    keychainService: PIN_KEY,
+  const key = pinStorageKeyForUser(userId);
+  return SecureStore.getItemAsync(key, {
+    keychainService: key,
   });
 };
 
-const setStoredPin = async (pin: string): Promise<boolean> => {
+const setStoredPin = async (userId: string, pin: string): Promise<boolean> => {
   if (Platform.OS === 'web') {
     return false;
   }
 
-  await SecureStore.setItemAsync(PIN_KEY, pin, {
-    keychainService: PIN_KEY,
+  const key = pinStorageKeyForUser(userId);
+  await SecureStore.setItemAsync(key, pin, {
+    keychainService: key,
   });
   return true;
 };
 
-const removeStoredPin = async (): Promise<void> => {
+const removeStoredPin = async (userId: string): Promise<void> => {
   if (Platform.OS === 'web') {
     return;
   }
 
-  await SecureStore.deleteItemAsync(PIN_KEY, {
-    keychainService: PIN_KEY,
+  const key = pinStorageKeyForUser(userId);
+  await SecureStore.deleteItemAsync(key, {
+    keychainService: key,
   });
 };
 
-export const useSecurityStore = create<SecurityState>((set) => ({
+export const useSecurityStore = create<SecurityState>((set, get) => ({
+  activeUserId: null,
   isPinSet: false,
   biometricsEnabled: true,
 
+  setActiveUserId: async (userId: string | null) => {
+    set({ activeUserId: userId });
+    await get().checkPinStatus();
+  },
+
   checkPinStatus: async () => {
     try {
+      const activeUserId = get().activeUserId;
+      if (!activeUserId) {
+        set({ isPinSet: false });
+        return;
+      }
+
       if (Platform.OS === 'web') {
         const status = await fetchSecurityStatus();
         set({ isPinSet: status.transaction_pin_set });
         return;
       }
-      const pin = await getStoredPin();
+      const pin = await getStoredPin(activeUserId);
       set({ isPinSet: !!pin });
     } catch (error) {
       console.error('Failed to check PIN status:', error);
@@ -68,7 +87,11 @@ export const useSecurityStore = create<SecurityState>((set) => ({
 
   getPin: async () => {
     try {
-      return await getStoredPin();
+      const activeUserId = get().activeUserId;
+      if (!activeUserId) {
+        return null;
+      }
+      return await getStoredPin(activeUserId);
     } catch (error) {
       console.error('Failed to retrieve PIN:', error);
       return null;
@@ -76,6 +99,12 @@ export const useSecurityStore = create<SecurityState>((set) => ({
   },
 
   setPin: async (pin: string) => {
+    const activeUserId = get().activeUserId;
+    if (!activeUserId) {
+      set({ isPinSet: false });
+      return;
+    }
+
     if (Platform.OS === 'web') {
       try {
         const status = await fetchSecurityStatus();
@@ -86,12 +115,15 @@ export const useSecurityStore = create<SecurityState>((set) => ({
       }
       return;
     }
-    const persisted = await setStoredPin(pin);
+    const persisted = await setStoredPin(activeUserId, pin);
     set({ isPinSet: persisted });
   },
 
   clearPin: async () => {
-    await removeStoredPin();
+    const activeUserId = get().activeUserId;
+    if (activeUserId) {
+      await removeStoredPin(activeUserId);
+    }
     set({ isPinSet: false });
   },
 
@@ -100,7 +132,11 @@ export const useSecurityStore = create<SecurityState>((set) => ({
       if (Platform.OS === 'web') {
         return false;
       }
-      const storedPin = await getStoredPin();
+      const activeUserId = get().activeUserId;
+      if (!activeUserId) {
+        return false;
+      }
+      const storedPin = await getStoredPin(activeUserId);
       return storedPin === pin;
     } catch (error) {
       console.error('Failed to verify PIN:', error);

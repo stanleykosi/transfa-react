@@ -12,19 +12,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
 
 // Client is a client for the account service.
 type Client struct {
 	baseURL    string
+	apiKey     string
 	httpClient *http.Client
 }
 
 // NewClient creates a new account service client.
-func NewClient(baseURL string) *Client {
+func NewClient(baseURL string, apiKey string) *Client {
 	return &Client{
-		baseURL:    baseURL,
+		baseURL:    strings.TrimRight(strings.TrimSpace(baseURL), "/"),
+		apiKey:     apiKey,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
 }
@@ -44,6 +47,10 @@ type CreateMoneyDropAccountResponse struct {
 
 // CreateMoneyDropAccount calls the account-service to create a money drop Anchor account.
 func (c *Client) CreateMoneyDropAccount(ctx context.Context, userID string) (*CreateMoneyDropAccountResponse, error) {
+	if c.baseURL == "" {
+		return nil, fmt.Errorf("account service base url is empty")
+	}
+
 	url := fmt.Sprintf("%s/internal/accounts/money-drop", c.baseURL)
 
 	payload := CreateMoneyDropAccountRequest{
@@ -60,8 +67,9 @@ func (c *Client) CreateMoneyDropAccount(ctx context.Context, userID string) (*Cr
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	// NOTE: This is an internal, server-to-server call.
-	// We might add internal auth (e.g., a shared secret) later for security.
+	if strings.TrimSpace(c.apiKey) != "" {
+		req.Header.Set("X-Internal-API-Key", strings.TrimSpace(c.apiKey))
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
