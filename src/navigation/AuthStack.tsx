@@ -17,6 +17,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import SignInScreen from '@/screens/Auth/SignInScreen';
 import SignUpScreen from '@/screens/Auth/SignUpScreen';
 import VerifyCodeScreen from '@/screens/Auth/VerifyCodeScreen';
+import ForgotPasswordScreen from '@/screens/Auth/ForgotPasswordScreen';
 
 // Define the parameter list for the AuthStack routes for type safety.
 export type AuthStackParamList = {
@@ -24,6 +25,9 @@ export type AuthStackParamList = {
   SignUp: undefined;
   VerifyCode: {
     emailAddressId?: string;
+  };
+  ForgotPassword: {
+    identifier?: string;
   };
 };
 
@@ -40,6 +44,7 @@ const AuthStack = () => {
       <Stack.Screen name="SignIn" component={SignInScreen} />
       <Stack.Screen name="SignUp" component={SignUpScreen} />
       <Stack.Screen name="VerifyCode" component={VerifyCodeScreen} />
+      <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
     </Stack.Navigator>
   );
 };

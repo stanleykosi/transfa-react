@@ -1,13 +1,11 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -20,6 +18,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSignIn } from '@/hooks/useSignIn';
 import { fetchAuthSession } from '@/api/authApi';
 import { AuthStackParamList } from '@/navigation/AuthStack';
+import OtpCodeField from '@/components/auth/OtpCodeField';
 
 const OTP_LENGTH = 6;
 
@@ -63,7 +62,6 @@ const VerifyCodeScreen = () => {
   const { signIn, setActive, isLoaded } = useSignIn();
   const route = useRoute<VerifyCodeRoute>();
   const navigation = useNavigation<AuthNavigation>();
-  const inputRef = useRef<TextInput | null>(null);
 
   const [code, setCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -79,15 +77,6 @@ const VerifyCodeScreen = () => {
       return route.params.emailAddressId;
     }
     return getEmailFactor(signIn)?.emailAddressId;
-  };
-
-  const focusCodeInput = () => {
-    inputRef.current?.focus();
-  };
-
-  const onCodeChange = (value: string) => {
-    const sanitized = value.replace(/[^\d]/g, '').slice(0, OTP_LENGTH);
-    setCode(sanitized);
   };
 
   const onVerifyPress = async () => {
@@ -176,29 +165,7 @@ const VerifyCodeScreen = () => {
               <Text style={styles.title}>Verify Code</Text>
               <Text style={styles.subtitle}>Please enter the code we just sent to your email</Text>
 
-              <Pressable style={styles.otpRow} onPress={focusCodeInput}>
-                {Array.from({ length: OTP_LENGTH }).map((_, index) => {
-                  const digit = code[index];
-                  const isActive = index === code.length && code.length < OTP_LENGTH;
-                  return (
-                    <View key={index} style={[styles.otpBox, isActive && styles.otpBoxActive]}>
-                      <Text style={styles.otpValue}>{digit || '-'}</Text>
-                    </View>
-                  );
-                })}
-              </Pressable>
-
-              <TextInput
-                ref={inputRef}
-                value={code}
-                onChangeText={onCodeChange}
-                keyboardType="number-pad"
-                textContentType="oneTimeCode"
-                autoComplete="one-time-code"
-                autoFocus
-                style={styles.hiddenInput}
-                maxLength={OTP_LENGTH}
-              />
+              <OtpCodeField value={code} onChangeCode={setCode} length={OTP_LENGTH} autoFocus />
 
               <TouchableOpacity
                 style={[styles.verifyButton, !canSubmit && styles.verifyButtonDisabled]}
@@ -292,37 +259,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 24,
     maxWidth: 275,
-  },
-  otpRow: {
-    width: '100%',
-    marginTop: 42,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  otpBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.07)',
-    backgroundColor: 'rgba(79, 79, 79, 0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  otpBoxActive: {
-    borderColor: '#FFD300',
-    backgroundColor: 'rgba(79, 79, 79, 0.5)',
-  },
-  otpValue: {
-    color: '#DCDCDC',
-    fontSize: 21,
-    fontWeight: '500',
-  },
-  hiddenInput: {
-    position: 'absolute',
-    opacity: 0,
-    height: 1,
-    width: 1,
   },
   verifyButton: {
     width: '100%',

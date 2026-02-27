@@ -154,32 +154,11 @@ const SignInScreen = () => {
   };
 
   const onForgotPasswordPress = async () => {
-    if (!isLoaded) {
-      return;
-    }
-
-    const trimmedIdentifier = identifier.trim();
-    if (!trimmedIdentifier) {
-      Alert.alert('Missing identifier', 'Enter your email, username, or phone number first.');
-      return;
-    }
-
     setIsResetLoading(true);
     try {
-      await signIn.create({
-        strategy: 'reset_password_email_code',
-        identifier: trimmedIdentifier,
-      } as any);
-
-      Alert.alert(
-        'Reset initiated',
-        'If your account exists, a password reset code has been sent.'
-      );
-    } catch (err: any) {
-      Alert.alert(
-        'Could not start reset',
-        err?.errors?.[0]?.message || 'Please verify your identifier and try again.'
-      );
+      navigation.navigate('ForgotPassword', {
+        identifier: identifier.trim() || undefined,
+      });
     } finally {
       setIsResetLoading(false);
     }
