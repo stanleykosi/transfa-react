@@ -1,0 +1,3460 @@
+openapi: 3.0.3
+info:
+  title: Transfa Backend API
+  version: 1.0.0
+  license:
+    name: Proprietary
+  description: |
+    Consolidated OpenAPI spec for all HTTP services in `transfa-backend`.
+
+    Services covered:
+    - `auth-service`
+    - `account-service`
+    - `transaction-service`
+    - `platform-fee-service`
+    - `notification-service`
+
+    Note:
+    - Some error responses are plain text in current handlers.
+    - Internal endpoints require `X-Internal-API-Key`.
+
+tags:
+  - name: Health
+  - name: Auth
+  - name: Onboarding
+  - name: User
+  - name: Account
+  - name: Beneficiaries
+  - name: Banks
+  - name: Transactions
+  - name: Payment Requests
+  - name: Notifications
+  - name: Transfer Lists
+  - name: Money Drops
+  - name: Platform Fees
+  - name: Webhooks
+  - name: Internal
+
+servers:
+  - url: https://auth-service-production-dac4.up.railway.app
+    description: Auth service
+  - url: https://transaction-service-production-a8d9.up.railway.app
+    description: Transaction service
+  - url: https://platform-fee-service-production.up.railway.app
+    description: Platform fee service
+  - url: https://notification-service-production-88c4.up.railway.app
+    description: Notification service
+  - url: https://account-service-production-8e34.up.railway.app
+    description: Account service
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Service health check
+      security: []
+      description: |
+        Health endpoint shared by multiple services. Response payload can differ slightly
+        by service instance.
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/HealthJSON'
+                  - type: string
+            text/plain:
+              schema:
+                type: string
+
+  /onboarding/account-types:
+    get:
+      tags: [Onboarding]
+      summary: List onboarding account type options
+      operationId: getOnboardingAccountTypes
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Account type options
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountTypeOptionsResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /onboarding:
+    post:
+      tags: [Onboarding]
+      summary: Submit Tier 1 onboarding
+      operationId: submitOnboarding
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OnboardingPayload'
+      responses:
+        '201':
+          description: Tier 1 onboarding accepted for a new user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnboardingResponse'
+        '200':
+          description: Tier 1 already exists for this user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnboardingResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '409':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /onboarding/tier1/update:
+    post:
+      tags: [Onboarding]
+      summary: Update Tier 1 profile and trigger re-processing
+      operationId: updateTier1Profile
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OnboardingPayload'
+      responses:
+        '202':
+          description: Tier 1 update queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/ErrorResponse'
+        '412':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /onboarding/tier2:
+    post:
+      tags: [Onboarding]
+      summary: Submit Tier 2 verification details
+      operationId: submitTier2Verification
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Tier2VerificationPayload'
+      responses:
+        '202':
+          description: Tier 2 verification queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/ErrorResponse'
+        '412':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /onboarding/tier3:
+    post:
+      tags: [Onboarding]
+      summary: Submit Tier 3 verification details
+      operationId: submitTier3Verification
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Tier3UpgradePayload'
+      responses:
+        '202':
+          description: Tier 3 verification queued or still processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '200':
+          description: Tier 3 already completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/ErrorResponse'
+        '412':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /onboarding/progress:
+    post:
+      tags: [Onboarding]
+      summary: Save onboarding progress draft
+      operationId: saveOnboardingProgress
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OnboardingProgressPayload'
+      responses:
+        '204':
+          description: Progress saved
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /onboarding/progress/clear:
+    post:
+      tags: [Onboarding]
+      summary: Clear onboarding progress draft
+      operationId: clearOnboardingProgress
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          description: Progress cleared
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /onboarding/status:
+    get:
+      tags: [Onboarding]
+      summary: Fetch onboarding status
+      operationId: getOnboardingStatus
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Onboarding status state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OnboardingStatusResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /me/profile:
+    get:
+      tags: [User]
+      summary: Get current authenticated user profile
+      operationId: getMeProfile
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '404':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /me/security-status:
+    get:
+      tags: [User]
+      summary: Get security setup status for current user
+      operationId: getSecurityStatus
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Security status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecurityStatusResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /me/kyc-status:
+    get:
+      tags: [User]
+      summary: Get KYC stage statuses and inferred tier
+      operationId: getKycStatus
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: KYC status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KycStatusResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /users/search:
+    get:
+      tags: [User]
+      summary: Search users by username/fullname
+      operationId: searchUsers
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+          description: Search query
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 20
+      responses:
+        '200':
+          description: Matched users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDiscoveryResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /users/frequent:
+    get:
+      tags: [User]
+      summary: List frequent transfer recipients
+      operationId: listFrequentUsers
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 6
+            minimum: 1
+            maximum: 12
+      responses:
+        '200':
+          description: Frequent users list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserDiscoveryResponse'
+
+  /me/username:
+    post:
+      tags: [User]
+      summary: Set username for current user
+      operationId: setUsername
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetUsernamePayload'
+      responses:
+        '200':
+          description: Username set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SetUsernameResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '409':
+          $ref: '#/components/responses/ErrorResponse'
+        '412':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /me/transaction-pin:
+    post:
+      tags: [User]
+      summary: Set transaction PIN for current user
+      operationId: setTransactionPin
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetTransactionPinPayload'
+      responses:
+        '200':
+          description: PIN set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '412':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /me/pin-change/complete:
+    post:
+      tags: [User]
+      summary: Change transaction PIN
+      description: Requires recent step-up re-verification in Clerk session metadata.
+      operationId: completePinChange
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompletePinChangePayload'
+      responses:
+        '200':
+          description: PIN changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatusResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '412':
+          $ref: '#/components/responses/ErrorResponse'
+        '423':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /me/primary-account:
+    get:
+      tags: [User]
+      summary: Get primary account details for current user
+      operationId: getPrimaryAccount
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Primary account details (can be empty object)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrimaryAccountDetails'
+
+  /auth/session:
+    get:
+      tags: [Auth]
+      summary: Get authenticated session bootstrap payload
+      operationId: getAuthSession
+      servers:
+        - url: https://auth-service-production-dac4.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Session state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSessionResponse'
+
+  /beneficiaries:
+    get:
+      tags: [Beneficiaries]
+      summary: List beneficiaries
+      operationId: listBeneficiaries
+      servers:
+        - url: https://account-service-production-8e34.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Beneficiaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Beneficiary'
+    post:
+      tags: [Beneficiaries]
+      summary: Create beneficiary
+      operationId: createBeneficiary
+      servers:
+        - url: https://account-service-production-8e34.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddBeneficiaryPayload'
+      responses:
+        '201':
+          description: Beneficiary created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Beneficiary'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '401':
+          $ref: '#/components/responses/ErrorResponse'
+        '412':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /beneficiaries/verify:
+    post:
+      tags: [Beneficiaries]
+      summary: Verify beneficiary account details before linking
+      operationId: verifyBeneficiary
+      servers:
+        - url: https://account-service-production-8e34.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyBeneficiaryAccountPayload'
+      responses:
+        '200':
+          description: Beneficiary account details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyBeneficiaryAccountResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /beneficiaries/{id}:
+    delete:
+      tags: [Beneficiaries]
+      summary: Delete beneficiary
+      operationId: deleteBeneficiary
+      servers:
+        - url: https://account-service-production-8e34.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+        '404':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /banks:
+    get:
+      tags: [Banks]
+      summary: List supported banks
+      operationId: listBanks
+      servers:
+        - url: https://account-service-production-8e34.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Bank list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BanksResponse'
+
+  /internal/accounts/money-drop:
+    post:
+      tags: [Internal, Account]
+      summary: Create money-drop account for a user
+      operationId: createMoneyDropAccountInternal
+      servers:
+        - url: https://account-service-production-8e34.up.railway.app
+      security:
+        - InternalApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMoneyDropAccountRequest'
+      responses:
+        '200':
+          description: Money-drop account created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Account'
+
+  /transactions/health:
+    get:
+      tags: [Health]
+      summary: Transaction service health check
+      operationId: getTransactionsHealth
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security: []
+      responses:
+        '200':
+          description: Healthy response
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /transactions/p2p:
+    post:
+      tags: [Transactions]
+      summary: Initiate P2P transfer
+      operationId: createP2PTransfer
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/P2PTransferPayload'
+      responses:
+        '201':
+          description: Transfer initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+        '402':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /transactions/p2p/bulk:
+    post:
+      tags: [Transactions]
+      summary: Initiate bulk P2P transfer batch
+      operationId: createBulkP2PTransfer
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkP2PTransferPayload'
+      responses:
+        '200':
+          description: Batch transfer result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkP2PTransferResponse'
+
+  /transactions/self-transfer:
+    post:
+      tags: [Transactions]
+      summary: Initiate self transfer to linked beneficiary
+      operationId: createSelfTransfer
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SelfTransferPayload'
+      responses:
+        '201':
+          description: Transfer initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionResponse'
+
+  /transactions/beneficiaries:
+    get:
+      tags: [Transactions]
+      summary: List beneficiaries resolved by transaction service
+      operationId: listTransactionBeneficiaries
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Beneficiaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Beneficiary'
+
+  /transactions/beneficiaries/default:
+    get:
+      tags: [Transactions]
+      summary: Get default beneficiary
+      operationId: getDefaultBeneficiary
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Default beneficiary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Beneficiary'
+    put:
+      tags: [Transactions]
+      summary: Set default beneficiary
+      operationId: setDefaultBeneficiary
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetDefaultBeneficiaryPayload'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /transactions/receiving-preference:
+    get:
+      tags: [Transactions]
+      summary: Get receiving preference
+      operationId: getReceivingPreference
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Receiving preference
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReceivingPreference'
+    put:
+      tags: [Transactions]
+      summary: Update receiving preference
+      operationId: updateReceivingPreference
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateReceivingPreferencePayload'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessageResponse'
+
+  /transactions/account/balance:
+    get:
+      tags: [Transactions]
+      summary: Get account balance
+      operationId: getAccountBalance
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Balance details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountBalance'
+
+  /transactions/fees:
+    get:
+      tags: [Transactions]
+      summary: Get configured fees
+      operationId: getFees
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Fee settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeeResponse'
+
+  /transactions/transactions:
+    get:
+      tags: [Transactions]
+      summary: List transaction history
+      operationId: listTransactions
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Transaction history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TransactionHistoryItem'
+
+  /transactions/transactions/with/{username}:
+    get:
+      tags: [Transactions]
+      summary: Get bilateral transaction history with a user
+      operationId: getTransactionsWithUser
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+      responses:
+        '200':
+          description: Bilateral history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BilateralTransactionHistoryResponse'
+
+  /transactions/transactions/{id}:
+    get:
+      tags: [Transactions]
+      summary: Get transaction by ID
+      operationId: getTransactionById
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Transaction details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionHistoryItem'
+        '404':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /transactions/payment-requests:
+    get:
+      tags: [Payment Requests]
+      summary: List creator-owned payment requests
+      operationId: listPaymentRequests
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payment requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PaymentRequest'
+    post:
+      tags: [Payment Requests]
+      summary: Create payment request
+      operationId: createPaymentRequest
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePaymentRequestPayload'
+      responses:
+        '201':
+          description: Payment request created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRequest'
+
+  /transactions/payment-requests/{id}:
+    get:
+      tags: [Payment Requests]
+      summary: Get creator-owned payment request by ID
+      operationId: getPaymentRequestById
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestIdPath'
+      responses:
+        '200':
+          description: Payment request details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRequest'
+        '404':
+          $ref: '#/components/responses/ErrorResponse'
+    delete:
+      tags: [Payment Requests]
+      summary: Soft-delete creator-owned payment request
+      operationId: deletePaymentRequestById
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestIdPath'
+      responses:
+        '204':
+          description: Deleted
+
+  /transactions/payment-requests/incoming:
+    get:
+      tags: [Payment Requests]
+      summary: List incoming payment requests
+      operationId: listIncomingPaymentRequests
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, processing, fulfilled, declined]
+      responses:
+        '200':
+          description: Incoming payment requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PaymentRequest'
+
+  /transactions/payment-requests/incoming/{id}:
+    get:
+      tags: [Payment Requests]
+      summary: Get incoming payment request by ID
+      operationId: getIncomingPaymentRequestById
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestIdPath'
+      responses:
+        '200':
+          description: Incoming request details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRequest'
+        '404':
+          $ref: '#/components/responses/ErrorResponse'
+
+  /transactions/payment-requests/incoming/{id}/pay:
+    post:
+      tags: [Payment Requests]
+      summary: Pay incoming payment request
+      operationId: payIncomingPaymentRequest
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestIdPath'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayIncomingPaymentRequestPayload'
+      responses:
+        '200':
+          description: Request settled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayIncomingPaymentRequestResponse'
+
+  /transactions/payment-requests/incoming/{id}/decline:
+    post:
+      tags: [Payment Requests]
+      summary: Decline incoming payment request
+      operationId: declineIncomingPaymentRequest
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RequestIdPath'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeclineIncomingPaymentRequestPayload'
+      responses:
+        '200':
+          description: Request declined
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentRequest'
+
+  /transactions/notifications:
+    get:
+      tags: [Notifications]
+      summary: List in-app notifications
+      operationId: listInAppNotifications
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [request, newsletter, system]
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [unread, read]
+      responses:
+        '200':
+          description: Notification list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InAppNotification'
+
+  /transactions/notifications/unread-counts:
+    get:
+      tags: [Notifications]
+      summary: Get unread notification counts
+      operationId: getNotificationUnreadCounts
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Unread counts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationUnreadCounts'
+
+  /transactions/notifications/read-all:
+    post:
+      tags: [Notifications]
+      summary: Mark all notifications read
+      operationId: markAllNotificationsRead
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarkAllReadPayload'
+      responses:
+        '200':
+          description: Number of notifications updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatedCountResponse'
+
+  /transactions/notifications/{id}/read:
+    post:
+      tags: [Notifications]
+      summary: Mark single notification read
+      operationId: markNotificationRead
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Notification updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdatedBooleanResponse'
+
+  /transactions/transfer-lists:
+    get:
+      tags: [Transfer Lists]
+      summary: List transfer lists
+      operationId: listTransferLists
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Transfer list summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TransferListSummary'
+    post:
+      tags: [Transfer Lists]
+      summary: Create transfer list
+      operationId: createTransferList
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTransferListPayload'
+      responses:
+        '201':
+          description: Created transfer list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferList'
+
+  /transactions/transfer-lists/{id}:
+    get:
+      tags: [Transfer Lists]
+      summary: Get transfer list by ID
+      operationId: getTransferListById
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Transfer list details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferList'
+    put:
+      tags: [Transfer Lists]
+      summary: Update transfer list
+      operationId: updateTransferList
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateTransferListPayload'
+      responses:
+        '200':
+          description: Updated transfer list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferList'
+    delete:
+      tags: [Transfer Lists]
+      summary: Delete transfer list
+      operationId: deleteTransferList
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Deleted
+
+  /transactions/transfer-lists/{id}/members/toggle:
+    post:
+      tags: [Transfer Lists]
+      summary: Toggle member presence in transfer list
+      operationId: toggleTransferListMember
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToggleTransferListMemberPayload'
+      responses:
+        '200':
+          description: Toggle result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToggleTransferListMemberResponse'
+
+  /transactions/money-drops:
+    post:
+      tags: [Money Drops]
+      summary: Create money drop
+      operationId: createMoneyDrop
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMoneyDropPayload'
+      responses:
+        '201':
+          description: Money drop created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MoneyDropResponse'
+
+  /transactions/money-drops/dashboard:
+    get:
+      tags: [Money Drops]
+      summary: Get money drop owner dashboard
+      operationId: getMoneyDropDashboard
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Dashboard
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MoneyDropDashboardResponse'
+
+  /transactions/money-drops/claimed:
+    get:
+      tags: [Money Drops]
+      summary: Get claimed money drop history for current user
+      operationId: getClaimedMoneyDrops
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Claimed drops history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimedMoneyDropHistoryResponse'
+
+  /transactions/money-drops/{drop_id}/claim:
+    post:
+      tags: [Money Drops]
+      summary: Claim money drop
+      operationId: claimMoneyDrop
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: drop_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema:
+            type: string
+          description: Idempotency key used to protect claim retries.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClaimMoneyDropPayload'
+      responses:
+        '200':
+          description: Drop claimed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClaimMoneyDropResponse'
+
+  /transactions/money-drops/{drop_id}/end:
+    post:
+      tags: [Money Drops]
+      summary: End active money drop
+      operationId: endMoneyDrop
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: drop_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Money drop ended
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EndMoneyDropResponse'
+
+  /transactions/money-drops/{drop_id}/details:
+    get:
+      tags: [Money Drops]
+      summary: Get public claim details for money drop
+      operationId: getMoneyDropDetails
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: drop_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Money drop details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MoneyDropDetails'
+
+  /transactions/money-drops/{drop_id}/owner-details:
+    get:
+      tags: [Money Drops]
+      summary: Get owner details for money drop
+      operationId: getMoneyDropOwnerDetails
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: drop_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: claimers_limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 20
+            minimum: 1
+      responses:
+        '200':
+          description: Owner details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MoneyDropOwnerDetails'
+
+  /transactions/money-drops/{drop_id}/reveal-password:
+    post:
+      tags: [Money Drops]
+      summary: Reveal lock password for creator-owned drop
+      operationId: revealMoneyDropPassword
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: drop_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevealMoneyDropPasswordPayload'
+      responses:
+        '200':
+          description: Plain lock password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevealMoneyDropPasswordResponse'
+
+  /transactions/money-drops/{drop_id}/claimers:
+    get:
+      tags: [Money Drops]
+      summary: List money drop claimers
+      operationId: getMoneyDropClaimers
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: drop_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/OffsetParam'
+      responses:
+        '200':
+          description: Claimers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MoneyDropClaimersResponse'
+
+  /transactions/platform-fee:
+    post:
+      tags: [Internal, Transactions, Platform Fees]
+      summary: Debit platform fee from user account
+      operationId: debitPlatformFeeInternal
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - InternalApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PlatformFeeDebitRequest'
+      responses:
+        '201':
+          description: Platform fee debit transaction created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionHistoryItem'
+
+  /transactions/internal/money-drops/refund:
+    post:
+      tags: [Internal, Money Drops]
+      summary: Trigger money-drop refund
+      operationId: refundMoneyDropInternal
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - InternalApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoneyDropRefundRequest'
+      responses:
+        '200':
+          description: Refund processed
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /transactions/internal/money-drops/reconcile-claims:
+    post:
+      tags: [Internal, Money Drops]
+      summary: Reconcile stale pending money-drop claims
+      operationId: reconcileMoneyDropClaimsInternal
+      servers:
+        - url: https://transaction-service-production-a8d9.up.railway.app
+      security:
+        - InternalApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/LimitParam'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MoneyDropReconcileRequest'
+      responses:
+        '200':
+          description: Reconciliation summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MoneyDropReconcileResponse'
+
+  /platform-fees/status:
+    get:
+      tags: [Platform Fees]
+      summary: Get current user's platform fee status
+      operationId: getPlatformFeeStatus
+      servers:
+        - url: https://platform-fee-service-production.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Platform fee status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformFeeStatus'
+
+  /platform-fees/invoices:
+    get:
+      tags: [Platform Fees]
+      summary: List current user's platform fee invoices
+      operationId: listPlatformFeeInvoices
+      servers:
+        - url: https://platform-fee-service-production.up.railway.app
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Invoices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PlatformFeeInvoice'
+
+  /internal/platform-fees/invoices/generate:
+    post:
+      tags: [Internal, Platform Fees]
+      summary: Generate monthly invoices
+      operationId: generatePlatformFeeInvoicesInternal
+      servers:
+        - url: https://platform-fee-service-production.up.railway.app
+      security:
+        - InternalApiKey: []
+      responses:
+        '200':
+          description: Generation run result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalRunResult'
+
+  /internal/platform-fees/attempts/run:
+    post:
+      tags: [Internal, Platform Fees]
+      summary: Run platform fee charge attempts
+      operationId: runPlatformFeeChargeAttemptsInternal
+      servers:
+        - url: https://platform-fee-service-production.up.railway.app
+      security:
+        - InternalApiKey: []
+      responses:
+        '200':
+          description: Charge run result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalRunResult'
+
+  /internal/platform-fees/delinquency/run:
+    post:
+      tags: [Internal, Platform Fees]
+      summary: Mark delinquent invoices
+      operationId: markPlatformFeeDelinquentInternal
+      servers:
+        - url: https://platform-fee-service-production.up.railway.app
+      security:
+        - InternalApiKey: []
+      responses:
+        '200':
+          description: Delinquency run result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalRunResult'
+
+  /internal/platform-fees/invoices/{id}/charge:
+    post:
+      tags: [Internal, Platform Fees]
+      summary: Charge a specific invoice
+      operationId: chargePlatformFeeInvoiceInternal
+      servers:
+        - url: https://platform-fee-service-production.up.railway.app
+      security:
+        - InternalApiKey: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Charge result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InternalRunResult'
+
+  /internal/platform-fees/users/{userID}/status:
+    get:
+      tags: [Internal, Platform Fees]
+      summary: Get platform fee status for a user (internal)
+      operationId: getPlatformFeeStatusByUserInternal
+      servers:
+        - url: https://platform-fee-service-production.up.railway.app
+      security:
+        - InternalApiKey: []
+      parameters:
+        - name: userID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: User platform fee status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformFeeStatus'
+
+  /webhooks/anchor:
+    post:
+      tags: [Webhooks]
+      summary: Receive Anchor webhook event
+      operationId: receiveAnchorWebhook
+      servers:
+        - url: https://notification-service-production-88c4.up.railway.app
+      security:
+        - AnchorWebhookSignature: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnchorWebhookEvent'
+      responses:
+        '200':
+          description: Webhook accepted
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/ErrorResponse'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    InternalApiKey:
+      type: apiKey
+      in: header
+      name: X-Internal-API-Key
+    AnchorWebhookSignature:
+      type: apiKey
+      in: header
+      name: x-anchor-signature
+
+  parameters:
+    LimitParam:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+      description: Page size limit.
+    OffsetParam:
+      name: offset
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+      description: Pagination offset.
+    RequestIdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    ErrorResponse:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+        text/plain:
+          schema:
+            type: string
+
+  schemas:
+    HealthJSON:
+      type: object
+      properties:
+        status:
+          type: string
+      additionalProperties: true
+
+    ErrorResponse:
+      oneOf:
+        - type: object
+          properties:
+            error:
+              type: string
+          required: [error]
+        - type: string
+
+    StatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+      required: [status]
+      additionalProperties: true
+
+    MessageResponse:
+      type: object
+      properties:
+        message:
+          type: string
+      required: [message]
+
+    UpdatedBooleanResponse:
+      type: object
+      properties:
+        updated:
+          type: boolean
+      required: [updated]
+
+    UpdatedCountResponse:
+      type: object
+      properties:
+        updated:
+          type: integer
+      required: [updated]
+
+    OnboardingPayload:
+      type: object
+      properties:
+        user_type:
+          type: string
+          enum: [personal, merchant]
+        phone_number:
+          type: string
+          description: Nigerian phone number (e.g. 07012345678)
+        email:
+          type: string
+          format: email
+        kyc_data:
+          type: object
+          additionalProperties: true
+          description: Tier-specific KYC fields.
+      required: [user_type, phone_number, kyc_data]
+
+    OnboardingResponse:
+      type: object
+      properties:
+        user_id:
+          type: string
+        status:
+          type: string
+        anchor_customer_id:
+          type: string
+      required: [user_id, status]
+
+    AccountTypeOption:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [personal, merchant]
+        title:
+          type: string
+        description:
+          type: string
+      required: [type, title, description]
+
+    AccountTypeOptionsResponse:
+      type: object
+      properties:
+        options:
+          type: array
+          items:
+            $ref: '#/components/schemas/AccountTypeOption'
+      required: [options]
+
+    OnboardingProgressPayload:
+      type: object
+      properties:
+        user_type:
+          type: string
+          enum: [personal, merchant]
+        current_step:
+          type: integer
+          minimum: 1
+          maximum: 3
+        payload:
+          type: object
+          additionalProperties: true
+      required: [user_type, current_step]
+
+    OnboardingState:
+      type: object
+      properties:
+        status:
+          type: string
+        reason:
+          type: string
+        next_step:
+          type: string
+          enum: [app_tabs, onboarding_form, create_account, create_username, create_pin]
+        resume_step:
+          type: integer
+          enum: [1, 2, 3]
+        user_type:
+          type: string
+          enum: [personal, merchant]
+        draft:
+          type: object
+          additionalProperties: true
+      required: [status, next_step]
+
+    OnboardingStatusResponse:
+      allOf:
+        - $ref: '#/components/schemas/OnboardingState'
+
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        clerk_user_id:
+          type: string
+        anchor_customer_id:
+          type: string
+          nullable: true
+        username:
+          type: string
+          nullable: true
+        email:
+          type: string
+          format: email
+          nullable: true
+        phone_number:
+          type: string
+          nullable: true
+        full_name:
+          type: string
+          nullable: true
+        profile_picture_url:
+          type: string
+          nullable: true
+        user_type:
+          type: string
+          enum: [personal, merchant]
+        allow_sending:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, clerk_user_id, user_type, allow_sending, created_at, updated_at]
+
+    AuthSessionResponse:
+      type: object
+      properties:
+        authenticated:
+          type: boolean
+        clerk_user_id:
+          type: string
+        user:
+          $ref: '#/components/schemas/UserProfile'
+        onboarding:
+          $ref: '#/components/schemas/OnboardingState'
+      required: [authenticated, clerk_user_id, onboarding]
+
+    UserDiscoveryResult:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        full_name:
+          type: string
+          nullable: true
+      required: [id, username]
+
+    UserDiscoveryResponse:
+      type: object
+      properties:
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserDiscoveryResult'
+      required: [users]
+
+    SecurityStatusResponse:
+      type: object
+      properties:
+        transaction_pin_set:
+          type: boolean
+      required: [transaction_pin_set]
+
+    KycStageStatus:
+      type: object
+      properties:
+        status:
+          type: string
+        reason:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+      required: [status]
+
+    KycStatusResponse:
+      type: object
+      properties:
+        current_tier:
+          type: integer
+          enum: [1, 2, 3]
+        stages:
+          type: object
+          properties:
+            tier1:
+              $ref: '#/components/schemas/KycStageStatus'
+            tier2:
+              $ref: '#/components/schemas/KycStageStatus'
+            tier3:
+              $ref: '#/components/schemas/KycStageStatus'
+          additionalProperties: true
+      required: [current_tier, stages]
+
+    SetUsernamePayload:
+      type: object
+      properties:
+        username:
+          type: string
+      required: [username]
+
+    SetUsernameResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        username:
+          type: string
+      required: [status, username]
+
+    SetTransactionPinPayload:
+      type: object
+      properties:
+        pin:
+          type: string
+          pattern: '^[0-9]{4}$'
+      required: [pin]
+
+    CompletePinChangePayload:
+      type: object
+      properties:
+        current_pin:
+          type: string
+          pattern: '^[0-9]{4}$'
+        new_pin:
+          type: string
+          pattern: '^[0-9]{4}$'
+      required: [current_pin, new_pin]
+
+    Tier2VerificationPayload:
+      type: object
+      properties:
+        dob:
+          type: string
+          description: YYYY-MM-DD preferred
+        gender:
+          type: string
+          enum: [male, female]
+        bvn:
+          type: string
+          pattern: '^[0-9]{11}$'
+      required: [dob, gender, bvn]
+
+    Tier3UpgradePayload:
+      type: object
+      properties:
+        id_type:
+          type: string
+          enum: [DRIVERS_LICENSE, VOTERS_CARD, PASSPORT, NATIONAL_ID, NIN_SLIP]
+        id_number:
+          type: string
+          minLength: 4
+          maxLength: 64
+        expiry_date:
+          type: string
+          format: date
+      required: [id_type, id_number, expiry_date]
+
+    PrimaryAccountDetails:
+      type: object
+      properties:
+        accountNumber:
+          type: string
+        bankName:
+          type: string
+      additionalProperties: false
+
+    Beneficiary:
+      type: object
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        anchor_counterparty_id:
+          type: string
+        account_name:
+          type: string
+        account_number_masked:
+          type: string
+        bank_name:
+          type: string
+        is_default:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - user_id
+        - anchor_counterparty_id
+        - account_name
+        - account_number_masked
+        - bank_name
+        - is_default
+        - created_at
+        - updated_at
+
+    AddBeneficiaryPayload:
+      type: object
+      properties:
+        account_number:
+          type: string
+        bank_code:
+          type: string
+        transaction_pin:
+          type: string
+      required: [account_number, bank_code, transaction_pin]
+
+    VerifyBeneficiaryAccountPayload:
+      type: object
+      properties:
+        account_number:
+          type: string
+        bank_code:
+          type: string
+      required: [account_number, bank_code]
+
+    VerifyBeneficiaryAccountResponse:
+      type: object
+      properties:
+        account_name:
+          type: string
+        account_number:
+          type: string
+        bank_code:
+          type: string
+        bank_name:
+          type: string
+      required: [account_name, account_number, bank_code, bank_name]
+
+    BankAttributes:
+      type: object
+      properties:
+        name:
+          type: string
+        nipCode:
+          type: string
+      required: [name, nipCode]
+
+    BankData:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        attributes:
+          $ref: '#/components/schemas/BankAttributes'
+      required: [id, type, attributes]
+
+    BanksResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/BankData'
+      required: [data]
+
+    CreateMoneyDropAccountRequest:
+      type: object
+      properties:
+        user_id:
+          type: string
+      required: [user_id]
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        anchor_account_id:
+          type: string
+        virtual_nuban:
+          type: string
+        bank_name:
+          type: string
+        account_type:
+          type: string
+          enum: [primary, money_drop]
+        balance:
+          type: integer
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, user_id, anchor_account_id, account_type, balance, status]
+
+    P2PTransferPayload:
+      type: object
+      properties:
+        recipient_username:
+          type: string
+        amount:
+          type: integer
+          minimum: 1
+        description:
+          type: string
+        transaction_pin:
+          type: string
+      required: [recipient_username, amount, description, transaction_pin]
+
+    BulkP2PTransferItemPayload:
+      type: object
+      properties:
+        recipient_username:
+          type: string
+        amount:
+          type: integer
+          minimum: 1
+        description:
+          type: string
+      required: [recipient_username, amount, description]
+
+    BulkP2PTransferPayload:
+      type: object
+      properties:
+        transfers:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkP2PTransferItemPayload'
+        transaction_pin:
+          type: string
+      required: [transfers, transaction_pin]
+
+    BulkP2PTransferFailure:
+      type: object
+      properties:
+        recipient_username:
+          type: string
+        amount:
+          type: integer
+        description:
+          type: string
+        error:
+          type: string
+      required: [recipient_username, amount, description, error]
+
+    TransactionResponse:
+      type: object
+      properties:
+        transaction_id:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, completed, failed, cancelled]
+        message:
+          type: string
+        amount:
+          type: integer
+        fee:
+          type: integer
+        anchor_transfer_id:
+          type: string
+          nullable: true
+        transfer_type:
+          type: string
+        failure_reason:
+          type: string
+          nullable: true
+        anchor_session_id:
+          type: string
+          nullable: true
+        anchor_reason:
+          type: string
+          nullable: true
+      required: [transaction_id, status, message]
+
+    BulkP2PTransferResponse:
+      type: object
+      properties:
+        batch_id:
+          type: string
+        status:
+          type: string
+          enum: [completed, partial_failed, failed]
+        message:
+          type: string
+        total_amount:
+          type: integer
+        total_fee:
+          type: integer
+        success_count:
+          type: integer
+        failure_count:
+          type: integer
+        successful_transfers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionResponse'
+        failed_transfers:
+          type: array
+          items:
+            $ref: '#/components/schemas/BulkP2PTransferFailure'
+        successful_transaction_ids:
+          type: array
+          items:
+            type: string
+      required:
+        - batch_id
+        - status
+        - message
+        - total_amount
+        - total_fee
+        - success_count
+        - failure_count
+        - successful_transfers
+        - failed_transfers
+        - successful_transaction_ids
+
+    SelfTransferPayload:
+      type: object
+      properties:
+        beneficiary_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          minimum: 1
+        description:
+          type: string
+        transaction_pin:
+          type: string
+      required: [beneficiary_id, amount, description, transaction_pin]
+
+    SetDefaultBeneficiaryPayload:
+      type: object
+      properties:
+        beneficiary_id:
+          type: string
+          format: uuid
+      required: [beneficiary_id]
+
+    ReceivingPreference:
+      type: object
+      properties:
+        user_id:
+          type: string
+        use_external_account:
+          type: boolean
+        default_beneficiary_id:
+          type: string
+          format: uuid
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [user_id, use_external_account, created_at, updated_at]
+
+    UpdateReceivingPreferencePayload:
+      type: object
+      properties:
+        use_external_account:
+          type: boolean
+        default_beneficiary_id:
+          type: string
+          format: uuid
+      required: [use_external_account]
+
+    AccountBalance:
+      type: object
+      properties:
+        available_balance:
+          type: integer
+        ledger_balance:
+          type: integer
+        hold:
+          type: integer
+        pending:
+          type: integer
+      required: [available_balance, ledger_balance, hold, pending]
+
+    FeeResponse:
+      type: object
+      properties:
+        p2p_fee_kobo:
+          type: integer
+        self_fee_kobo:
+          type: integer
+        money_drop_fee_kobo:
+          type: integer
+        money_drop_fee_percent:
+          type: number
+      required: [p2p_fee_kobo, self_fee_kobo, money_drop_fee_kobo, money_drop_fee_percent]
+
+    TransactionHistoryItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        anchor_transfer_id:
+          type: string
+          nullable: true
+        transfer_type:
+          type: string
+        failure_reason:
+          type: string
+          nullable: true
+        anchor_session_id:
+          type: string
+          nullable: true
+        anchor_reason:
+          type: string
+          nullable: true
+        sender_id:
+          type: string
+          format: uuid
+        recipient_id:
+          type: string
+          format: uuid
+          nullable: true
+        source_account_id:
+          type: string
+          format: uuid
+        destination_account_id:
+          type: string
+          format: uuid
+          nullable: true
+        destination_beneficiary_id:
+          type: string
+          format: uuid
+          nullable: true
+        type:
+          type: string
+        category:
+          type: string
+        status:
+          type: string
+        amount:
+          type: integer
+        fee:
+          type: integer
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - sender_id
+        - source_account_id
+        - type
+        - category
+        - status
+        - amount
+        - fee
+        - description
+        - created_at
+        - updated_at
+
+    UserProfileSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        full_name:
+          type: string
+          nullable: true
+      required: [id, username]
+
+    BilateralTransactionHistoryResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/UserProfileSummary'
+        shareable_link:
+          type: string
+        transactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionHistoryItem'
+      required: [user, shareable_link, transactions]
+
+    PaymentRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        creator_id:
+          type: string
+          format: uuid
+        creator_username:
+          type: string
+          nullable: true
+        creator_full_name:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [pending, processing, fulfilled, declined]
+        display_status:
+          type: string
+          enum: [pending, paid, declined]
+        request_type:
+          type: string
+          enum: [general, individual]
+        title:
+          type: string
+        recipient_user_id:
+          type: string
+          format: uuid
+          nullable: true
+        recipient_username:
+          type: string
+          nullable: true
+        recipient_full_name:
+          type: string
+          nullable: true
+        amount:
+          type: integer
+        description:
+          type: string
+          nullable: true
+        image_url:
+          type: string
+          nullable: true
+        fulfilled_by_user_id:
+          type: string
+          format: uuid
+          nullable: true
+        settled_transaction_id:
+          type: string
+          format: uuid
+          nullable: true
+        processing_started_at:
+          type: string
+          format: date-time
+          nullable: true
+        responded_at:
+          type: string
+          format: date-time
+          nullable: true
+        declined_reason:
+          type: string
+          nullable: true
+        shareable_link:
+          type: string
+        qr_code_content:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - creator_id
+        - status
+        - request_type
+        - title
+        - amount
+        - created_at
+        - updated_at
+
+    CreatePaymentRequestPayload:
+      type: object
+      properties:
+        request_type:
+          type: string
+          enum: [general, individual]
+        title:
+          type: string
+        recipient_username:
+          type: string
+        amount:
+          type: integer
+          minimum: 1
+        description:
+          type: string
+        image_url:
+          type: string
+      required: [request_type, title, amount]
+
+    PayIncomingPaymentRequestPayload:
+      type: object
+      properties:
+        transaction_pin:
+          type: string
+      required: [transaction_pin]
+
+    DeclineIncomingPaymentRequestPayload:
+      type: object
+      properties:
+        reason:
+          type: string
+
+    PayIncomingPaymentRequestResponse:
+      type: object
+      properties:
+        request:
+          $ref: '#/components/schemas/PaymentRequest'
+        transaction:
+          $ref: '#/components/schemas/TransactionResponse'
+      required: [request, transaction]
+
+    InAppNotification:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        category:
+          type: string
+          enum: [request, newsletter, system]
+        type:
+          type: string
+        title:
+          type: string
+        body:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [unread, read]
+        related_entity_type:
+          type: string
+          nullable: true
+        related_entity_id:
+          type: string
+          format: uuid
+          nullable: true
+        data:
+          type: object
+          additionalProperties: true
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, user_id, category, type, title, status, created_at, updated_at]
+
+    NotificationUnreadCounts:
+      type: object
+      properties:
+        total:
+          type: integer
+        request:
+          type: integer
+        newsletter:
+          type: integer
+        system:
+          type: integer
+      required: [total, request, newsletter, system]
+
+    MarkAllReadPayload:
+      type: object
+      properties:
+        category:
+          type: string
+          enum: [request, newsletter, system]
+
+    TransferListMember:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        full_name:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+      required: [user_id, username, created_at]
+
+    TransferListSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        owner_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        member_count:
+          type: integer
+        member_usernames:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, owner_id, name, member_count, member_usernames, created_at, updated_at]
+
+    TransferList:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        owner_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        member_count:
+          type: integer
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransferListMember'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, owner_id, name, member_count, members, created_at, updated_at]
+
+    CreateTransferListPayload:
+      type: object
+      properties:
+        name:
+          type: string
+        member_usernames:
+          type: array
+          items:
+            type: string
+      required: [name, member_usernames]
+
+    UpdateTransferListPayload:
+      allOf:
+        - $ref: '#/components/schemas/CreateTransferListPayload'
+
+    ToggleTransferListMemberPayload:
+      type: object
+      properties:
+        username:
+          type: string
+      required: [username]
+
+    ToggleTransferListMemberResponse:
+      type: object
+      properties:
+        list:
+          $ref: '#/components/schemas/TransferList'
+        member:
+          $ref: '#/components/schemas/TransferListMember'
+        in_list:
+          type: boolean
+        added:
+          type: boolean
+        removed:
+          type: boolean
+        username:
+          type: string
+      required: [list, in_list, added, removed, username]
+
+    CreateMoneyDropPayload:
+      type: object
+      properties:
+        title:
+          type: string
+        total_amount:
+          type: integer
+          minimum: 1
+        number_of_people:
+          type: integer
+          minimum: 1
+        expiry_in_minutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+        lock_drop:
+          type: boolean
+        lock_password:
+          type: string
+        transaction_pin:
+          type: string
+      required:
+        - title
+        - total_amount
+        - number_of_people
+        - expiry_in_minutes
+        - lock_drop
+        - transaction_pin
+
+    MoneyDropResponse:
+      type: object
+      properties:
+        money_drop_id:
+          type: string
+        title:
+          type: string
+        qr_code_content:
+          type: string
+        shareable_link:
+          type: string
+        total_amount:
+          type: integer
+        amount_per_claim:
+          type: integer
+        number_of_people:
+          type: integer
+        fee:
+          type: integer
+        fee_percentage:
+          type: number
+        lock_enabled:
+          type: boolean
+        expiry_timestamp:
+          type: string
+          format: date-time
+      required:
+        - money_drop_id
+        - title
+        - qr_code_content
+        - shareable_link
+        - total_amount
+        - amount_per_claim
+        - number_of_people
+        - fee
+        - fee_percentage
+        - lock_enabled
+        - expiry_timestamp
+
+    ClaimMoneyDropPayload:
+      type: object
+      properties:
+        lock_password:
+          type: string
+
+    ClaimMoneyDropResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        amount_claimed:
+          type: integer
+        creator_username:
+          type: string
+      required: [message, amount_claimed, creator_username]
+
+    RevealMoneyDropPasswordPayload:
+      type: object
+      properties:
+        transaction_pin:
+          type: string
+      required: [transaction_pin]
+
+    RevealMoneyDropPasswordResponse:
+      type: object
+      properties:
+        lock_password:
+          type: string
+      required: [lock_password]
+
+    MoneyDropDetails:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        creator_username:
+          type: string
+        total_amount:
+          type: integer
+        amount_per_claim:
+          type: integer
+        claims_made_count:
+          type: integer
+        total_claims_allowed:
+          type: integer
+        status:
+          type: string
+        is_claimable:
+          type: boolean
+        requires_password:
+          type: boolean
+        message:
+          type: string
+      required:
+        - id
+        - title
+        - creator_username
+        - total_amount
+        - amount_per_claim
+        - claims_made_count
+        - total_claims_allowed
+        - status
+        - is_claimable
+        - requires_password
+        - message
+
+    MoneyDropDashboardItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        status:
+          type: string
+        total_amount:
+          type: integer
+        amount_per_person:
+          type: integer
+        number_of_people:
+          type: integer
+        claims_made_count:
+          type: integer
+        time_left_label:
+          type: string
+        users_claimed_label:
+          type: string
+        expiry_timestamp:
+          type: string
+          format: date-time
+        created_date_label:
+          type: string
+        ended:
+          type: boolean
+        ended_display_status:
+          type: string
+      required:
+        - id
+        - title
+        - status
+        - total_amount
+        - amount_per_person
+        - number_of_people
+        - claims_made_count
+        - time_left_label
+        - users_claimed_label
+        - expiry_timestamp
+        - created_date_label
+        - ended
+        - ended_display_status
+
+    MoneyDropDashboardResponse:
+      type: object
+      properties:
+        current_balance:
+          type: integer
+        active_drops:
+          type: array
+          items:
+            $ref: '#/components/schemas/MoneyDropDashboardItem'
+        drop_history:
+          type: array
+          items:
+            $ref: '#/components/schemas/MoneyDropDashboardItem'
+      required: [current_balance, active_drops, drop_history]
+
+    MoneyDropClaimer:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        full_name:
+          type: string
+          nullable: true
+        profile_picture_url:
+          type: string
+          nullable: true
+        amount_claimed:
+          type: integer
+        claimed_at:
+          type: string
+          format: date-time
+      required: [user_id, username, amount_claimed, claimed_at]
+
+    MoneyDropOwnerDetails:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        status:
+          type: string
+        status_label:
+          type: string
+        total_amount:
+          type: integer
+        amount_per_person:
+          type: integer
+        number_of_people:
+          type: integer
+        claims_made_count:
+          type: integer
+        expiry_timestamp:
+          type: string
+          format: date-time
+        lock_enabled:
+          type: boolean
+        lock_password_masked:
+          type: string
+        lock_password:
+          type: string
+          nullable: true
+        shareable_link:
+          type: string
+        qr_code_content:
+          type: string
+        claimers:
+          type: array
+          items:
+            $ref: '#/components/schemas/MoneyDropClaimer'
+        can_end_drop:
+          type: boolean
+        ended_at:
+          type: string
+          format: date-time
+          nullable: true
+        ended_reason:
+          type: string
+          nullable: true
+      required:
+        - id
+        - title
+        - status
+        - status_label
+        - total_amount
+        - amount_per_person
+        - number_of_people
+        - claims_made_count
+        - expiry_timestamp
+        - lock_enabled
+        - shareable_link
+        - qr_code_content
+        - claimers
+        - can_end_drop
+
+    MoneyDropClaimersResponse:
+      type: object
+      properties:
+        drop_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        claimers:
+          type: array
+          items:
+            $ref: '#/components/schemas/MoneyDropClaimer'
+        total:
+          type: integer
+        has_more:
+          type: boolean
+      required: [drop_id, title, claimers, total, has_more]
+
+    EndMoneyDropResponse:
+      type: object
+      properties:
+        drop_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        refunded_amount:
+          type: integer
+        remaining_balance:
+          type: integer
+        message:
+          type: string
+      required: [drop_id, status, refunded_amount, remaining_balance, message]
+
+    ClaimedMoneyDropHistoryItem:
+      type: object
+      properties:
+        drop_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        creator_username:
+          type: string
+        amount_claimed:
+          type: integer
+        claimed_at:
+          type: string
+          format: date-time
+      required: [drop_id, title, creator_username, amount_claimed, claimed_at]
+
+    ClaimedMoneyDropHistoryResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClaimedMoneyDropHistoryItem'
+      required: [items]
+
+    PlatformFeeDebitRequest:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+        reason:
+          type: string
+        invoice_id:
+          type: string
+      required: [user_id, amount]
+
+    MoneyDropRefundRequest:
+      type: object
+      properties:
+        drop_id:
+          type: string
+          format: uuid
+        creator_id:
+          type: string
+          format: uuid
+        amount:
+          type: integer
+          minimum: 0
+      required: [drop_id, creator_id, amount]
+
+    MoneyDropReconcileRequest:
+      type: object
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+
+    MoneyDropReconcileResponse:
+      type: object
+      properties:
+        processed:
+          type: integer
+        retried:
+          type: integer
+        retry_failed:
+          type: integer
+        explicit_anchor_rejects:
+          type: integer
+        ambiguous_failures:
+          type: integer
+      required: [processed, retried, retry_failed, explicit_anchor_rejects, ambiguous_failures]
+
+    PlatformFeeStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, paid, failed, delinquent, waived, none]
+        period_start:
+          type: string
+          format: date-time
+          nullable: true
+        period_end:
+          type: string
+          format: date-time
+          nullable: true
+        due_at:
+          type: string
+          format: date-time
+          nullable: true
+        grace_until:
+          type: string
+          format: date-time
+          nullable: true
+        amount:
+          type: integer
+        currency:
+          type: string
+        retry_count:
+          type: integer
+        last_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+        is_delinquent:
+          type: boolean
+        is_within_grace:
+          type: boolean
+      required: [status, is_delinquent, is_within_grace]
+
+    PlatformFeeInvoice:
+      type: object
+      properties:
+        id:
+          type: string
+        user_id:
+          type: string
+        user_type:
+          type: string
+          enum: [personal, merchant]
+        period_start:
+          type: string
+          format: date-time
+        period_end:
+          type: string
+          format: date-time
+        due_at:
+          type: string
+          format: date-time
+        grace_until:
+          type: string
+          format: date-time
+        amount:
+          type: integer
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [pending, paid, failed, delinquent, waived]
+        paid_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+        retry_count:
+          type: integer
+        failure_reason:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - user_id
+        - user_type
+        - period_start
+        - period_end
+        - due_at
+        - grace_until
+        - amount
+        - currency
+        - status
+        - retry_count
+        - created_at
+        - updated_at
+
+    InternalRunResult:
+      type: object
+      description: Internal run result payload returned by platform-fee service operations.
+      additionalProperties: true
+
+    AnchorWebhookEvent:
+      type: object
+      properties:
+        event:
+          type: string
+          description: Anchor event type.
+        data:
+          type: object
+          properties:
+            id:
+              type: string
+            type:
+              type: string
+            attributes:
+              type: object
+              additionalProperties: true
+            relationships:
+              type: object
+              additionalProperties: true
+          required: [id, type]
+        included:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+      required: [data]
