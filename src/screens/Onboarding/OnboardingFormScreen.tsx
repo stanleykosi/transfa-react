@@ -488,20 +488,63 @@ const OnboardingFormScreen = () => {
           return true;
         }
 
-        // If backend is in an in-flight state but has not advanced next_step yet,
-        // move to processing screen so polling can continue automatically.
-        if (latestStatus.resume_step) {
-          setCurrentStep(latestStatus.resume_step);
+        const normalizedStatus = latestStatus.status?.toLowerCase?.() ?? '';
+
+        if (normalizedStatus === 'tier2_manual_review') {
+          navigation.dispatch(
+            StackActions.replace('OnboardingResult', {
+              outcome: 'manual_review',
+              status: normalizedStatus,
+              reason: latestStatus.reason,
+            })
+          );
+          return true;
         }
-        navigation.dispatch(StackActions.replace('CreateAccount'));
+
+        if (
+          normalizedStatus === 'tier2_rejected' ||
+          normalizedStatus === 'tier2_error' ||
+          normalizedStatus === 'tier2_failed' ||
+          normalizedStatus === 'tier2_reenter_information' ||
+          normalizedStatus === 'tier2_awaiting_document'
+        ) {
+          navigation.dispatch(
+            StackActions.replace('OnboardingResult', {
+              outcome: 'failure',
+              status: normalizedStatus,
+              reason: latestStatus.reason || conflictReason || 'Tier 2 verification failed.',
+            })
+          );
+          return true;
+        }
+
+        if (normalizedStatus.startsWith('tier2_')) {
+          navigation.dispatch(StackActions.replace('CreateAccount'));
+          return true;
+        }
+
+        const resumeStep = latestStatus.resume_step || 3;
+        navigation.dispatch(
+          StackActions.replace('OnboardingForm', {
+            userType: latestStatus.user_type || selectedUserType,
+            startStep: resumeStep,
+            forceTier1Update: resumeStep === 1,
+          })
+        );
         return true;
       } catch (recoveryError) {
         console.warn('Failed to recover onboarding state after conflict', recoveryError);
-        navigation.dispatch(StackActions.replace('CreateAccount'));
+        navigation.dispatch(
+          StackActions.replace('OnboardingForm', {
+            userType: selectedUserType,
+            startStep: 3,
+            forceTier1Update: false,
+          })
+        );
         return true;
       }
     },
-    [navigation, redirectFromStatus]
+    [navigation, redirectFromStatus, selectedUserType]
   );
 
   const submitAllSteps = async (overrides?: {

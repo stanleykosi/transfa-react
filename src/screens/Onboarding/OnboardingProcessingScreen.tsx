@@ -32,6 +32,17 @@ const OnboardingProcessingScreen = () => {
       navigation.dispatch(StackActions.replace('OnboardingResult', { outcome, status, reason }));
     };
 
+    const goToRoute = (
+      route: keyof AppStackParamList,
+      params?: AppStackParamList[keyof AppStackParamList]
+    ) => {
+      if (!isActive || hasNavigatedRef.current) {
+        return;
+      }
+      hasNavigatedRef.current = true;
+      navigation.dispatch(StackActions.replace(route as never, params as never));
+    };
+
     const tick = async () => {
       if (!isActive || hasNavigatedRef.current) {
         return;
@@ -41,6 +52,34 @@ const OnboardingProcessingScreen = () => {
         const statusResponse = await fetchOnboardingStatus();
         const normalizedStatus = statusResponse.status?.toLowerCase?.() ?? '';
         const reason = statusResponse.reason;
+        const resumeStep = statusResponse.resume_step || 3;
+
+        if (statusResponse.next_step === 'app_tabs') {
+          goToRoute('AppTabs');
+          return;
+        }
+
+        if (statusResponse.next_step === 'create_username') {
+          goToRoute('CreateUsername');
+          return;
+        }
+
+        if (statusResponse.next_step === 'create_pin') {
+          goToRoute('CreatePin');
+          return;
+        }
+
+        if (
+          statusResponse.next_step === 'onboarding_form' ||
+          normalizedStatus === 'tier1_created'
+        ) {
+          goToRoute('OnboardingForm', {
+            userType: statusResponse.user_type || 'personal',
+            startStep: resumeStep,
+            forceTier1Update: resumeStep === 1,
+          });
+          return;
+        }
 
         if (normalizedStatus === 'completed') {
           goToResult('success', normalizedStatus, reason);
