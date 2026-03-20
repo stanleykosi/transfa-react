@@ -20,7 +20,7 @@
 import React, { useEffect, useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { NavigatorScreenParams } from '@react-navigation/native';
-import { View, ActivityIndicator } from 'react-native';
+import { View } from 'react-native';
 import { useUser } from '@clerk/clerk-expo';
 import type { UserDiscoveryResult } from '@/types/api';
 
@@ -59,7 +59,6 @@ import CreateTransferListScreen from '@/screens/List/CreateTransferListScreen';
 import TransferListDetailScreen from '@/screens/List/TransferListDetailScreen';
 import PayTransferListScreen from '@/screens/List/PayTransferListScreen';
 import { fetchAuthSession } from '@/api/authApi';
-import { theme } from '@/constants/theme';
 
 // Define the parameter list for the AppStack routes for type safety.
 // It includes the AppTabs (as a nested navigator) and the OnboardingForm.
@@ -213,15 +212,16 @@ const AppStack = () => {
 
   // Show loading while checking status
   if (isCheckingStatus) {
-    return (
-      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-        <ActivityIndicator size="large" color={theme.colors.primary} />
-      </View>
-    );
+    return <View style={{ flex: 1, backgroundColor: '#FFD300' }} />;
   }
 
   return (
-    <Stack.Navigator initialRouteName={initialRoute}>
+    <Stack.Navigator
+      initialRouteName={initialRoute}
+      screenOptions={{
+        headerShown: false,
+      }}
+    >
       <Stack.Screen
         name="AppTabs"
         component={AppTabs}
@@ -236,7 +236,6 @@ const AppStack = () => {
         name="OnboardingForm"
         component={OnboardingFormScreen}
         options={{
-          title: 'Complete Your Profile',
           headerBackVisible: false, // Prevent going back from onboarding
           gestureEnabled: false, // Disable swipe gesture
         }}

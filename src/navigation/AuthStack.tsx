@@ -18,9 +18,11 @@ import SignInScreen from '@/screens/Auth/SignInScreen';
 import SignUpScreen from '@/screens/Auth/SignUpScreen';
 import VerifyCodeScreen from '@/screens/Auth/VerifyCodeScreen';
 import ForgotPasswordScreen from '@/screens/Auth/ForgotPasswordScreen';
+import OnboardingWelcomeScreen from '@/screens/Auth/OnboardingWelcomeScreen';
 
 // Define the parameter list for the AuthStack routes for type safety.
 export type AuthStackParamList = {
+  OnboardingWelcome: undefined;
   SignIn: undefined;
   SignUp: undefined;
   VerifyCode: {
@@ -36,11 +38,12 @@ const Stack = createNativeStackNavigator<AuthStackParamList>();
 const AuthStack = () => {
   return (
     <Stack.Navigator
-      initialRouteName="SignIn"
+      initialRouteName="OnboardingWelcome"
       screenOptions={{
         headerShown: false, // Hides the default header for a custom UI
       }}
     >
+      <Stack.Screen name="OnboardingWelcome" component={OnboardingWelcomeScreen} />
       <Stack.Screen name="SignIn" component={SignInScreen} />
       <Stack.Screen name="SignUp" component={SignUpScreen} />
       <Stack.Screen name="VerifyCode" component={VerifyCodeScreen} />

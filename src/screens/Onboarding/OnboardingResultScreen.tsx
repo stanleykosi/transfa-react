@@ -7,6 +7,7 @@ import { RouteProp, StackActions, useNavigation, useRoute } from '@react-navigat
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { AppStackParamList } from '@/navigation/AppStack';
+import AuthSuccess from '@/components/source-auth/auth-success';
 
 type ResultRoute = RouteProp<AppStackParamList, 'OnboardingResult'>;
 type Navigation = NativeStackNavigationProp<AppStackParamList, 'OnboardingResult'>;
@@ -64,19 +65,22 @@ const OnboardingResultScreen = () => {
   const failureReason = normalizeReason(reason);
   const recovery = resolveRecovery(status, failureReason);
 
-  const title =
-    outcome === 'success'
-      ? 'Success!'
-      : outcome === 'manual_review'
-        ? 'Review In Progress'
-        : 'Verification Failed';
+  if (outcome === 'success') {
+    return (
+      <AuthSuccess
+        title="Success!"
+        subtitle="Profile created successfully."
+        onComplete={() => navigation.dispatch(StackActions.replace('CreateUsername'))}
+      />
+    );
+  }
+
+  const title = outcome === 'manual_review' ? 'Review In Progress' : 'Verification Failed';
   const subtitle =
-    outcome === 'success'
-      ? 'Profile created successfully.'
-      : outcome === 'manual_review'
-        ? failureReason || 'Your verification is under manual review. We will update you shortly.'
-        : failureReason ||
-          'We could not complete your verification. Please fix your details and retry.';
+    outcome === 'manual_review'
+      ? failureReason || 'Your verification is under manual review. We will update you shortly.'
+      : failureReason ||
+        'We could not complete your verification. Please fix your details and retry.';
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
@@ -87,57 +91,45 @@ const OnboardingResultScreen = () => {
           <Text style={styles.title}>{title}</Text>
           <Text style={styles.subtitle}>{subtitle}</Text>
 
-          {outcome === 'success' ? (
-            <TouchableOpacity
-              style={styles.primaryButton}
-              activeOpacity={0.85}
-              onPress={() => navigation.dispatch(StackActions.replace('CreateUsername'))}
-            >
-              <Text style={styles.primaryButtonText}>Continue</Text>
-            </TouchableOpacity>
-          ) : (
-            <>
-              <TouchableOpacity
-                style={styles.primaryButton}
-                activeOpacity={0.85}
-                onPress={() =>
-                  navigation.dispatch(
-                    StackActions.replace('OnboardingForm', {
-                      userType: 'personal',
-                      startStep: recovery.startStep,
-                      forceTier1Update: recovery.forceTier1Update,
-                    })
-                  )
-                }
-              >
-                <Text style={styles.primaryButtonText}>{recovery.label}</Text>
-              </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.primaryButton}
+            activeOpacity={0.85}
+            onPress={() =>
+              navigation.dispatch(
+                StackActions.replace('OnboardingForm', {
+                  userType: 'personal',
+                  startStep: recovery.startStep,
+                  forceTier1Update: recovery.forceTier1Update,
+                })
+              )
+            }
+          >
+            <Text style={styles.primaryButtonText}>{recovery.label}</Text>
+          </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.secondaryButton}
-                activeOpacity={0.85}
-                onPress={() =>
-                  navigation.dispatch(
-                    StackActions.replace('OnboardingForm', {
-                      userType: 'personal',
-                      startStep: 1,
-                      forceTier1Update: true,
-                    })
-                  )
-                }
-              >
-                <Text style={styles.secondaryButtonText}>Back To Tier 1</Text>
-              </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            activeOpacity={0.85}
+            onPress={() =>
+              navigation.dispatch(
+                StackActions.replace('OnboardingForm', {
+                  userType: 'personal',
+                  startStep: 1,
+                  forceTier1Update: true,
+                })
+              )
+            }
+          >
+            <Text style={styles.secondaryButtonText}>Back To Tier 1</Text>
+          </TouchableOpacity>
 
-              <TouchableOpacity
-                style={styles.textButton}
-                activeOpacity={0.8}
-                onPress={() => navigation.dispatch(StackActions.replace('CreateAccount'))}
-              >
-                <Text style={styles.textButtonText}>Check Status Again</Text>
-              </TouchableOpacity>
-            </>
-          )}
+          <TouchableOpacity
+            style={styles.textButton}
+            activeOpacity={0.8}
+            onPress={() => navigation.dispatch(StackActions.replace('CreateAccount'))}
+          >
+            <Text style={styles.textButtonText}>Check Status Again</Text>
+          </TouchableOpacity>
         </View>
       </LinearGradient>
     </SafeAreaView>

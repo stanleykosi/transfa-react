@@ -1,728 +1,1010 @@
-import React, { useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Pressable,
-  PanResponder,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import AvatarDefaultIcon from '@/assets/icons/avatar-default.svg';
+import Eyeslash from '@/assets/icons/eyeSlash.svg';
+import List from '@/assets/icons/list.svg';
+import NotificationIcon from '@/assets/icons/notification.svg';
+import Recieve from '@/assets/icons/recieve.svg';
+import Scan from '@/assets/icons/scan.svg';
+import Search from '@/assets/icons/search-normal.svg';
+import Send from '@/assets/icons/send.svg';
+import VerifiedBadge from '@/assets/icons/verified.svg';
+import WalletPlusIcon from '@/assets/icons/wallet.svg';
+import Avatar from '@/assets/images/avatar.svg';
+import Avatar1 from '@/assets/images/avatar1.svg';
+import Avatar2 from '@/assets/images/avatar2.svg';
+import Avatar3 from '@/assets/images/avatar3.svg';
+
+import AnimatedPageWrapper from '@/components/AnimatedPageWrapper';
+import BottomNavbar from '@/components/bottom-navbar';
+import UserProfileModal from '@/components/UserProfileModal';
+import WalletModal from '@/components/WalletModal';
+import { AppNavigationProp } from '@/types/navigation';
+import { moderateScale, scale, verticalScale } from '@/utils/responsive';
+import BottomSheet, { BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import * as Haptics from 'expo-haptics';
+import { StatusBar } from 'expo-status-bar';
+import React, { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
+import Animated, {
+  FadeInUp,
+  interpolate,
+  runOnJS,
+  useDerivedValue,
+  useSharedValue,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SvgXml } from 'react-native-svg';
 
-import {
-  useAccountBalance,
-  usePrimaryAccountDetails,
-  useTransactionHistory,
-  useUserProfile,
-} from '@/api/transactionApi';
-import TopUpAccountModal from '@/components/TopUpAccountModal';
-import { useFrequentUsers } from '@/api/userDiscoveryApi';
-import { formatCurrency } from '@/utils/formatCurrency';
-import { normalizeUsername } from '@/utils/username';
-import type { TransactionHistoryItem, UserDiscoveryResult } from '@/types/api';
-import type { AppNavigationProp } from '@/types/navigation';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const BRAND_YELLOW = '#FFD300';
-const BG_BOTTOM = '#050607';
-const CARD_BG = 'rgba(255,255,255,0.08)';
-const CARD_BORDER = 'rgba(255,255,255,0.06)';
-
-const avatarPalette = ['#ABABFD', '#A8E6B5', '#F4CE9B', '#F3ABA7', '#BDE3FF', '#FFDCC0'];
-
-const stripUsernamePrefix = (username?: string | null): string =>
-  normalizeUsername(username ?? 'new_user');
-
-const HomeScreen = () => {
-  const navigation = useNavigation<AppNavigationProp>();
-
-  const [refreshing, setRefreshing] = useState(false);
-  const [isBalanceHidden, setIsBalanceHidden] = useState(false);
-  const [isExpandedHistory, setIsExpandedHistory] = useState(false);
-  const [isTopUpModalVisible, setIsTopUpModalVisible] = useState(false);
-
-  const historySheetPanResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gestureState) => Math.abs(gestureState.dy) > 8,
-        onPanResponderRelease: (_, gestureState) => {
-          if (gestureState.dy < -24) {
-            setIsExpandedHistory(true);
-            return;
-          }
-          if (gestureState.dy > 24) {
-            setIsExpandedHistory(false);
-          }
-        },
-      }),
-    []
-  );
-
-  const {
-    data: userProfile,
-    isLoading: isLoadingProfile,
-    refetch: refetchProfile,
-  } = useUserProfile();
-  const {
-    data: balanceData,
-    isLoading: isLoadingBalance,
-    refetch: refetchBalance,
-  } = useAccountBalance();
-  const {
-    data: transactionHistory,
-    isLoading: isLoadingTransactions,
-    refetch: refetchTransactions,
-  } = useTransactionHistory();
-  const {
-    data: primaryAccount,
-    isLoading: isLoadingPrimaryAccount,
-    refetch: refetchPrimaryAccount,
-  } = usePrimaryAccountDetails();
-  const { data: frequentUsersData, isLoading: isLoadingFrequent } = useFrequentUsers(8);
-
-  const balanceValue = useMemo(() => {
-    if (isBalanceHidden) {
-      return '******';
-    }
-    return formatCurrency(balanceData?.available_balance ?? 0);
-  }, [balanceData?.available_balance, isBalanceHidden]);
-
-  const frequentUsers = frequentUsersData?.users ?? [];
-  const transactions = transactionHistory ?? [];
-  const visibleTransactions = isExpandedHistory ? transactions : transactions.slice(0, 3);
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    try {
-      await Promise.all([
-        refetchBalance(),
-        refetchTransactions(),
-        refetchProfile(),
-        refetchPrimaryAccount(),
-      ]);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  if (isLoadingProfile) {
-    return (
-      <SafeAreaView style={styles.loadingSafeArea} edges={['top', 'left', 'right']}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={BRAND_YELLOW} />
-          <Text style={styles.loadingText}>Loading your dashboard...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  const username = stripUsernamePrefix(userProfile?.username);
-
-  return (
-    <View style={styles.root}>
-      <LinearGradient
-        colors={['#1A1B1E', '#0C0D0F', BG_BOTTOM]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={styles.backgroundGradient}
-      />
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={BRAND_YELLOW}
-            />
-          }
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.headerRow}>
-            <View style={styles.userIdentityRow}>
-              <View style={styles.avatarSquare}>
-                <Ionicons name="person" size={16} color="#0D0E10" />
-              </View>
-
-              <View>
-                <Text style={styles.welcomeText}>Welcome back</Text>
-                <Text style={styles.usernameText}>{username}</Text>
-              </View>
-            </View>
-
-            <View style={styles.headerActions}>
-              <TouchableOpacity
-                style={styles.headerIconButton}
-                activeOpacity={0.8}
-                onPress={() => {
-                  refetchPrimaryAccount();
-                  setIsTopUpModalVisible(true);
-                }}
-              >
-                <Ionicons name="wallet-outline" size={18} color="#F2F2F2" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.headerIconButton}
-                activeOpacity={0.8}
-                onPress={() => navigation.navigate('NotificationCenter')}
-              >
-                <Ionicons name="notifications-outline" size={18} color="#F2F2F2" />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <View style={styles.balanceWrap}>
-            <Text style={styles.balanceLabel}>AVAILABLE BALANCE</Text>
-            <View style={styles.balanceRow}>
-              {isLoadingBalance ? (
-                <ActivityIndicator size="small" color={BRAND_YELLOW} />
-              ) : (
-                <Text style={styles.balanceAmount}>{balanceValue}</Text>
-              )}
-
-              <TouchableOpacity
-                activeOpacity={0.8}
-                onPress={() => setIsBalanceHidden((prev) => !prev)}
-                style={styles.eyeButton}
-              >
-                <Ionicons
-                  name={isBalanceHidden ? 'eye-outline' : 'eye-off-outline'}
-                  size={18}
-                  color="#CECECE"
-                />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <View style={styles.primaryActionRow}>
-            <ActionCard
-              icon="arrow-up-outline"
-              title="Send"
-              onPress={() => navigation.navigate('PayUser')}
-            />
-            <ActionCard
-              icon="scan-outline"
-              title="Scan"
-              onPress={() => navigation.navigate('Scan')}
-            />
-            <ActionCard
-              icon="arrow-down-outline"
-              title="Receive"
-              onPress={() => navigation.navigate('PaymentRequestsList')}
-            />
-          </View>
-
-          <View style={styles.findUsersHeader}>
-            <Text style={styles.findUsersTitle}>Find Users</Text>
-
-            <TouchableOpacity
-              activeOpacity={0.8}
-              style={styles.searchPill}
-              onPress={() => navigation.navigate('UserSearch')}
-            >
-              <Ionicons name="search" size={15} color="#D7D7D7" />
-              <Text style={styles.searchPillText}>Search</Text>
-            </TouchableOpacity>
-          </View>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.userChipsRow}
-          >
-            <TouchableOpacity
-              activeOpacity={0.8}
-              style={styles.listChip}
-              onPress={() => navigation.navigate('TransferLists')}
-            >
-              <View style={styles.listChipIconWrap}>
-                <Ionicons name="list-outline" size={16} color="#F4F4F4" />
-              </View>
-              <Text style={styles.listChipLabel}>List</Text>
-            </TouchableOpacity>
-
-            {isLoadingFrequent
-              ? [0, 1, 2].map((index) => (
-                  <View key={index} style={styles.loadingUserChip}>
-                    <View style={styles.loadingAvatar} />
-                    <View style={styles.loadingTextBar} />
-                  </View>
-                ))
-              : frequentUsers.map((user, index) => (
-                  <FrequentUserChip
-                    key={user.id}
-                    user={user}
-                    color={avatarPalette[index % avatarPalette.length]}
-                    onPress={() => navigation.navigate('UserProfileView', { user })}
-                  />
-                ))}
-          </ScrollView>
-        </ScrollView>
-      </SafeAreaView>
-
-      {isExpandedHistory && (
-        <Pressable style={styles.overlayDimmer} onPress={() => setIsExpandedHistory(false)} />
-      )}
-
-      <View style={[styles.historySheet, isExpandedHistory && styles.historySheetExpanded]}>
-        <View style={styles.sheetHandleTouchArea} {...historySheetPanResponder.panHandlers}>
-          <View style={styles.sheetHandle} />
-        </View>
-
-        <View style={styles.historyHeaderRow}>
-          <Text style={styles.historyTitle}>Transaction History</Text>
-          <TouchableOpacity
-            activeOpacity={0.8}
-            style={styles.showAllButton}
-            onPress={() => setIsExpandedHistory((prev) => !prev)}
-          >
-            <Text style={styles.showAllButtonText}>
-              {isExpandedHistory ? 'Show less' : 'Show all'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {isLoadingTransactions ? (
-          <View style={styles.historyLoadingWrap}>
-            <ActivityIndicator size="small" color="#101214" />
-          </View>
-        ) : visibleTransactions.length === 0 ? (
-          <View style={styles.emptyHistoryWrap}>
-            <Text style={styles.emptyHistoryText}>No transactions yet.</Text>
-          </View>
-        ) : (
-          <ScrollView
-            contentContainerStyle={styles.historyList}
-            showsVerticalScrollIndicator={false}
-            scrollEnabled={isExpandedHistory}
-          >
-            {visibleTransactions.map((txn) => (
-              <TransactionHistoryCard
-                key={txn.id}
-                transaction={txn}
-                currentUserId={userProfile?.id ?? ''}
-              />
-            ))}
-          </ScrollView>
-        )}
-      </View>
-
-      <TopUpAccountModal
-        visible={isTopUpModalVisible}
-        onClose={() => setIsTopUpModalVisible(false)}
-        accountNumber={primaryAccount?.accountNumber}
-        bankName={primaryAccount?.bankName}
-        isLoading={isLoadingPrimaryAccount}
-      />
-    </View>
-  );
-};
-
-const ActionCard = ({
-  icon,
-  title,
-  onPress,
-}: {
-  icon: React.ComponentProps<typeof Ionicons>['name'];
-  title: string;
-  onPress: () => void;
-}) => (
-  <TouchableOpacity activeOpacity={0.85} style={styles.actionCard} onPress={onPress}>
-    <Ionicons name={icon} size={18} color="#F4F4F4" />
-    <Text style={styles.actionCardText}>{title}</Text>
-  </TouchableOpacity>
-);
-
-const FrequentUserChip = ({
-  user,
-  color,
-  onPress,
-}: {
-  user: UserDiscoveryResult;
-  color: string;
-  onPress: () => void;
-}) => {
-  const label = stripUsernamePrefix(user.username);
-
-  return (
-    <TouchableOpacity style={styles.userChip} activeOpacity={0.8} onPress={onPress}>
-      <View style={[styles.userAvatar, { backgroundColor: color }]}>
-        <Text style={styles.userAvatarInitial}>
-          {user.full_name?.slice(0, 1)?.toUpperCase() || user.username.slice(0, 1).toUpperCase()}
-        </Text>
-      </View>
-      <Text style={styles.userChipLabel} numberOfLines={1}>
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
-};
-
-const TransactionHistoryCard = ({
-  transaction,
-  currentUserId,
-}: {
-  transaction: TransactionHistoryItem;
-  currentUserId: string;
-}) => {
-  const isIncoming =
-    transaction.recipient_id === currentUserId && transaction.sender_id !== currentUserId;
-  const amountPrefix = isIncoming ? '+' : '-';
-  const iconName: React.ComponentProps<typeof Ionicons>['name'] = isIncoming
-    ? 'arrow-down-outline'
-    : 'arrow-up-outline';
-
-  const counterpart =
-    transaction.description?.trim().length > 0
-      ? transaction.description
-      : isIncoming
-        ? 'Incoming transfer'
-        : 'Transfer';
-
-  return (
-    <View style={styles.historyItemCard}>
-      <View style={styles.historyItemLeft}>
-        <View style={styles.historyIconWrap}>
-          <Ionicons name={iconName} size={14} color={BRAND_YELLOW} />
-        </View>
-        <View style={styles.historyItemTextWrap}>
-          <Text style={styles.historyItemTitle} numberOfLines={1}>
-            {counterpart}
-          </Text>
-          <Text style={styles.historyItemSubText} numberOfLines={1}>
-            {new Date(transaction.created_at).toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-            })}
-          </Text>
-        </View>
-      </View>
-      <Text style={styles.historyAmountText}>
-        {amountPrefix}
-        {formatCurrency(transaction.amount)}
-      </Text>
-    </View>
-  );
-};
+const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="375" height="812" fill="white"/>
+<rect width="375" height="812" fill="url(#paint0_linear_708_2445)"/>
+<rect width="375" height="812" fill="black" fill-opacity="0.2"/>
+<defs>
+<linearGradient id="paint0_linear_708_2445" x1="187.5" y1="0" x2="187.5" y2="812" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2B2B2B"/>
+<stop offset="0.778846" stop-color="#0F0F0F"/>
+</linearGradient>
+</defs>
+</svg>`;
 
 const styles = StyleSheet.create({
-  root: {
+  container: {
     flex: 1,
-    backgroundColor: BG_BOTTOM,
+    backgroundColor: '#000000',
   },
-  backgroundGradient: {
-    ...StyleSheet.absoluteFillObject,
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
   },
-  safeArea: {
+  scrollView: {
     flex: 1,
-    backgroundColor: BG_BOTTOM,
-  },
-  loadingSafeArea: {
-    flex: 1,
-    backgroundColor: BG_BOTTOM,
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingText: {
-    marginTop: 10,
-    color: '#F1F1F1',
-    fontSize: 13,
+    zIndex: 1,
   },
   scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 280,
-    backgroundColor: BG_BOTTOM,
+    paddingHorizontal: scale(24),
+    paddingTop: scale(20),
+    paddingBottom: scale(40),
   },
-  headerRow: {
+  header: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: verticalScale(48),
   },
-  userIdentityRow: {
+  headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    flex: 1,
   },
-  avatarSquare: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
-    backgroundColor: '#F4DDB5',
+  avatarContainer: {
+    marginRight: scale(12),
+  },
+  defaultAvatarContainerHeader: {
+    width: scale(49),
+    height: scale(49),
+    backgroundColor: '#000000',
+    borderRadius: scale(16),
+    borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  welcomeText: {
-    color: '#8A8B8D',
-    fontSize: 13,
+  defaultAvatarContainerSmall: {
+    width: scale(60),
+    height: scale(60),
+    backgroundColor: '#000000',
+    borderWidth: scale(1),
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: scale(18),
+    borderCurve: 'continuous',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  usernameText: {
-    marginTop: 1,
-    color: '#F4F4F4',
-    fontSize: 17,
-    fontWeight: '700',
+  welcomeContainer: {
+    justifyContent: 'center',
   },
-  headerActions: {
+  welcomeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
   },
-  headerIconButton: {
-    padding: 6,
+  welcomeText: {
+    fontSize: moderateScale(18),
+    color: '#6C6B6B',
+    marginRight: scale(6),
+    fontFamily: 'Montserrat_400Regular',
   },
-  balanceWrap: {
+  usernameRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 20,
+  },
+  username: {
+    fontSize: moderateScale(20),
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_600SemiBold',
+    marginRight: scale(4),
+  },
+  headerRight: {
+    flexDirection: 'row',
+    gap: scale(16),
+  },
+  iconButton: {
+    padding: scale(4),
+  },
+  balanceSection: {
+    alignItems: 'center',
+    marginBottom: SCREEN_HEIGHT * 0.048,
   },
   balanceLabel: {
-    color: '#B2B2B3',
-    fontSize: 13,
-    letterSpacing: 0.6,
+    fontSize: moderateScale(16),
+    color: '#ffffff',
+    marginBottom: SCREEN_HEIGHT * 0.015,
+    fontFamily: 'Montserrat_500Medium',
+    letterSpacing: 1.2,
   },
   balanceRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 5,
+    gap: SCREEN_WIDTH * 0.03,
   },
   balanceAmount: {
-    color: '#F8F8F8',
-    fontSize: 40,
-    fontWeight: '700',
+    fontSize: moderateScale(40),
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+    fontFamily: 'ArtificTrial-Semibold',
   },
   eyeButton: {
-    marginLeft: 8,
-    marginTop: 3,
-    padding: 6,
+    // paddingVertical: 4,
   },
-  primaryActionRow: {
+  actionButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 24,
+    marginBottom: SCREEN_HEIGHT * 0.035,
+    gap: SCREEN_WIDTH * 0.05,
   },
-  actionCard: {
-    width: '31.5%',
-    borderRadius: 16,
-    backgroundColor: CARD_BG,
+  actionButton: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: scale(20),
+    height: verticalScale(90),
+    width: scale(30),
+    paddingHorizontal: scale(12),
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
-    borderColor: CARD_BORDER,
-    alignItems: 'center',
-    paddingVertical: 14,
-    gap: 7,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderCurve: 'continuous',
   },
-  actionCardText: {
-    color: '#EDEDED',
-    fontSize: 15,
-    fontWeight: '500',
+  actionButtonIcon: {
+    marginBottom: verticalScale(14),
   },
-  findUsersHeader: {
-    marginTop: 24,
+  actionButtonText: {
+    fontSize: moderateScale(20),
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_400Regular',
+  },
+  findUsersSection: {
+    marginBottom: scale(8),
+  },
+  sectionHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: scale(16),
   },
-  findUsersTitle: {
-    color: '#EDEDED',
-    fontSize: 20,
-    fontWeight: '500',
+  sectionTitle: {
+    fontSize: moderateScale(18),
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_400Regular',
   },
-  searchPill: {
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: CARD_BG,
+  searchButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: scale(10),
+    paddingVertical: verticalScale(5),
+    paddingHorizontal: scale(20),
     borderWidth: 1,
-    borderColor: CARD_BORDER,
-    paddingHorizontal: 12,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: scale(8),
+    borderCurve: 'continuous',
   },
-  searchPillText: {
-    color: '#D5D5D6',
-    fontSize: 16,
+  searchButtonText: {
+    fontSize: moderateScale(18),
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_400Regular',
   },
-  userChipsRow: {
-    marginTop: 14,
-    gap: 12,
-    paddingRight: 18,
+  usersList: {
+    flexDirection: 'row',
+    gap: scale(6),
   },
-  listChip: {
-    width: 62,
-    alignItems: 'center',
+  userItem: {
+    width: SCREEN_WIDTH * 0.225,
   },
-  listChipIconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: CARD_BG,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
+  userAvatarContainer: {
+    marginBottom: scale(4),
+    position: 'relative',
+    width: scale(60),
+    height: scale(60),
     alignItems: 'center',
     justifyContent: 'center',
   },
-  listChipLabel: {
-    marginTop: 7,
-    color: '#EDEDED',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  loadingUserChip: {
-    width: 62,
+  searchIconContainer: {
+    width: scale(60),
+    height: scale(60),
+    borderRadius: scale(20),
+    backgroundColor: '#333333',
     alignItems: 'center',
+    justifyContent: 'center',
+    borderCurve: 'continuous',
   },
-  loadingAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  loadingTextBar: {
-    width: 44,
-    height: 8,
-    borderRadius: 4,
-    marginTop: 8,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  userChip: {
-    width: 62,
-    alignItems: 'center',
-  },
-  userAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
+  verifiedBadgeContainer: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: scale(15),
+    height: scale(15),
     alignItems: 'center',
     justifyContent: 'center',
   },
-  userAvatarInitial: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#121212',
+  userName: {
+    fontSize: moderateScale(18),
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_400Regular',
+    textAlign: 'center',
+    width: scale(60),
+    marginTop: SCREEN_HEIGHT * 0.008,
   },
-  userChipLabel: {
-    marginTop: 7,
-    color: '#EDEDED',
-    fontSize: 12,
-    maxWidth: 62,
+  searchText: {
+    fontSize: moderateScale(18),
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_700Bold',
+    textAlign: 'center',
+    width: scale(60),
+    marginTop: SCREEN_HEIGHT * 0.008,
   },
-  overlayDimmer: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+  transactionSection: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: scale(20),
+    padding: SCREEN_WIDTH * 0.02,
+    marginTop: scale(8),
+    borderCurve: 'continuous',
   },
-  historySheet: {
+  transactionsList: {
+    gap: verticalScale(12),
+  },
+  transactionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#0F0F0F',
+    borderRadius: scale(12),
+    padding: scale(12),
+    borderCurve: 'continuous',
+  },
+  sheetTransactionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+    borderRadius: scale(12),
+    paddingHorizontal: scale(12),
+    paddingVertical: verticalScale(16),
+    marginBottom: verticalScale(12),
+    width: '100%',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 0, 0, 0.08)',
+  },
+  transactionAvatars: {
+    marginRight: scale(12),
+    width: scale(44),
+    height: scale(44),
+  },
+  avatarOverlap: {
+    width: scale(44),
+    height: scale(44),
+    position: 'relative',
+  },
+  avatarBack: {
     position: 'absolute',
     left: 0,
-    right: 0,
-    bottom: 0,
-    minHeight: 258,
-    maxHeight: 340,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    backgroundColor: '#F8F8F8',
-    paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 96,
+    top: 0,
+    zIndex: 1,
+    transform: [{ rotate: '-15deg' }],
   },
-  historySheetExpanded: {
-    maxHeight: 710,
+  avatarFront: {
+    position: 'absolute',
+    left: scale(15),
+    top: scale(15),
+    zIndex: 2,
+    transform: [{ rotate: '15deg' }],
   },
-  sheetHandle: {
-    width: 50,
-    height: 4,
-    borderRadius: 999,
-    backgroundColor: '#D4D4D5',
-  },
-  sheetHandleTouchArea: {
-    alignSelf: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    marginBottom: 4,
-  },
-  historyHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 14,
-  },
-  historyTitle: {
-    color: '#424347',
-    fontSize: 21,
-    fontWeight: '500',
-  },
-  showAllButton: {
-    backgroundColor: '#E6E6E6',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-  },
-  showAllButtonText: {
-    color: '#424347',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  historyLoadingWrap: {
-    paddingVertical: 22,
-    alignItems: 'center',
-  },
-  emptyHistoryWrap: {
-    paddingVertical: 14,
-  },
-  emptyHistoryText: {
-    fontSize: 14,
-    color: '#777',
-  },
-  historyList: {
-    gap: 10,
-    paddingBottom: 18,
-  },
-  historyItemCard: {
-    backgroundColor: '#E8E8E9',
-    borderRadius: 12,
-    padding: 11,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  historyItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+  transactionDetails: {
     flex: 1,
-    marginRight: 8,
+    marginRight: scale(12),
+    marginLeft: scale(12),
   },
-  historyIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: '#101214',
+  sheetTransactionDescription: {
+    fontSize: moderateScale(14),
+    color: '#000000',
+    fontFamily: 'Montserrat_400Regular',
+    maxWidth: '80%',
+  },
+  sheetTransactionAmount: {
+    fontSize: moderateScale(16),
+    fontFamily: 'Montserrat_400Regular',
+  },
+  sentAmount: {
+    color: '#000000',
+  },
+  receivedAmount: {
+    color: '#000000',
+  },
+  sheetHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: scale(20),
+    marginBottom: verticalScale(20),
+  },
+  sheetHeaderLeft: {
+    flex: 1,
+  },
+  sheetTitle: {
+    fontSize: moderateScale(18),
+    color: '#000000',
+    fontFamily: 'Montserrat_400Regular',
+  },
+  sheetShowAllButton: {
+    backgroundColor: 'rgba(0, 0, 0, 0.08)',
+    borderRadius: scale(10),
+    paddingVertical: verticalScale(6),
+    width: scale(110),
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderCurve: 'continuous',
   },
-  historyItemTextWrap: {
-    flex: 1,
-  },
-  historyItemTitle: {
-    fontSize: 13,
-    color: '#36373B',
-    fontWeight: '600',
-  },
-  historyItemSubText: {
-    marginTop: 1,
-    fontSize: 11,
-    color: '#5D5E61',
-  },
-  historyAmountText: {
-    color: '#36373B',
-    fontSize: 14,
-    fontWeight: '500',
+  sheetShowAllText: {
+    fontSize: moderateScale(17),
+    color: '#000000',
+    fontFamily: 'Montserrat_400Regular',
   },
 });
 
-export default HomeScreen;
+interface Transaction {
+  id: string;
+  type: 'sent' | 'received';
+  description: string;
+  amount: number;
+  otherUserAvatar?: string;
+}
+
+interface User {
+  id: string;
+  name: string;
+  username: string;
+  fullName: string;
+  avatar?: React.ComponentType<{ width?: number; height?: number }> | null;
+  avatarKey: string;
+  verified: boolean;
+}
+
+const MemoUserItem = memo(({ user, onSelect }: { user: User; onSelect: (user: User) => void }) => {
+  const AvatarComponent = user.avatar;
+  const handlePress = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onSelect(user);
+  }, [user, onSelect]);
+
+  return (
+    <Pressable
+      style={({ pressed }) => [styles.userItem, pressed && { opacity: 0.7 }]}
+      onPress={handlePress}
+    >
+      <View style={styles.userAvatarContainer}>
+        {AvatarComponent ? (
+          <AvatarComponent width={scale(60)} height={scale(60)} />
+        ) : (
+          <View style={styles.defaultAvatarContainerSmall}>
+            <AvatarDefaultIcon width={scale(30)} height={scale(30)} color="#ffffff" />
+          </View>
+        )}
+        {user.verified ? (
+          <View style={styles.verifiedBadgeContainer}>
+            <VerifiedBadge width={scale(20)} height={scale(20)} />
+          </View>
+        ) : null}
+      </View>
+      <Text style={styles.userName} numberOfLines={1}>
+        {user.name}
+      </Text>
+    </Pressable>
+  );
+});
+
+const avatarMap: Record<string, React.ComponentType<{ width?: number; height?: number }>> = {
+  avatar: Avatar,
+  avatar1: Avatar1,
+  avatar2: Avatar2,
+  avatar3: Avatar3,
+};
+
+const MemoTransactionItem = memo(
+  ({
+    transaction,
+    index,
+    hasAnimated,
+    formatAmount,
+    onComplete,
+  }: {
+    transaction: Transaction;
+    index: number;
+    hasAnimated: boolean;
+    formatAmount: (val: number) => string;
+    onComplete: (idx: number) => void;
+  }) => {
+    const isSent = transaction.type === 'sent';
+    const OtherUserAvatar = avatarMap[transaction.otherUserAvatar || 'avatar1'] || Avatar1;
+    const CurrentUserAvatar = Avatar;
+
+    return (
+      <Animated.View
+        entering={
+          !hasAnimated
+            ? FadeInUp.delay(index * 20)
+                .duration(120)
+                .springify()
+                .damping(28)
+                .stiffness(200)
+                .withInitialValues({
+                  opacity: 0,
+                  transform: [{ translateY: 4 }],
+                })
+                .withCallback((finished) => {
+                  if (finished) {
+                    runOnJS(onComplete)(index);
+                  }
+                })
+            : undefined
+        }
+        style={styles.sheetTransactionItem}
+      >
+        <View style={styles.transactionAvatars}>
+          <View style={styles.avatarOverlap}>
+            <View style={styles.avatarBack}>
+              {isSent ? (
+                <CurrentUserAvatar width={scale(32)} height={scale(32)} />
+              ) : (
+                <OtherUserAvatar width={scale(32)} height={scale(32)} />
+              )}
+            </View>
+            <View style={styles.avatarFront}>
+              {isSent ? (
+                <OtherUserAvatar width={scale(32)} height={scale(32)} />
+              ) : (
+                <CurrentUserAvatar width={scale(32)} height={scale(32)} />
+              )}
+            </View>
+          </View>
+        </View>
+        <View style={styles.transactionDetails}>
+          <Text style={styles.sheetTransactionDescription} numberOfLines={2}>
+            {transaction.description}
+          </Text>
+        </View>
+        <Text
+          style={[
+            styles.sheetTransactionAmount,
+            transaction.type === 'sent' ? styles.sentAmount : styles.receivedAmount,
+          ]}
+        >
+          {transaction.type === 'sent' ? '-' : '+'}
+          {formatAmount(transaction.amount)}
+        </Text>
+      </Animated.View>
+    );
+  }
+);
+
+export default function HomeScreen() {
+  const navigation = useNavigation<AppNavigationProp>();
+  const [balanceVisible, setBalanceVisible] = useState(true);
+  const [username] = useState('_Huncho25_');
+  const [balance] = useState(481296.89);
+  const [isSheetExpanded, setIsSheetExpanded] = useState(false);
+  const hasAnimatedTransactions = useRef(false);
+  const bottomSheetRef = useRef<BottomSheet>(null);
+  const snapPoints = useMemo(() => ['35%', '85%'], []);
+
+  const [isNavbarVisible, setIsNavbarVisible] = useState(true);
+  const [walletModalVisible, setWalletModalVisible] = useState(false);
+  const [userProfileModalVisible, setUserProfileModalVisible] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const scrollY = useSharedValue(0);
+  const lastScrollY = useSharedValue(0);
+  const sheetAnimatedIndex = useSharedValue(0);
+
+  const navbarVisibility = useDerivedValue(() => {
+    if (!isNavbarVisible) return 0;
+    return interpolate(sheetAnimatedIndex.value, [0, 1], [1, 0]);
+  });
+
+  const transactions: Transaction[] = [
+    {
+      id: '1',
+      type: 'sent',
+      description: 'TRF FRM _HNCH25 TO BGGRMN26 - B69',
+      amount: 50000,
+      otherUserAvatar: 'avatar2',
+    },
+    {
+      id: '2',
+      type: 'sent',
+      description: 'TRF FRM _HNCH25 TO BGGRMN26 - B69',
+      amount: 15000,
+      otherUserAvatar: 'avatar2',
+    },
+    {
+      id: '3',
+      type: 'sent',
+      description: 'TRF FRM _HNCH25 TO BGGRMN26 - B69',
+      amount: 50000,
+      otherUserAvatar: 'avatar2',
+    },
+    {
+      id: '4',
+      type: 'received',
+      description: 'TRF FRM USER123 TO _HNCH25 - B70',
+      amount: 25000,
+      otherUserAvatar: 'avatar1',
+    },
+    {
+      id: '5',
+      type: 'sent',
+      description: 'TRF FRM _HNCH25 TO USER456 - B71',
+      amount: 30000,
+      otherUserAvatar: 'avatar3',
+    },
+    {
+      id: '6',
+      type: 'received',
+      description: 'TRF FRM USER789 TO _HNCH25 - B72',
+      amount: 75000,
+      otherUserAvatar: 'avatar1',
+    },
+    {
+      id: '7',
+      type: 'sent',
+      description: 'TRF FRM _HNCH25 TO USER101 - B73',
+      amount: 10000,
+      otherUserAvatar: 'avatar2',
+    },
+    {
+      id: '8',
+      type: 'received',
+      description: 'TRF FRM USER202 TO _HNCH25 - B74',
+      amount: 45000,
+      otherUserAvatar: 'avatar3',
+    },
+    {
+      id: '9',
+      type: 'sent',
+      description: 'TRF FRM _HNCH25 TO USER303 - B75',
+      amount: 20000,
+      otherUserAvatar: 'avatar1',
+    },
+    {
+      id: '10',
+      type: 'received',
+      description: 'TRF FRM USER404 TO _HNCH25 - B76',
+      amount: 60000,
+      otherUserAvatar: 'avatar2',
+    },
+  ];
+
+  const users: User[] = [
+    {
+      id: '1',
+      name: 'Titi_2...',
+      username: 'Titi_823',
+      fullName: 'Oluwatiti Adenuga',
+      avatar: Avatar1,
+      avatarKey: 'avatar1',
+      verified: true,
+    },
+    {
+      id: '2',
+      name: '!Adeo...',
+      username: '!Adeo',
+      fullName: 'Adeoluwa Johnson',
+      avatar: Avatar2,
+      avatarKey: 'avatar2',
+      verified: false,
+    },
+    {
+      id: '3',
+      name: '_Bigg...',
+      username: '_Bigg',
+      fullName: 'Biggie Thompson',
+      avatar: Avatar3,
+      avatarKey: 'avatar3',
+      verified: true,
+    },
+    {
+      id: '4',
+      name: 'gremlix',
+      username: 'gremlix',
+      fullName: 'Biggie Thompson',
+      avatar: null,
+      avatarKey: 'default',
+      verified: true,
+    },
+    {
+      id: '5',
+      name: 'Choppa',
+      username: 'choppa',
+      fullName: 'Biggie Thompson',
+      avatar: Avatar3,
+      avatarKey: 'avatar3',
+      verified: false,
+    },
+    {
+      id: '6',
+      name: 'Tomisin',
+      username: 'Tomisin',
+      fullName: 'Biggie Thompson',
+      avatar: Avatar1,
+      avatarKey: 'avatar1',
+      verified: false,
+    },
+  ];
+
+  const formatBalance = (amount: number) => {
+    return `₦${amount.toLocaleString('en-NG', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  };
+
+  const formatAmount = useCallback((amount: number) => {
+    return `₦${amount.toLocaleString('en-NG', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+  }, []);
+
+  const handleSheetChange = useCallback((index: number) => {
+    setIsSheetExpanded(index === 1);
+  }, []);
+
+  const handleUserSelect = useCallback((user: User) => {
+    setSelectedUser(user);
+    setUserProfileModalVisible(true);
+  }, []);
+
+  const handleToggleBalance = useCallback(() => {
+    Haptics.selectionAsync();
+    setBalanceVisible((prev) => !prev);
+  }, []);
+
+  const handleTransactionAnimationComplete = useCallback(
+    (index: number) => {
+      if (index === transactions.length - 1) {
+        hasAnimatedTransactions.current = true;
+      }
+    },
+    [transactions.length]
+  );
+
+  const renderBackdrop = useCallback(
+    (props: any) => (
+      <BottomSheetBackdrop
+        {...props}
+        appearsOnIndex={1}
+        disappearsOnIndex={0}
+        opacity={0.4}
+        pressBehavior="collapse"
+      />
+    ),
+    []
+  );
+
+  const insets = useSafeAreaInsets();
+
+  const handleTabPress = useCallback(
+    (tab: 'home' | 'settings' | 'gifts' | 'support') => {
+      if (tab === 'home') {
+        navigation.navigate('AppTabs', { screen: 'Home' });
+        return;
+      }
+
+      if (tab === 'settings') {
+        navigation.navigate('AppTabs', { screen: 'Settings', params: { screen: 'ProfileHome' } });
+        return;
+      }
+
+      if (tab === 'gifts') {
+        navigation.navigate('AppTabs', { screen: 'MoneyDrop' });
+        return;
+      }
+
+      navigation.navigate('AppTabs', { screen: 'Support' });
+    },
+    [navigation]
+  );
+
+  return (
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <StatusBar style="light" />
+      <View style={styles.backgroundContainer}>
+        <SvgXml xml={backgroundSvg} width={SCREEN_WIDTH} height={SCREEN_HEIGHT} />
+      </View>
+      <AnimatedPageWrapper>
+        <Animated.ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: SCREEN_HEIGHT * 0.32 + scale(20) },
+          ]}
+          showsVerticalScrollIndicator={false}
+          scrollEnabled={!isSheetExpanded}
+          pointerEvents={isSheetExpanded ? 'none' : 'auto'}
+          onScroll={(event) => {
+            const currentScrollY = event.nativeEvent.contentOffset.y;
+            scrollY.value = currentScrollY;
+
+            // Hide navbar when scrolling down, show when scrolling up or at top
+            if (currentScrollY > lastScrollY.value && currentScrollY > 50) {
+              // Scrolling down and past threshold
+              if (isNavbarVisible) {
+                setIsNavbarVisible(false);
+              }
+            } else if (currentScrollY < lastScrollY.value || currentScrollY <= 50) {
+              // Scrolling up or near top
+              if (!isNavbarVisible) {
+                setIsNavbarVisible(true);
+              }
+            }
+
+            lastScrollY.value = currentScrollY;
+          }}
+          scrollEventThrottle={16}
+        >
+          {/* Header Section */}
+          <View style={styles.header}>
+            <View style={styles.headerLeft}>
+              <Pressable
+                style={styles.avatarContainer}
+                onPress={() =>
+                  navigation.navigate('AppTabs', {
+                    screen: 'Settings',
+                    params: { screen: 'ProfileHome' },
+                  })
+                }
+              >
+                {Avatar ? (
+                  <Avatar width={scale(49)} height={scale(49)} />
+                ) : (
+                  <View style={styles.defaultAvatarContainerHeader}>
+                    <AvatarDefaultIcon width={scale(28)} height={scale(28)} color="#ffffff" />
+                  </View>
+                )}
+              </Pressable>
+              <View style={styles.welcomeContainer}>
+                <View style={styles.welcomeRow}>
+                  <Text style={styles.welcomeText}>Welcome back 👋</Text>
+                </View>
+                <View style={styles.usernameRow}>
+                  <Text style={styles.username}>{username}</Text>
+                  <VerifiedBadge width={scale(14)} height={scale(14)} />
+                </View>
+              </View>
+            </View>
+            <View style={styles.headerRight}>
+              <Pressable
+                style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  setWalletModalVisible(true);
+                }}
+              >
+                <WalletPlusIcon width={scale(24)} height={scale(24)} />
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.iconButton, pressed && { opacity: 0.7 }]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  navigation.navigate('NotificationCenter');
+                }}
+              >
+                <NotificationIcon width={scale(24)} height={scale(24)} fill="#FFFFFF" />
+              </Pressable>
+            </View>
+          </View>
+
+          {/* Available Balance Section */}
+          <View style={styles.balanceSection}>
+            <Text style={styles.balanceLabel}>AVAILABLE BALANCE</Text>
+            <View style={styles.balanceRow}>
+              <Text style={styles.balanceAmount}>
+                {balanceVisible ? formatBalance(balance) : '••••••••'}
+              </Text>
+              <Pressable
+                onPress={handleToggleBalance}
+                style={({ pressed }) => [
+                  styles.eyeButton,
+                  pressed && { transform: [{ scale: 0.95 }] },
+                ]}
+              >
+                <Eyeslash width={scale(20)} height={scale(20)} />
+              </Pressable>
+            </View>
+          </View>
+
+          {/* Action Buttons */}
+          <View style={styles.actionButtons}>
+            <Pressable
+              style={({ pressed }) => [styles.actionButton, pressed && { opacity: 0.8 }]}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                navigation.navigate('PayUser');
+              }}
+            >
+              <View style={styles.actionButtonIcon}>
+                <Send width={scale(24)} height={scale(24)} color="#FFFFFF" />
+              </View>
+              <Text style={styles.actionButtonText}>Send</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.actionButton, pressed && { opacity: 0.8 }]}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                navigation.navigate('Scan');
+              }}
+            >
+              <View style={styles.actionButtonIcon}>
+                <Scan width={scale(24)} height={scale(24)} />
+              </View>
+              <Text style={styles.actionButtonText}>Scan</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.actionButton, pressed && { opacity: 0.8 }]}
+              onPress={() => {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                navigation.navigate('PaymentRequestsList');
+              }}
+            >
+              <View style={styles.actionButtonIcon}>
+                <Recieve width={scale(24)} height={scale(24)} color="#FFFFFF" />
+              </View>
+              <Text style={styles.actionButtonText}>Receive</Text>
+            </Pressable>
+          </View>
+
+          {/* Find Users Section */}
+          <View style={styles.findUsersSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Find Users</Text>
+              <Pressable
+                style={styles.searchButton}
+                onPress={() => navigation.navigate('UserSearch')}
+              >
+                <Search color="#FFFFFF" width={scale(20)} height={scale(20)} />
+                <Text style={styles.searchButtonText}>Search</Text>
+              </Pressable>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.usersList}
+            >
+              <Pressable
+                style={({ pressed }) => [styles.userItem, pressed && { opacity: 0.7 }]}
+                onPress={() => {
+                  Haptics.selectionAsync();
+                  navigation.navigate('TransferLists');
+                }}
+              >
+                <View style={styles.searchIconContainer}>
+                  <List width={scale(30)} height={scale(30)} />
+                </View>
+                <Text style={styles.searchText}>List</Text>
+              </Pressable>
+              {users.map((user) => (
+                <MemoUserItem key={user.id} user={user} onSelect={handleUserSelect} />
+              ))}
+            </ScrollView>
+          </View>
+        </Animated.ScrollView>
+      </AnimatedPageWrapper>
+
+      {/* Transaction History Bottom Sheet — lives outside AnimatedPageWrapper for stable gestures */}
+      <BottomSheet
+        ref={bottomSheetRef}
+        index={0}
+        snapPoints={snapPoints}
+        animatedIndex={sheetAnimatedIndex}
+        enablePanDownToClose={false}
+        enableOverDrag={false}
+        enableDynamicSizing={false}
+        onChange={handleSheetChange}
+        backdropComponent={renderBackdrop}
+        handleIndicatorStyle={{
+          backgroundColor: '#CCCCCC',
+          width: SCREEN_WIDTH * 0.15,
+        }}
+        backgroundStyle={{
+          backgroundColor: '#FFFFFF',
+          borderTopLeftRadius: 32,
+          borderTopRightRadius: 32,
+        }}
+      >
+        <View style={styles.sheetHeader}>
+          <View style={styles.sheetHeaderLeft}>
+            <Text style={styles.sheetTitle}>Transaction History</Text>
+          </View>
+          <Pressable
+            style={({ pressed }) => [styles.sheetShowAllButton, pressed && { opacity: 0.7 }]}
+            onPress={() => {
+              Haptics.selectionAsync();
+              if (isSheetExpanded) {
+                bottomSheetRef.current?.collapse();
+              } else {
+                bottomSheetRef.current?.snapToIndex(1);
+              }
+            }}
+          >
+            <Text style={styles.sheetShowAllText}>
+              {isSheetExpanded ? 'Show less' : 'Show all'}
+            </Text>
+          </Pressable>
+        </View>
+
+        <BottomSheetScrollView
+          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {transactions.map((transaction, index) => (
+            <MemoTransactionItem
+              key={transaction.id}
+              transaction={transaction}
+              index={index}
+              hasAnimated={hasAnimatedTransactions.current}
+              formatAmount={formatAmount}
+              onComplete={handleTransactionAnimationComplete}
+            />
+          ))}
+        </BottomSheetScrollView>
+      </BottomSheet>
+
+      {/* Bottom Navigation Bar */}
+      <BottomNavbar
+        activeTab="home"
+        onTabPress={handleTabPress}
+        visibilityValue={navbarVisibility}
+      />
+
+      {/* Wallet Modal */}
+      <WalletModal visible={walletModalVisible} onClose={() => setWalletModalVisible(false)} />
+
+      {/* User Profile Modal */}
+      {selectedUser && (
+        <UserProfileModal
+          visible={userProfileModalVisible}
+          onClose={() => {
+            setUserProfileModalVisible(false);
+            setSelectedUser(null);
+          }}
+          username={selectedUser.username}
+          fullName={selectedUser.fullName}
+          avatar={selectedUser.avatarKey}
+          verified={selectedUser.verified}
+        />
+      )}
+    </View>
+  );
+}

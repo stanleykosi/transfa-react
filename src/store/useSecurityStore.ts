@@ -5,8 +5,7 @@ import { fetchSecurityStatus } from '@/api/authApi';
 
 const PIN_KEY = 'com.transfaapp.pin';
 
-const toSecureStoreSafeKeyPart = (value: string): string =>
-  value.replace(/[^A-Za-z0-9._-]/g, '_');
+const toSecureStoreSafeKeyPart = (value: string): string => value.replace(/[^A-Za-z0-9._-]/g, '_');
 
 interface SecurityState {
   activeUserId: string | null;
