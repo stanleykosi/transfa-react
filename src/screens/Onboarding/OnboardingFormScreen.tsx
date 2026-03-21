@@ -439,12 +439,8 @@ const OnboardingFormScreen = () => {
       }
 
       if (statusResponse.status.startsWith('tier2_')) {
-        if (stayOnForm) {
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-          continue;
-        }
-        navigation.dispatch(StackActions.replace('CreateAccount'));
-        return false;
+        console.log('✅ Tier 2 status detected, assuming Tier 1 is ready:', statusResponse.status);
+        return true;
       }
 
       if (
@@ -606,10 +602,12 @@ const OnboardingFormScreen = () => {
     }
 
     setIsSubmitting(true);
+    console.log('🚀 Starting onboarding submission flow. forceTier1Update:', forceTier1Update);
     try {
       // Re-sync status just before submit to avoid duplicate tier requests.
       try {
         const latestStatus = await fetchOnboardingStatus();
+        console.log('🔍 Current onboarding status pre-submit:', latestStatus.status);
         if (latestStatus.status === 'completed') {
           navigation.dispatch(StackActions.replace('AppTabs'));
           return;
@@ -670,14 +668,17 @@ const OnboardingFormScreen = () => {
       }
 
       if (!tier1Ready) {
+        console.log('⚠️ Tier 1 not ready. Aborting submission.');
         return;
       }
 
+      console.log('🚀 Submitting Tier 2 (BVN) verification details...');
       await submitTier2Verification({
         dob: normalizedDob,
         bvn: cleanDigits(finalBvn),
         gender: finalGender.toLowerCase() as 'male' | 'female',
       });
+      console.log('✅ Tier 2 submission accepted.');
 
       await clearOnboardingProgress().catch(() => undefined);
       navigation.dispatch(StackActions.replace('CreateAccount'));

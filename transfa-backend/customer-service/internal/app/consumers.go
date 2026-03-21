@@ -171,7 +171,11 @@ func (h *UserEventHandler) HandleUserCreatedEvent(body []byte) bool {
 			strings.Contains(err.Error(), "status 409") ||
 			strings.Contains(err.Error(), "status 422") {
 			log.Printf("Non-retriable client error from Anchor (ACK). UserID %s: %v", event.UserID, err)
-			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", ptr(err.Error()))
+			msg := err.Error()
+			if strings.Contains(strings.ToLower(msg), "insufficient balance") {
+				msg = "The platform's verification account has insufficient funds. Please contact support or try again later."
+			}
+			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier1", "failed", &msg)
 			return true
 		}
 		// Rate limit from Anchor: ACK to avoid hot-looping and API limits
@@ -396,8 +400,11 @@ func (h *UserEventHandler) HandleTier2VerificationRequestedEvent(body []byte) bo
 			strings.Contains(lowerErr, "status 409") ||
 			strings.Contains(lowerErr, "status 422") {
 			log.Printf("Non-retriable client error from Anchor for Tier2 KYC (ACK). UserID %s: %v", event.UserID, err)
-			reason := fmt.Sprintf("Anchor API error: %v", err)
-			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier2", "failed", &reason)
+			msg := err.Error()
+			if strings.Contains(strings.ToLower(msg), "insufficient balance") {
+				msg = "The platform's verification account has insufficient funds. Please contact support or try again later."
+			}
+			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier2", "failed", &msg)
 			return true
 		}
 
