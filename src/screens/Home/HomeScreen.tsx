@@ -15,15 +15,30 @@ import Avatar3 from '@/assets/images/avatar3.svg';
 
 import AnimatedPageWrapper from '@/components/AnimatedPageWrapper';
 import BottomNavbar from '@/components/bottom-navbar';
-import UserProfileModal from '@/components/UserProfileModal';
 import WalletModal from '@/components/WalletModal';
+import { useFrequentUsers } from '@/api/userDiscoveryApi';
+import {
+  useAccountBalance,
+  usePrimaryAccountDetails,
+  useTransactionHistory,
+  useUserProfile,
+} from '@/api/transactionApi';
 import { AppNavigationProp } from '@/types/navigation';
+import type { TransactionHistoryItem, UserDiscoveryResult } from '@/types/api';
 import { moderateScale, scale, verticalScale } from '@/utils/responsive';
 import BottomSheet, { BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import React, { memo, useCallback, useMemo, useRef, useState } from 'react';
-import { Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Dimensions,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Animated, {
   FadeInUp,
@@ -267,6 +282,17 @@ const styles = StyleSheet.create({
     width: scale(60),
     marginTop: SCREEN_HEIGHT * 0.008,
   },
+  usersStateContainer: {
+    width: scale(110),
+    minHeight: scale(60),
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  usersStateText: {
+    color: '#8C8D90',
+    fontSize: moderateScale(14),
+    fontFamily: 'Montserrat_400Regular',
+  },
   transactionSection: {
     backgroundColor: '#1A1A1A',
     borderRadius: scale(20),
@@ -373,6 +399,16 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontFamily: 'Montserrat_400Regular',
   },
+  sheetStateContainer: {
+    paddingVertical: verticalScale(24),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetStateText: {
+    color: '#676A70',
+    fontSize: moderateScale(14),
+    fontFamily: 'Montserrat_400Regular',
+  },
 });
 
 interface Transaction {
@@ -431,6 +467,28 @@ const avatarMap: Record<string, React.ComponentType<{ width?: number; height?: n
   avatar1: Avatar1,
   avatar2: Avatar2,
   avatar3: Avatar3,
+};
+
+const avatarRotation = ['avatar1', 'avatar2', 'avatar3'] as const;
+
+const pickAvatarKey = (seed: string) => {
+  if (!seed) {
+    return avatarRotation[0];
+  }
+
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash += seed.charCodeAt(index) * (index + 1);
+  }
+
+  return avatarRotation[hash % avatarRotation.length];
+};
+
+const koboToNaira = (value?: number) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) {
+    return 0;
+  }
+  return value / 100;
 };
 
 const MemoTransactionItem = memo(
@@ -513,8 +571,6 @@ const MemoTransactionItem = memo(
 export default function HomeScreen() {
   const navigation = useNavigation<AppNavigationProp>();
   const [balanceVisible, setBalanceVisible] = useState(true);
-  const [username] = useState('_Huncho25_');
-  const [balance] = useState(481296.89);
   const [isSheetExpanded, setIsSheetExpanded] = useState(false);
   const hasAnimatedTransactions = useRef(false);
   const bottomSheetRef = useRef<BottomSheet>(null);
@@ -522,146 +578,96 @@ export default function HomeScreen() {
 
   const [isNavbarVisible, setIsNavbarVisible] = useState(true);
   const [walletModalVisible, setWalletModalVisible] = useState(false);
-  const [userProfileModalVisible, setUserProfileModalVisible] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
   const scrollY = useSharedValue(0);
   const lastScrollY = useSharedValue(0);
   const sheetAnimatedIndex = useSharedValue(0);
+  const { data: userProfile } = useUserProfile();
+  const { data: accountBalance } = useAccountBalance();
+  const { data: primaryAccountDetails } = usePrimaryAccountDetails();
+  const { data: frequentUsersData, isLoading: isLoadingUsers } = useFrequentUsers(6);
+  const { data: transactionHistoryData, isLoading: isLoadingTransactions } =
+    useTransactionHistory();
 
   const navbarVisibility = useDerivedValue(() => {
     if (!isNavbarVisible) return 0;
     return interpolate(sheetAnimatedIndex.value, [0, 1], [1, 0]);
   });
 
-  const transactions: Transaction[] = [
-    {
-      id: '1',
-      type: 'sent',
-      description: 'TRF FRM _HNCH25 TO BGGRMN26 - B69',
-      amount: 50000,
-      otherUserAvatar: 'avatar2',
-    },
-    {
-      id: '2',
-      type: 'sent',
-      description: 'TRF FRM _HNCH25 TO BGGRMN26 - B69',
-      amount: 15000,
-      otherUserAvatar: 'avatar2',
-    },
-    {
-      id: '3',
-      type: 'sent',
-      description: 'TRF FRM _HNCH25 TO BGGRMN26 - B69',
-      amount: 50000,
-      otherUserAvatar: 'avatar2',
-    },
-    {
-      id: '4',
-      type: 'received',
-      description: 'TRF FRM USER123 TO _HNCH25 - B70',
-      amount: 25000,
-      otherUserAvatar: 'avatar1',
-    },
-    {
-      id: '5',
-      type: 'sent',
-      description: 'TRF FRM _HNCH25 TO USER456 - B71',
-      amount: 30000,
-      otherUserAvatar: 'avatar3',
-    },
-    {
-      id: '6',
-      type: 'received',
-      description: 'TRF FRM USER789 TO _HNCH25 - B72',
-      amount: 75000,
-      otherUserAvatar: 'avatar1',
-    },
-    {
-      id: '7',
-      type: 'sent',
-      description: 'TRF FRM _HNCH25 TO USER101 - B73',
-      amount: 10000,
-      otherUserAvatar: 'avatar2',
-    },
-    {
-      id: '8',
-      type: 'received',
-      description: 'TRF FRM USER202 TO _HNCH25 - B74',
-      amount: 45000,
-      otherUserAvatar: 'avatar3',
-    },
-    {
-      id: '9',
-      type: 'sent',
-      description: 'TRF FRM _HNCH25 TO USER303 - B75',
-      amount: 20000,
-      otherUserAvatar: 'avatar1',
-    },
-    {
-      id: '10',
-      type: 'received',
-      description: 'TRF FRM USER404 TO _HNCH25 - B76',
-      amount: 60000,
-      otherUserAvatar: 'avatar2',
-    },
-  ];
+  const username = useMemo(() => {
+    const profileUsername = userProfile?.username?.trim();
+    if (profileUsername) {
+      return profileUsername;
+    }
 
-  const users: User[] = [
-    {
-      id: '1',
-      name: 'Titi_2...',
-      username: 'Titi_823',
-      fullName: 'Oluwatiti Adenuga',
-      avatar: Avatar1,
-      avatarKey: 'avatar1',
-      verified: true,
-    },
-    {
-      id: '2',
-      name: '!Adeo...',
-      username: '!Adeo',
-      fullName: 'Adeoluwa Johnson',
-      avatar: Avatar2,
-      avatarKey: 'avatar2',
-      verified: false,
-    },
-    {
-      id: '3',
-      name: '_Bigg...',
-      username: '_Bigg',
-      fullName: 'Biggie Thompson',
-      avatar: Avatar3,
-      avatarKey: 'avatar3',
-      verified: true,
-    },
-    {
-      id: '4',
-      name: 'gremlix',
-      username: 'gremlix',
-      fullName: 'Biggie Thompson',
-      avatar: null,
-      avatarKey: 'default',
-      verified: true,
-    },
-    {
-      id: '5',
-      name: 'Choppa',
-      username: 'choppa',
-      fullName: 'Biggie Thompson',
-      avatar: Avatar3,
-      avatarKey: 'avatar3',
-      verified: false,
-    },
-    {
-      id: '6',
-      name: 'Tomisin',
-      username: 'Tomisin',
-      fullName: 'Biggie Thompson',
-      avatar: Avatar1,
-      avatarKey: 'avatar1',
-      verified: false,
-    },
-  ];
+    const fullName = userProfile?.full_name?.trim();
+    if (fullName) {
+      return fullName;
+    }
+
+    return 'Transfa User';
+  }, [userProfile?.full_name, userProfile?.username]);
+
+  const balance = useMemo(
+    () => koboToNaira(accountBalance?.available_balance),
+    [accountBalance?.available_balance]
+  );
+
+  const users: User[] = useMemo(
+    () =>
+      (frequentUsersData?.users || []).slice(0, 6).map((user) => {
+        const avatarKey = pickAvatarKey(user.id || user.username);
+        const displayName = user.username || user.full_name || 'User';
+
+        return {
+          id: user.id,
+          name: displayName,
+          username: user.username,
+          fullName: user.full_name || user.username || 'Transfa User',
+          avatar: avatarMap[avatarKey] || null,
+          avatarKey,
+          verified: true,
+        };
+      }),
+    [frequentUsersData?.users]
+  );
+
+  const transactions: Transaction[] = useMemo(() => {
+    const currentUserId = userProfile?.id || '';
+    return (transactionHistoryData || [])
+      .slice(0, 30)
+      .map((transaction: TransactionHistoryItem) => {
+        const isSelfTransfer =
+          transaction.type === 'self_transfer' ||
+          transaction.type === 'self' ||
+          transaction.category === 'self';
+        const isPlatformFee =
+          transaction.type === 'platform_fee' || transaction.category === 'platform_fee';
+        const isP2P = transaction.type === 'p2p' || transaction.category === 'p2p';
+
+        const isOutgoingP2P = isP2P && transaction.sender_id === currentUserId;
+        const isIncomingP2P =
+          isP2P &&
+          transaction.recipient_id === currentUserId &&
+          transaction.recipient_id !== transaction.sender_id;
+
+        const isSent =
+          isPlatformFee ||
+          isSelfTransfer ||
+          isOutgoingP2P ||
+          (!isIncomingP2P && transaction.sender_id === currentUserId);
+        const counterpartySeed = isSent
+          ? transaction.recipient_id || transaction.destination_account_id || transaction.id
+          : transaction.sender_id || transaction.id;
+
+        return {
+          id: transaction.id,
+          type: isSent ? 'sent' : 'received',
+          description: transaction.description || 'Transaction',
+          amount: koboToNaira(transaction.amount),
+          otherUserAvatar: pickAvatarKey(counterpartySeed),
+        };
+      });
+  }, [transactionHistoryData, userProfile?.id]);
 
   const formatBalance = (amount: number) => {
     return `₦${amount.toLocaleString('en-NG', {
@@ -681,10 +687,17 @@ export default function HomeScreen() {
     setIsSheetExpanded(index === 1);
   }, []);
 
-  const handleUserSelect = useCallback((user: User) => {
-    setSelectedUser(user);
-    setUserProfileModalVisible(true);
-  }, []);
+  const handleUserSelect = useCallback(
+    (user: User) => {
+      const payload: UserDiscoveryResult = {
+        id: user.id,
+        username: user.username,
+        full_name: user.fullName,
+      };
+      navigation.navigate('UserProfileView', { user: payload });
+    },
+    [navigation]
+  );
 
   const handleToggleBalance = useCallback(() => {
     Haptics.selectionAsync();
@@ -914,9 +927,19 @@ export default function HomeScreen() {
                 </View>
                 <Text style={styles.searchText}>List</Text>
               </Pressable>
-              {users.map((user) => (
-                <MemoUserItem key={user.id} user={user} onSelect={handleUserSelect} />
-              ))}
+              {isLoadingUsers ? (
+                <View style={styles.usersStateContainer}>
+                  <ActivityIndicator size="small" color="#FFD300" />
+                </View>
+              ) : users.length === 0 ? (
+                <View style={styles.usersStateContainer}>
+                  <Text style={styles.usersStateText}>No recent users</Text>
+                </View>
+              ) : (
+                users.map((user) => (
+                  <MemoUserItem key={user.id} user={user} onSelect={handleUserSelect} />
+                ))
+              )}
             </ScrollView>
           </View>
         </Animated.ScrollView>
@@ -968,16 +991,26 @@ export default function HomeScreen() {
           contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
           showsVerticalScrollIndicator={false}
         >
-          {transactions.map((transaction, index) => (
-            <MemoTransactionItem
-              key={transaction.id}
-              transaction={transaction}
-              index={index}
-              hasAnimated={hasAnimatedTransactions.current}
-              formatAmount={formatAmount}
-              onComplete={handleTransactionAnimationComplete}
-            />
-          ))}
+          {isLoadingTransactions ? (
+            <View style={styles.sheetStateContainer}>
+              <ActivityIndicator size="small" color="#111111" />
+            </View>
+          ) : transactions.length === 0 ? (
+            <View style={styles.sheetStateContainer}>
+              <Text style={styles.sheetStateText}>No transactions yet</Text>
+            </View>
+          ) : (
+            transactions.map((transaction, index) => (
+              <MemoTransactionItem
+                key={transaction.id}
+                transaction={transaction}
+                index={index}
+                hasAnimated={hasAnimatedTransactions.current}
+                formatAmount={formatAmount}
+                onComplete={handleTransactionAnimationComplete}
+              />
+            ))
+          )}
         </BottomSheetScrollView>
       </BottomSheet>
 
@@ -989,22 +1022,12 @@ export default function HomeScreen() {
       />
 
       {/* Wallet Modal */}
-      <WalletModal visible={walletModalVisible} onClose={() => setWalletModalVisible(false)} />
-
-      {/* User Profile Modal */}
-      {selectedUser && (
-        <UserProfileModal
-          visible={userProfileModalVisible}
-          onClose={() => {
-            setUserProfileModalVisible(false);
-            setSelectedUser(null);
-          }}
-          username={selectedUser.username}
-          fullName={selectedUser.fullName}
-          avatar={selectedUser.avatarKey}
-          verified={selectedUser.verified}
-        />
-      )}
+      <WalletModal
+        visible={walletModalVisible}
+        onClose={() => setWalletModalVisible(false)}
+        bankName={primaryAccountDetails?.bankName}
+        accountNumber={primaryAccountDetails?.accountNumber}
+      />
     </View>
   );
 }
