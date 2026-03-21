@@ -211,6 +211,7 @@ export default function AuthCompleteProfile({
                   placeholderTextColor="rgba(255, 255, 255, 0.32)"
                   value={firstName}
                   onChangeText={handleFirstNameChange}
+                  keyboardAppearance="dark"
                   onFocus={() => setFocusedInput('firstName')}
                   onBlur={() => setFocusedInput(null)}
                   returnKeyType="next"
@@ -243,6 +244,7 @@ export default function AuthCompleteProfile({
                   placeholderTextColor="rgba(255, 255, 255, 0.32)"
                   value={lastName}
                   onChangeText={handleLastNameChange}
+                  keyboardAppearance="dark"
                   onFocus={() => setFocusedInput('lastName')}
                   onBlur={() => setFocusedInput(null)}
                   returnKeyType="next"
@@ -273,6 +275,7 @@ export default function AuthCompleteProfile({
                     placeholderTextColor="rgba(255, 255, 255, 0.32)"
                     value={middleName}
                     onChangeText={(val) => setMiddleName(validateName(val))}
+                    keyboardAppearance="dark"
                     onFocus={() => setFocusedInput('middleName')}
                     onBlur={() => setFocusedInput(null)}
                     returnKeyType="next"
@@ -302,6 +305,7 @@ export default function AuthCompleteProfile({
                     placeholderTextColor="rgba(255, 255, 255, 0.32)"
                     value={maidenName}
                     onChangeText={(val) => setMaidenName(validateName(val))}
+                    keyboardAppearance="dark"
                     onFocus={() => setFocusedInput('maidenName')}
                     onBlur={() => setFocusedInput(null)}
                     returnKeyType="next"
@@ -345,6 +349,7 @@ export default function AuthCompleteProfile({
                   value={phoneNumber}
                   onChangeText={handlePhoneNumberChange}
                   keyboardType="phone-pad"
+                  keyboardAppearance="dark"
                   autoComplete="tel"
                   textContentType="telephoneNumber"
                   onFocus={() => setFocusedInput('phoneNumber')}

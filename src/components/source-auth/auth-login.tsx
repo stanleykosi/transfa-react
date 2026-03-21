@@ -122,6 +122,7 @@ export default function AuthLogin({
                   setUsername(value);
                   onIdentifierChange?.(value);
                 }}
+                keyboardAppearance="dark"
                 autoCapitalize="none"
                 autoComplete="username"
                 textContentType="username"
@@ -161,6 +162,7 @@ export default function AuthLogin({
                 placeholderTextColor="rgba(255, 255, 255, 0.32)"
                 value={password}
                 onChangeText={setPassword}
+                keyboardAppearance="dark"
                 secureTextEntry={!showPassword}
                 autoComplete="password"
                 textContentType="password"

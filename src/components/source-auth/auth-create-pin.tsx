@@ -153,6 +153,7 @@ export default function AuthCreatePin({ onNext, onBack }: AuthCreatePinProps) {
                 onChangeText={(val) => handlePinChange(val, index)}
                 onKeyPress={(e) => handleKeyPress(e, index)}
                 keyboardType="number-pad"
+                keyboardAppearance="dark"
                 maxLength={1}
                 textAlign="center"
                 placeholderTextColor="rgba(255, 255, 255, 0.15)"

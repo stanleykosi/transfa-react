@@ -141,6 +141,48 @@ const isEmailAlreadyUsedConflict = (message: string): boolean => {
   );
 };
 
+const extractBvnSubmissionError = (error: unknown): string | null => {
+  const fallbackConflictMessage =
+    'This BVN is already linked to another account. Sign in with that account or use a different BVN.';
+  const message = errorMessage(error, '');
+
+  if (isBvnAlreadyUsedConflict(message)) {
+    return fallbackConflictMessage;
+  }
+
+  const normalizedMessage = message.toLowerCase();
+  let serializedResponse = '';
+  try {
+    serializedResponse = JSON.stringify((error as any)?.response?.data || {}).toLowerCase();
+  } catch {
+    serializedResponse = '';
+  }
+
+  const mentionsBvn =
+    normalizedMessage.includes('bvn') ||
+    normalizedMessage.includes('bank verification number') ||
+    serializedResponse.includes('bvn');
+
+  if (!mentionsBvn) {
+    return null;
+  }
+
+  if (
+    normalizedMessage.includes('mismatch') ||
+    normalizedMessage.includes('dob') ||
+    normalizedMessage.includes('date of birth') ||
+    normalizedMessage.includes('gender')
+  ) {
+    return 'BVN verification failed. Ensure your BVN, date of birth, and gender match your bank records.';
+  }
+
+  if (message) {
+    return message;
+  }
+
+  return 'BVN verification failed. Please confirm your details and try again.';
+};
+
 const OnboardingFormScreen = () => {
   const navigation = useNavigation<OnboardingNavigation>();
   const route = useRoute<OnboardingRoute>();
@@ -171,6 +213,7 @@ const OnboardingFormScreen = () => {
   const [bvn, setBvn] = useState('');
   const [dateOfBirth, setDateOfBirth] = useState('');
   const [gender, setGender] = useState('');
+  const [bvnSubmitError, setBvnSubmitError] = useState<string | null>(null);
 
   const normalizedPhoneForApi = useMemo(
     () => toAnchorNigerianPhoneNumber(phoneNumber),
@@ -683,6 +726,12 @@ const OnboardingFormScreen = () => {
       await clearOnboardingProgress().catch(() => undefined);
       navigation.dispatch(StackActions.replace('CreateAccount'));
     } catch (err) {
+      const bvnError = extractBvnSubmissionError(err);
+      if (bvnError) {
+        setBvnSubmitError(bvnError);
+        return;
+      }
+
       if (httpStatusCode(err) === 409) {
         const recovered = await recoverFromConflict(err);
         if (recovered) {
@@ -756,6 +805,7 @@ const OnboardingFormScreen = () => {
       return;
     }
 
+    setBvnSubmitError(null);
     setBvn(data.bvn);
     setDateOfBirth(data.dateOfBirth);
     setGender(data.gender);
@@ -764,6 +814,39 @@ const OnboardingFormScreen = () => {
     await submitAllSteps(data);
   };
 
+  const restartFromBeginning = useCallback(() => {
+    if (isSubmitting) {
+      return;
+    }
+
+    Alert.alert(
+      'Restart onboarding?',
+      'This clears your saved progress and starts onboarding from step 1.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Restart',
+          style: 'destructive',
+          onPress: async () => {
+            setIsSubmitting(true);
+            try {
+              await clearOnboardingProgress().catch(() => undefined);
+              navigation.dispatch(
+                StackActions.replace('OnboardingForm', {
+                  userType: selectedUserType,
+                  startStep: 1,
+                  forceTier1Update: true,
+                })
+              );
+            } finally {
+              setIsSubmitting(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [isSubmitting, navigation, selectedUserType]);
+
   const onBack = () => {
     if (isSubmitting) {
       return;
@@ -771,6 +854,11 @@ const OnboardingFormScreen = () => {
 
     if (currentStep > 1 && (!hasTier1Created || forceTier1Update)) {
       setCurrentStep((value) => value - 1);
+      return;
+    }
+
+    if (currentStep === 3 && hasTier1Created && !forceTier1Update) {
+      restartFromBeginning();
       return;
     }
 
@@ -842,6 +930,12 @@ const OnboardingFormScreen = () => {
     <AuthCompleteBvnDob
       onNext={handleBvnNext}
       onBack={onBack}
+      serverError={bvnSubmitError}
+      onFormChange={() => {
+        if (bvnSubmitError) {
+          setBvnSubmitError(null);
+        }
+      }}
       initialValues={{
         bvn,
         dateOfBirth: formatDobForUi(dateOfBirth),

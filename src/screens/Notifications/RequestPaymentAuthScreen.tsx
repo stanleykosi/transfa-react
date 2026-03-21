@@ -247,6 +247,7 @@ const RequestPaymentAuthScreen = () => {
               value={pinValue}
               onChangeText={handlePinChange}
               keyboardType="number-pad"
+              keyboardAppearance="dark"
               maxLength={4}
               secureTextEntry
               style={styles.hiddenInput}

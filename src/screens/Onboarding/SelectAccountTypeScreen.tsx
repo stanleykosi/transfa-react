@@ -4,8 +4,10 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { fetchAccountTypeOptions } from '@/api/authApi';
+import { useAuth } from '@/hooks/useAuth';
 import { AccountTypeOption } from '@/types/api';
 import { AppStackParamList } from '@/navigation/AppStack';
+import { setNextAuthInitialRoute } from '@/navigation/authStackEntry';
 import AuthAccountType from '@/components/source-auth/auth-account-type';
 
 type AppNavigation = NativeStackNavigationProp<AppStackParamList, 'SelectAccountType'>;
@@ -25,6 +27,7 @@ const fallbackOptions: AccountTypeOption[] = [
 
 const SelectAccountTypeScreen = () => {
   const navigation = useNavigation<AppNavigation>();
+  const { signOut } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [options, setOptions] = useState<AccountTypeOption[]>(fallbackOptions);
 
@@ -91,9 +94,16 @@ const SelectAccountTypeScreen = () => {
         }
         navigation.navigate('OnboardingForm', { userType: 'merchant' });
       }}
-      onBack={() => {
-        if (navigation.canGoBack()) {
-          navigation.goBack();
+      onBack={async () => {
+        try {
+          setNextAuthInitialRoute('SignIn');
+          await signOut();
+        } catch (error) {
+          setNextAuthInitialRoute(null);
+          console.warn('Failed to sign out from SelectAccountType screen', error);
+          if (navigation.canGoBack()) {
+            navigation.goBack();
+          }
         }
       }}
     />

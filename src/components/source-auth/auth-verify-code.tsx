@@ -181,6 +181,7 @@ export default function AuthVerifyCode({
               onChangeText={(value) => handleCodeChange(value, index)}
               onKeyPress={({ nativeEvent }) => handleKeyPress(nativeEvent.key, index)}
               keyboardType="number-pad"
+              keyboardAppearance="dark"
               maxLength={Platform.OS === 'android' ? 1 : 1}
               textContentType="oneTimeCode"
               textAlign="center"

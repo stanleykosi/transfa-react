@@ -201,6 +201,7 @@ export default function AuthCompleteAddress({
                     setAddress(val);
                     if (errors.address) setErrors((prev) => ({ ...prev, address: undefined }));
                   }}
+                  keyboardAppearance="dark"
                   onFocus={() => setFocusedInput('address')}
                   onBlur={() => setFocusedInput(null)}
                   multiline
@@ -272,6 +273,7 @@ export default function AuthCompleteAddress({
                     autoComplete="postal-code"
                     textContentType="postalCode"
                     keyboardType="number-pad"
+                    keyboardAppearance="dark"
                     onFocus={() => setFocusedInput('postalCode')}
                     onBlur={() => setFocusedInput(null)}
                     maxLength={6}
@@ -373,6 +375,7 @@ export default function AuthCompleteAddress({
               placeholderTextColor="rgba(255, 255, 255, 0.32)"
               value={countrySearch}
               onChangeText={setCountrySearch}
+              keyboardAppearance="dark"
             />
           </View>
         </View>
