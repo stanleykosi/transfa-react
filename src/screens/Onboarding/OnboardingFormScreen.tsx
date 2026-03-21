@@ -113,6 +113,34 @@ const isBvnAlreadyUsedConflict = (message: string): boolean => {
   );
 };
 
+const isPhoneAlreadyUsedConflict = (message: string): boolean => {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized.includes('phone')) {
+    return false;
+  }
+  return (
+    normalized.includes('already') ||
+    normalized.includes('exists') ||
+    normalized.includes('in use') ||
+    normalized.includes('used') ||
+    normalized.includes('linked')
+  );
+};
+
+const isEmailAlreadyUsedConflict = (message: string): boolean => {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized.includes('email')) {
+    return false;
+  }
+  return (
+    normalized.includes('already') ||
+    normalized.includes('exists') ||
+    normalized.includes('in use') ||
+    normalized.includes('used') ||
+    normalized.includes('linked')
+  );
+};
+
 const OnboardingFormScreen = () => {
   const navigation = useNavigation<OnboardingNavigation>();
   const route = useRoute<OnboardingRoute>();
@@ -471,6 +499,12 @@ const OnboardingFormScreen = () => {
                 'This BVN is already linked to another account. Sign in with that account or use a different BVN.',
             })
           );
+          return true;
+        }
+
+        if (isPhoneAlreadyUsedConflict(conflictReason) || isEmailAlreadyUsedConflict(conflictReason)) {
+          Alert.alert('Duplicate Information', conflictReason);
+          setCurrentStep(1); // Profile step has phone and email
           return true;
         }
 

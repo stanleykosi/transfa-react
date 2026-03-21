@@ -18,6 +18,7 @@ type UserRepository interface {
 	CreateUserAndEnqueueUserCreatedEvent(ctx context.Context, user *domain.User, kycData map[string]interface{}, exchange, routingKey string) (string, error)
 	FindByClerkUserID(ctx context.Context, clerkUserID string) (*domain.User, error)
 	FindByEmail(ctx context.Context, email string) (*domain.User, error)
+	FindByPhone(ctx context.Context, phone string) (*domain.User, error)
 	UpdateClerkUserID(ctx context.Context, userID, clerkUserID string) error
 	UpdateContactInfo(ctx context.Context, userID string, email *string, phone *string) error
 	UpdateAnchorCustomerInfo(ctx context.Context, userID string, anchorCustomerID string, fullName *string) error
@@ -149,6 +150,44 @@ func (r *PostgresUserRepository) FindByEmail(ctx context.Context, email string) 
 	u.Username = username
 	return &u, nil
 }
+
+// FindByPhone retrieves a user by their phone number.
+func (r *PostgresUserRepository) FindByPhone(ctx context.Context, phone string) (*domain.User, error) {
+	query := `
+		SELECT id, clerk_user_id, anchor_customer_id, btrim(username) AS username, email, phone_number, full_name, user_type, allow_sending, created_at, updated_at
+		FROM users WHERE phone_number = $1 LIMIT 1
+	`
+	var u domain.User
+	var anchorID *string
+	var username *string
+	row := r.db.QueryRow(ctx, query, phone)
+	err := row.Scan(
+		&u.ID,
+		&u.ClerkUserID,
+		&anchorID,
+		&username,
+		&u.Email,
+		&u.PhoneNumber,
+		&u.FullName,
+		&u.Type,
+		&u.AllowSending,
+		&u.CreatedAt,
+		&u.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, err
+		}
+		log.Printf("Error fetching user by phone %s: %v", phone, err)
+		return nil, err
+	}
+	if anchorID != nil {
+		u.AnchorCustomerID = anchorID
+	}
+	u.Username = username
+	return &u, nil
+}
+
 
 // UpdateClerkUserID updates the Clerk user ID for a given internal user ID.
 func (r *PostgresUserRepository) UpdateClerkUserID(ctx context.Context, userID, clerkUserID string) error {

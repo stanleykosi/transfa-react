@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/mail"
 	"regexp"
@@ -246,6 +247,19 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Internal server error: could not lookup user", http.StatusInternalServerError)
 		return
 	}
+
+	if existing == nil || errors.Is(findErr, pgx.ErrNoRows) {
+		// Try finding by phone to handle cases where user reset their Clerk account
+		byPhone, _ := h.repo.FindByPhone(r.Context(), req.PhoneNumber)
+		if byPhone != nil && byPhone.Email != nil && strings.ToLower(*byPhone.Email) == strings.ToLower(authEmail) {
+			log.Printf("Re-linking orphaned user %s for clerk_user_id %s via phone %s", byPhone.ID, clerkUserID, req.PhoneNumber)
+			if err := h.repo.UpdateClerkUserID(r.Context(), byPhone.ID, clerkUserID); err == nil {
+				existing = byPhone
+				existing.ClerkUserID = clerkUserID
+				findErr = nil
+			}
+		}
+	}
 	if findErr == nil && existing != nil {
 		internalUserID = existing.ID
 
@@ -279,7 +293,16 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		); err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-				http.Error(w, "Conflict: user data already exists", http.StatusConflict)
+				message := "Conflict: user data already exists"
+				switch pgErr.ConstraintName {
+				case "users_phone_number_key":
+					message = "This phone number is already associated with another account"
+				case "users_email_key":
+					message = "This email is already associated with another account"
+				case "users_username_key":
+					message = "This username is already taken"
+				}
+				http.Error(w, message, http.StatusConflict)
 				return
 			}
 			http.Error(w, "Internal server error: could not queue onboarding", http.StatusInternalServerError)
@@ -311,7 +334,16 @@ func (h *OnboardingHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-				http.Error(w, "Conflict: user data already exists", http.StatusConflict)
+				message := "Conflict: user data already exists"
+				switch pgErr.ConstraintName {
+				case "users_phone_number_key":
+					message = "This phone number is already associated with another account"
+				case "users_email_key":
+					message = "This email is already associated with another account"
+				case "users_username_key":
+					message = "This username is already taken"
+				}
+				http.Error(w, message, http.StatusConflict)
 				return
 			}
 			http.Error(w, "Internal server error: could not create user", http.StatusInternalServerError)
