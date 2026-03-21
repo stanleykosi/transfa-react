@@ -55,7 +55,13 @@ const AppTabs = () => {
         ),
       })}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
+      <Tab.Screen
+        name="Home"
+        component={HomeScreen}
+        options={{
+          tabBarStyle: { display: 'none' },
+        }}
+      />
       <Tab.Screen name="Settings" component={ProfileStack} />
       <Tab.Screen name="MoneyDrop" component={MoneyDropTabScreen} />
       <Tab.Screen name="Support" component={SupportScreen} />

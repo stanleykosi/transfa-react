@@ -1,26 +1,12 @@
-import React, { useMemo, useState } from 'react';
-import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useState } from 'react';
+import { Alert } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { useSignIn } from '@/hooks/useSignIn';
 import { fetchAuthSession } from '@/api/authApi';
 import { AuthStackParamList } from '@/navigation/AuthStack';
-import OtpCodeField from '@/components/auth/OtpCodeField';
-
-const OTP_LENGTH = 6;
+import AuthVerifyCode from '@/components/source-auth/auth-verify-code';
 
 type VerifyCodeRoute = RouteProp<AuthStackParamList, 'VerifyCode'>;
 type AuthNavigation = NativeStackNavigationProp<AuthStackParamList, 'VerifyCode'>;
@@ -28,15 +14,6 @@ type AuthNavigation = NativeStackNavigationProp<AuthStackParamList, 'VerifyCode'
 type EmailCodeFactor = {
   strategy?: string;
   emailAddressId?: string;
-};
-
-const TransfaMark = () => {
-  return (
-    <View style={styles.logoMark}>
-      <View style={styles.logoSlash} />
-      <View style={styles.logoBottomMark} />
-    </View>
-  );
 };
 
 const extractErrorMessage = (err: unknown, fallback: string): string => {
@@ -63,14 +40,8 @@ const VerifyCodeScreen = () => {
   const route = useRoute<VerifyCodeRoute>();
   const navigation = useNavigation<AuthNavigation>();
 
-  const [code, setCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isResending, setIsResending] = useState(false);
-
-  const canSubmit = useMemo(
-    () => isLoaded && code.length === OTP_LENGTH && !isLoading,
-    [isLoaded, code.length, isLoading]
-  );
 
   const resolveEmailAddressId = () => {
     if (route.params?.emailAddressId) {
@@ -79,8 +50,14 @@ const VerifyCodeScreen = () => {
     return getEmailFactor(signIn)?.emailAddressId;
   };
 
-  const onVerifyPress = async () => {
-    if (!isLoaded || !canSubmit) {
+  const onVerifyPress = async (code: string) => {
+    if (!isLoaded || isLoading) {
+      return;
+    }
+
+    const trimmedCode = code.trim();
+    if (!trimmedCode) {
+      Alert.alert('Missing code', 'Enter the verification code sent to your email.');
       return;
     }
 
@@ -88,7 +65,7 @@ const VerifyCodeScreen = () => {
     try {
       const result = await signIn.attemptSecondFactor({
         strategy: 'email_code',
-        code,
+        code: trimmedCode,
       });
 
       if (result.status === 'complete' && result.createdSessionId) {
@@ -141,155 +118,14 @@ const VerifyCodeScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
-      <LinearGradient colors={['#242424', '#121212', '#060708']} style={styles.gradient}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.keyboardContainer}
-        >
-          <ScrollView
-            contentContainerStyle={styles.scrollContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => navigation.navigate('SignIn')}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-            </TouchableOpacity>
-
-            <View style={styles.contentContainer}>
-              <TransfaMark />
-              <Text style={styles.title}>Verify Code</Text>
-              <Text style={styles.subtitle}>Please enter the code we just sent to your email</Text>
-
-              <OtpCodeField value={code} onChangeCode={setCode} length={OTP_LENGTH} autoFocus />
-
-              <TouchableOpacity
-                style={[styles.verifyButton, !canSubmit && styles.verifyButtonDisabled]}
-                onPress={onVerifyPress}
-                activeOpacity={0.85}
-                disabled={!canSubmit}
-              >
-                <Text style={styles.verifyButtonText}>{isLoading ? 'Verifying...' : 'Verify'}</Text>
-              </TouchableOpacity>
-
-              <Text style={styles.helperText}>Didn’t receive OTP?</Text>
-              <TouchableOpacity onPress={onResendPress} activeOpacity={0.75} disabled={isResending}>
-                <Text style={styles.resendText}>{isResending ? 'Sending...' : 'Resend Code'}</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </LinearGradient>
-    </SafeAreaView>
+    <AuthVerifyCode
+      onVerify={onVerifyPress}
+      onResend={onResendPress}
+      onBack={() => navigation.navigate('SignIn')}
+      email=""
+      isVerifying={isLoading || isResending}
+    />
   );
 };
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#0A0A0A',
-  },
-  gradient: {
-    flex: 1,
-  },
-  keyboardContainer: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 24,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 6,
-  },
-  contentContainer: {
-    flex: 1,
-    alignItems: 'center',
-    paddingTop: 40,
-  },
-  logoMark: {
-    width: 42,
-    height: 20,
-    borderRadius: 3,
-    backgroundColor: '#FFD300',
-    marginBottom: 16,
-    overflow: 'hidden',
-    justifyContent: 'flex-end',
-  },
-  logoSlash: {
-    position: 'absolute',
-    width: 60,
-    height: 11,
-    backgroundColor: '#0A0A0A',
-    transform: [{ rotate: '-12deg' }],
-    top: 4,
-    right: -17,
-  },
-  logoBottomMark: {
-    width: 8,
-    height: 6,
-    borderTopLeftRadius: 1,
-    borderTopRightRadius: 1,
-    backgroundColor: '#0A0A0A',
-    alignSelf: 'center',
-    marginBottom: 2,
-  },
-  title: {
-    color: '#F4F4F4',
-    fontSize: 48,
-    fontWeight: '700',
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    marginTop: 8,
-    color: '#55565A',
-    fontSize: 17,
-    fontWeight: '500',
-    textAlign: 'center',
-    lineHeight: 24,
-    maxWidth: 275,
-  },
-  verifyButton: {
-    width: '100%',
-    marginTop: 34,
-    backgroundColor: '#FFD300',
-    borderRadius: 8,
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  verifyButtonDisabled: {
-    opacity: 0.6,
-  },
-  verifyButtonText: {
-    color: '#121212',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  helperText: {
-    marginTop: 20,
-    color: '#A0A0A0',
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  resendText: {
-    marginTop: 6,
-    color: '#D2B108',
-    fontSize: 15,
-    fontWeight: '700',
-    textDecorationLine: 'underline',
-  },
-});
 
 export default VerifyCodeScreen;

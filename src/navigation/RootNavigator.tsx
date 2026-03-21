@@ -21,22 +21,17 @@
  */
 
 import React from 'react';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { useAuth } from '@/hooks/useAuth';
 import AuthStack from './AuthStack';
 import AppStack from './AppStack';
-import { theme } from '@/constants/theme';
 
 const RootNavigator = () => {
   const { isLoaded, isSignedIn } = useAuth();
 
-  // Show a loading indicator while Clerk is verifying the session.
+  // Hold a branded background while Clerk verifies the session.
   if (!isLoaded) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={theme.colors.primary} />
-      </View>
-    );
+    return <View style={styles.loadingContainer} />;
   }
 
   // Conditionally render the correct navigator based on authentication state.
@@ -46,9 +41,7 @@ const RootNavigator = () => {
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: theme.colors.background,
+    backgroundColor: '#FFD300',
   },
 });
 

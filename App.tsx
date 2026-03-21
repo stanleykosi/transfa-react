@@ -12,7 +12,7 @@
  * - RootNavigator: The main navigator component that decides which screen stack to show.
  */
 
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   NavigationContainer,
@@ -21,11 +21,21 @@ import {
 } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Linking } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import * as Font from 'expo-font';
+import {
+  Montserrat_400Regular,
+  Montserrat_500Medium,
+  Montserrat_600SemiBold,
+  Montserrat_700Bold,
+  useFonts,
+} from '@expo-google-fonts/montserrat';
 
 import ClerkProvider from '@/providers/ClerkProvider';
 import RootNavigator from '@/navigation/RootNavigator';
 import { useAuth } from '@/hooks/useAuth';
 import { useSecurityStore } from '@/store/useSecurityStore';
+import SplashScreen from '@/components/splash-screen';
 
 const queryClient = new QueryClient();
 const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
@@ -167,19 +177,71 @@ function AppRoot(): React.JSX.Element {
   return (
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider>
-        <NavigationContainer
-          ref={navigationRef}
-          onReady={flushPendingDropLink}
-          onStateChange={flushPendingDropLink}
-        >
-          <RootNavigator />
-        </NavigationContainer>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          <NavigationContainer
+            ref={navigationRef}
+            onReady={flushPendingDropLink}
+            onStateChange={flushPendingDropLink}
+          >
+            <RootNavigator />
+          </NavigationContainer>
+        </GestureHandlerRootView>
       </SafeAreaProvider>
     </QueryClientProvider>
   );
 }
 
-function App(): React.JSX.Element {
+function App(): React.JSX.Element | null {
+  const [artificFontsLoaded, setArtificFontsLoaded] = useState(false);
+  const [isSplashVisible, setIsSplashVisible] = useState(true);
+  const [montserratFontsLoaded] = useFonts({
+    Montserrat_400Regular,
+    Montserrat_500Medium,
+    Montserrat_600SemiBold,
+    Montserrat_700Bold,
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadArtificFonts = async () => {
+      try {
+        await Font.loadAsync({
+          'ArtificTrial-Bold': require('./src/assets/fonts/artifictrial-bold.otf'),
+          'ArtificTrial-Regular': require('./src/assets/fonts/artifictrial-regular.otf'),
+          'ArtificTrial-Medium': require('./src/assets/fonts/artifictrial-medium.otf'),
+          'ArtificTrial-Semibold': require('./src/assets/fonts/artifictrial-semibold.otf'),
+        });
+      } catch (error) {
+        console.warn('Font loading failed:', error);
+      } finally {
+        if (isMounted) {
+          setArtificFontsLoaded(true);
+        }
+      }
+    };
+
+    loadArtificFonts();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const handleSplashFinish = useCallback(() => {
+    setIsSplashVisible(false);
+  }, []);
+
+  const isAppReady = montserratFontsLoaded && artificFontsLoaded;
+
+  if (!isAppReady) {
+    return null;
+  }
+
+  if (isSplashVisible) {
+    return <SplashScreen onFinish={handleSplashFinish} />;
+  }
+
   return (
     <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
       <AppRoot />

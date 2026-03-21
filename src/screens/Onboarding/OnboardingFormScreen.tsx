@@ -1,18 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import { Alert, ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
 import { RouteProp, StackActions, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useUser } from '@clerk/clerk-expo';
@@ -26,32 +14,21 @@ import {
   submitTier1ProfileUpdate,
   submitTier2Verification,
 } from '@/api/authApi';
-import { OnboardingPayload } from '@/types/api';
+import { OnboardingPayload, OnboardingStatusResponse } from '@/types/api';
 import {
   isValidAnchorNigerianPhoneNumber,
   normalizeNigerianPhoneInput,
   toAnchorNigerianPhoneNumber,
 } from '@/utils/phone';
+import AuthCompleteAddress from '@/components/source-auth/auth-complete-address';
+import AuthCompleteBvnDob from '@/components/source-auth/auth-complete-bvn-dob';
+import AuthCompleteProfile from '@/components/source-auth/auth-complete-profile';
 
 type UserType = 'personal' | 'merchant';
 type OnboardingRoute = RouteProp<AppStackParamList, 'OnboardingForm'>;
 type OnboardingNavigation = NativeStackNavigationProp<AppStackParamList, 'OnboardingForm'>;
 
 const NIGERIA_DIAL_CODE = '+234';
-const steps = [1, 2, 3] as const;
-
-const stateOptions = ['Lagos', 'Abuja', 'Rivers', 'Kano', 'Oyo'];
-const countryOptions = ['Nigeria'];
-const genderOptions = ['Male', 'Female'];
-
-const TransfaMark = () => {
-  return (
-    <View style={styles.logoMark}>
-      <View style={styles.logoSlash} />
-      <View style={styles.logoBottomMark} />
-    </View>
-  );
-};
 
 const cleanDigits = (value: string): string => value.replace(/\D/g, '');
 
@@ -93,12 +70,47 @@ const parseDobToApiFormat = (value: string): string | null => {
     .padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
 };
 
+const formatDobForUi = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(trimmed)) {
+    return trimmed;
+  }
+  const hyphenMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+  if (!hyphenMatch) {
+    return trimmed;
+  }
+  return `${hyphenMatch[3]}/${hyphenMatch[2]}/${hyphenMatch[1]}`;
+};
+
 const errorMessage = (error: unknown, fallback: string): string => {
   const message = (error as any)?.response?.data?.message || (error as any)?.message;
   if (typeof message === 'string' && message.trim().length > 0) {
     return message;
   }
   return fallback;
+};
+
+const httpStatusCode = (error: unknown): number | undefined => {
+  const status = (error as any)?.response?.status;
+  return typeof status === 'number' ? status : undefined;
+};
+
+const isBvnAlreadyUsedConflict = (message: string): boolean => {
+  const normalized = message.trim().toLowerCase();
+  if (!normalized.includes('bvn')) {
+    return false;
+  }
+
+  return (
+    normalized.includes('already') ||
+    normalized.includes('exists') ||
+    normalized.includes('in use') ||
+    normalized.includes('used') ||
+    normalized.includes('linked')
+  );
 };
 
 const OnboardingFormScreen = () => {
@@ -329,74 +341,52 @@ const OnboardingFormScreen = () => {
     };
   }, [forceTier1Update, navigation, startStepParam]);
 
-  const pickState = () => {
-    Alert.alert(
-      'Select State/City',
-      'Choose your state/city',
-      stateOptions.map((item) => ({
-        text: item,
-        onPress: () => setStateCity(item),
-      }))
-    );
-  };
-
-  const pickCountry = () => {
-    Alert.alert(
-      'Select Country',
-      'Choose your country',
-      countryOptions.map((item) => ({
-        text: item,
-        onPress: () => setCountry(item),
-      }))
-    );
-  };
-
-  const pickGender = () => {
-    Alert.alert(
-      'Select Gender',
-      'Choose your gender',
-      genderOptions.map((item) => ({
-        text: item,
-        onPress: () => setGender(item),
-      }))
-    );
-  };
-
-  const validateStepOne = (): boolean => {
-    if (!firstName.trim() || !lastName.trim()) {
+  const validateProfileStep = (nextFirstName: string, nextLastName: string, nextPhone: string) => {
+    if (!nextFirstName.trim() || !nextLastName.trim()) {
       Alert.alert('Missing details', 'First name and last name are required.');
       return false;
     }
 
-    if (!isValidAnchorNigerianPhoneNumber(phoneNumber)) {
+    if (!isValidAnchorNigerianPhoneNumber(nextPhone)) {
       Alert.alert('Invalid phone', 'Enter a valid Nigerian phone number.');
       return false;
     }
+
     return true;
   };
 
-  const validateStepTwo = (): boolean => {
-    if (!addressLine1.trim() || !stateCity.trim() || !postalCode.trim() || !country.trim()) {
+  const validateAddressStep = (
+    nextAddress: string,
+    nextStateCity: string,
+    nextPostalCode: string,
+    nextCountry: string
+  ) => {
+    if (
+      !nextAddress.trim() ||
+      !nextStateCity.trim() ||
+      !nextPostalCode.trim() ||
+      !nextCountry.trim()
+    ) {
       Alert.alert('Missing details', 'Address, State/City, Postal Code and Country are required.');
       return false;
     }
     return true;
   };
 
-  const validateStepThree = (): string | null => {
-    const cleanedBvn = cleanDigits(bvn);
+  const validateBvnStep = (nextBvn: string, nextDob: string, nextGender: string): string | null => {
+    const cleanedBvn = cleanDigits(nextBvn);
     if (cleanedBvn.length !== 11) {
       Alert.alert('Invalid BVN', 'BVN must be exactly 11 digits.');
       return null;
     }
 
-    const normalizedDob = parseDobToApiFormat(dateOfBirth);
+    const normalizedDob = parseDobToApiFormat(nextDob);
     if (!normalizedDob) {
       Alert.alert('Invalid date', 'Enter date of birth in DD/MM/YYYY format.');
       return null;
     }
 
-    if (gender !== 'Male' && gender !== 'Female') {
+    if (nextGender !== 'Male' && nextGender !== 'Female') {
       Alert.alert('Invalid gender', 'Select your gender.');
       return null;
     }
@@ -444,16 +434,138 @@ const OnboardingFormScreen = () => {
     throw new Error('Tier 1 verification is taking longer than expected.');
   };
 
-  const submitAllSteps = async () => {
+  const redirectFromStatus = useCallback(
+    (statusResponse: OnboardingStatusResponse): boolean => {
+      switch (statusResponse.next_step) {
+        case 'app_tabs':
+          navigation.dispatch(StackActions.replace('AppTabs'));
+          return true;
+        case 'create_account':
+          navigation.dispatch(StackActions.replace('CreateAccount'));
+          return true;
+        case 'create_username':
+          navigation.dispatch(StackActions.replace('CreateUsername'));
+          return true;
+        case 'create_pin':
+          navigation.dispatch(StackActions.replace('CreatePin'));
+          return true;
+        case 'onboarding_form':
+        default:
+          return false;
+      }
+    },
+    [navigation]
+  );
+
+  const recoverFromConflict = useCallback(
+    async (conflictError?: unknown): Promise<boolean> => {
+      try {
+        const conflictReason = errorMessage(conflictError, '');
+        if (isBvnAlreadyUsedConflict(conflictReason)) {
+          navigation.dispatch(
+            StackActions.replace('OnboardingResult', {
+              outcome: 'failure',
+              status: 'tier2_rejected',
+              reason:
+                conflictReason ||
+                'This BVN is already linked to another account. Sign in with that account or use a different BVN.',
+            })
+          );
+          return true;
+        }
+
+        const latestStatus = await fetchOnboardingStatus();
+
+        if (latestStatus.draft) {
+          applyDraft(latestStatus.draft);
+        }
+
+        if (latestStatus.status === 'tier1_created' || latestStatus.status.startsWith('tier2_')) {
+          setHasTier1Created(true);
+        }
+
+        if (redirectFromStatus(latestStatus)) {
+          return true;
+        }
+
+        const normalizedStatus = latestStatus.status?.toLowerCase?.() ?? '';
+
+        if (normalizedStatus === 'tier2_manual_review') {
+          navigation.dispatch(
+            StackActions.replace('OnboardingResult', {
+              outcome: 'manual_review',
+              status: normalizedStatus,
+              reason: latestStatus.reason,
+            })
+          );
+          return true;
+        }
+
+        if (
+          normalizedStatus === 'tier2_rejected' ||
+          normalizedStatus === 'tier2_error' ||
+          normalizedStatus === 'tier2_failed' ||
+          normalizedStatus === 'tier2_reenter_information' ||
+          normalizedStatus === 'tier2_awaiting_document'
+        ) {
+          navigation.dispatch(
+            StackActions.replace('OnboardingResult', {
+              outcome: 'failure',
+              status: normalizedStatus,
+              reason: latestStatus.reason || conflictReason || 'Tier 2 verification failed.',
+            })
+          );
+          return true;
+        }
+
+        if (normalizedStatus.startsWith('tier2_')) {
+          navigation.dispatch(StackActions.replace('CreateAccount'));
+          return true;
+        }
+
+        const resumeStep = latestStatus.resume_step || 3;
+        navigation.dispatch(
+          StackActions.replace('OnboardingForm', {
+            userType: latestStatus.user_type || selectedUserType,
+            startStep: resumeStep,
+            forceTier1Update: resumeStep === 1,
+          })
+        );
+        return true;
+      } catch (recoveryError) {
+        console.warn('Failed to recover onboarding state after conflict', recoveryError);
+        navigation.dispatch(
+          StackActions.replace('OnboardingForm', {
+            userType: selectedUserType,
+            startStep: 3,
+            forceTier1Update: false,
+          })
+        );
+        return true;
+      }
+    },
+    [navigation, redirectFromStatus, selectedUserType]
+  );
+
+  const submitAllSteps = async (overrides?: {
+    bvn: string;
+    dateOfBirth: string;
+    gender: string;
+  }) => {
     if (selectedUserType !== 'personal') {
       Alert.alert('Unavailable', 'Merchant onboarding is not yet available on this flow.');
       return;
     }
 
-    const normalizedDob = validateStepThree();
+    const finalBvn = overrides?.bvn ?? bvn;
+    const finalDateOfBirth = overrides?.dateOfBirth ?? dateOfBirth;
+    const finalGender = overrides?.gender ?? gender;
+
+    const normalizedDob = validateBvnStep(finalBvn, finalDateOfBirth, finalGender);
     if (!normalizedDob) {
       return;
     }
+
     if (!normalizedPhoneForApi) {
       Alert.alert('Invalid phone', 'Enter a valid Nigerian phone number.');
       return;
@@ -461,6 +573,25 @@ const OnboardingFormScreen = () => {
 
     setIsSubmitting(true);
     try {
+      // Re-sync status just before submit to avoid duplicate tier requests.
+      try {
+        const latestStatus = await fetchOnboardingStatus();
+        if (latestStatus.status === 'completed') {
+          navigation.dispatch(StackActions.replace('AppTabs'));
+          return;
+        }
+
+        if (latestStatus.status === 'tier1_created' || latestStatus.status.startsWith('tier2_')) {
+          setHasTier1Created(true);
+        }
+
+        if (redirectFromStatus(latestStatus)) {
+          return;
+        }
+      } catch (statusError) {
+        console.warn('Could not refresh onboarding status before submit', statusError);
+      }
+
       const tier1ProfilePayload: OnboardingPayload = {
         userType: 'personal',
         phoneNumber: normalizedPhoneForApi,
@@ -510,14 +641,20 @@ const OnboardingFormScreen = () => {
 
       await submitTier2Verification({
         dob: normalizedDob,
-        bvn: cleanDigits(bvn),
-        gender: gender.toLowerCase() as 'male' | 'female',
+        bvn: cleanDigits(finalBvn),
+        gender: finalGender.toLowerCase() as 'male' | 'female',
       });
 
       await clearOnboardingProgress().catch(() => undefined);
-
       navigation.dispatch(StackActions.replace('CreateAccount'));
     } catch (err) {
+      if (httpStatusCode(err) === 409) {
+        const recovered = await recoverFromConflict(err);
+        if (recovered) {
+          return;
+        }
+      }
+
       Alert.alert(
         'Could not complete onboarding',
         errorMessage(err, 'We could not submit your profile. Please try again.')
@@ -527,34 +664,76 @@ const OnboardingFormScreen = () => {
     }
   };
 
-  const onNext = async () => {
+  const handleProfileNext = async (data: {
+    firstName: string;
+    lastName: string;
+    middleName?: string;
+    maidenName?: string;
+    phoneNumber: string;
+    countryCode: string;
+  }) => {
     if (isSubmitting) {
       return;
     }
 
-    if (currentStep === 1) {
-      if (!validateStepOne()) {
-        return;
-      }
-      await persistProgress(2);
-      setCurrentStep(2);
+    const nextPhone = normalizeNigerianPhoneInput(
+      `${data.countryCode || NIGERIA_DIAL_CODE}${data.phoneNumber}`
+    );
+    if (!validateProfileStep(data.firstName, data.lastName, nextPhone)) {
       return;
     }
 
-    if (currentStep === 2) {
-      if (!validateStepTwo()) {
-        return;
-      }
-      await persistProgress(3);
-      setCurrentStep(3);
+    setFirstName(data.firstName.trim());
+    setLastName(data.lastName.trim());
+    setMiddleName((data.middleName || '').trim());
+    setMaidenName((data.maidenName || '').trim());
+    setPhoneNumber(nextPhone);
+
+    await persistProgress(2);
+    setCurrentStep(2);
+  };
+
+  const handleAddressNext = async (data: {
+    address: string;
+    stateCity: string;
+    postalCode: string;
+    country: string;
+  }) => {
+    if (isSubmitting) {
       return;
     }
+
+    if (!validateAddressStep(data.address, data.stateCity, data.postalCode, data.country)) {
+      return;
+    }
+
+    setAddressLine1(data.address.trim());
+    setStateCity(data.stateCity.trim());
+    setPostalCode(data.postalCode.trim());
+    setCountry(data.country.trim());
 
     await persistProgress(3);
-    await submitAllSteps();
+    setCurrentStep(3);
+  };
+
+  const handleBvnNext = async (data: { bvn: string; dateOfBirth: string; gender: string }) => {
+    if (isSubmitting) {
+      return;
+    }
+
+    setBvn(data.bvn);
+    setDateOfBirth(data.dateOfBirth);
+    setGender(data.gender);
+
+    await persistProgress(3);
+    await submitAllSteps(data);
   };
 
   const onBack = () => {
+    if (isSubmitting) {
+      return;
+    }
+
     if (currentStep > 1 && (!hasTier1Created || forceTier1Update)) {
       setCurrentStep((value) => value - 1);
       return;
@@ -571,11 +750,10 @@ const OnboardingFormScreen = () => {
   if (isBootstrapping) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <LinearGradient colors={['#242424', '#121212', '#060708']} style={styles.gradient}>
-          <View style={styles.loadingWrap}>
-            <Text style={styles.loadingText}>Loading profile setup...</Text>
-          </View>
-        </LinearGradient>
+        <View style={styles.centered}>
+          <ActivityIndicator size="small" color="#FFD300" />
+          <Text style={styles.text}>Loading profile setup...</Text>
+        </View>
       </SafeAreaView>
     );
   }
@@ -583,448 +761,83 @@ const OnboardingFormScreen = () => {
   if (selectedUserType === 'merchant') {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <LinearGradient colors={['#242424', '#121212', '#060708']} style={styles.gradient}>
-          <View style={styles.loadingWrap}>
-            <Text style={styles.loadingText}>
-              Merchant onboarding will be enabled in the next release.
-            </Text>
-            <TouchableOpacity style={styles.nextButton} onPress={onBack} activeOpacity={0.85}>
-              <Text style={styles.nextButtonText}>Go Back</Text>
-            </TouchableOpacity>
-          </View>
-        </LinearGradient>
+        <View style={styles.centered}>
+          <Text style={styles.text}>Merchant onboarding will be enabled in the next release.</Text>
+          <Text style={styles.linkText} onPress={onBack}>
+            Go Back
+          </Text>
+        </View>
       </SafeAreaView>
     );
   }
 
+  if (currentStep === 1) {
+    return (
+      <AuthCompleteProfile
+        onNext={handleProfileNext}
+        onBack={onBack}
+        initialValues={{
+          firstName,
+          lastName,
+          middleName,
+          maidenName,
+          phoneNumber,
+          countryCode: NIGERIA_DIAL_CODE,
+        }}
+      />
+    );
+  }
+
+  if (currentStep === 2) {
+    return (
+      <AuthCompleteAddress
+        onNext={handleAddressNext}
+        onBack={onBack}
+        initialValues={{
+          address: addressLine1,
+          stateCity,
+          postalCode,
+          country,
+        }}
+      />
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
-      <LinearGradient colors={['#242424', '#121212', '#060708']} style={styles.gradient}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.keyboardContainer}
-        >
-          <ScrollView
-            contentContainerStyle={styles.scrollContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-          >
-            <TouchableOpacity style={styles.backButton} onPress={onBack} activeOpacity={0.7}>
-              <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-            </TouchableOpacity>
-
-            <View style={styles.contentContainer}>
-              <TransfaMark />
-              <Text style={styles.title}>Complete your profile</Text>
-              <Text style={styles.subtitle}>Fill your information below</Text>
-
-              <View style={styles.stepRow}>
-                {steps.map((step) => (
-                  <View
-                    key={step}
-                    style={[
-                      styles.stepDot,
-                      step <= currentStep && styles.stepDotActive,
-                      step < currentStep && styles.stepDotDone,
-                    ]}
-                  />
-                ))}
-              </View>
-
-              <View style={styles.formSection}>
-                {currentStep === 1 && (
-                  <>
-                    <Text style={styles.label}>First name *</Text>
-                    <View style={styles.inputWrapper}>
-                      <TextInput
-                        style={styles.textInput}
-                        value={firstName}
-                        onChangeText={setFirstName}
-                        placeholder="e.g Samuel"
-                        placeholderTextColor="#707070"
-                      />
-                    </View>
-
-                    <Text style={styles.label}>Last name *</Text>
-                    <View style={styles.inputWrapper}>
-                      <TextInput
-                        style={styles.textInput}
-                        value={lastName}
-                        onChangeText={setLastName}
-                        placeholder="e.g Ogunmekpon"
-                        placeholderTextColor="#707070"
-                      />
-                    </View>
-
-                    <View style={styles.rowInputs}>
-                      <View style={styles.rowInputItem}>
-                        <Text style={styles.label}>Middle name</Text>
-                        <View style={styles.inputWrapper}>
-                          <TextInput
-                            style={styles.textInput}
-                            value={middleName}
-                            onChangeText={setMiddleName}
-                            placeholder="e.g Usman"
-                            placeholderTextColor="#707070"
-                          />
-                        </View>
-                      </View>
-
-                      <View style={styles.rowInputItem}>
-                        <Text style={styles.label}>Maiden name (if any)</Text>
-                        <View style={styles.inputWrapper}>
-                          <TextInput
-                            style={styles.textInput}
-                            value={maidenName}
-                            onChangeText={setMaidenName}
-                            placeholder="e.g Peters"
-                            placeholderTextColor="#707070"
-                          />
-                        </View>
-                      </View>
-                    </View>
-
-                    <Text style={styles.label}>Phone number *</Text>
-                    <View style={styles.phoneWrapper}>
-                      <View style={styles.phonePrefix}>
-                        <Text style={styles.flagText}>🇳🇬</Text>
-                        <Ionicons name="chevron-down" size={16} color="#DCDCDC" />
-                        <Text style={styles.phonePrefixText}>{NIGERIA_DIAL_CODE}</Text>
-                      </View>
-                      <TextInput
-                        style={styles.phoneInput}
-                        value={phoneNumber}
-                        onChangeText={(value) => setPhoneNumber(normalizeNigerianPhoneInput(value))}
-                        placeholder="8012345678"
-                        placeholderTextColor="#707070"
-                        keyboardType="number-pad"
-                        maxLength={10}
-                      />
-                    </View>
-                  </>
-                )}
-
-                {currentStep === 2 && (
-                  <>
-                    <Text style={styles.label}>Address *</Text>
-                    <View style={styles.inputWrapper}>
-                      <TextInput
-                        style={styles.textInput}
-                        value={addressLine1}
-                        onChangeText={setAddressLine1}
-                        placeholder="e.g 18, Babalola street, Magodo"
-                        placeholderTextColor="#707070"
-                      />
-                    </View>
-
-                    <View style={styles.rowInputs}>
-                      <View style={styles.rowInputItem}>
-                        <Text style={styles.label}>State/City *</Text>
-                        <TouchableOpacity
-                          style={styles.selectWrapper}
-                          onPress={pickState}
-                          activeOpacity={0.75}
-                        >
-                          <Text style={[styles.selectText, !stateCity && styles.selectPlaceholder]}>
-                            {stateCity || 'e.g Lagos'}
-                          </Text>
-                          <Ionicons name="chevron-down" size={18} color="#9B9B9B" />
-                        </TouchableOpacity>
-                      </View>
-
-                      <View style={styles.rowInputItem}>
-                        <Text style={styles.label}>Postal Code *</Text>
-                        <View style={styles.inputWrapper}>
-                          <TextInput
-                            style={styles.textInput}
-                            value={postalCode}
-                            onChangeText={setPostalCode}
-                            placeholder="e.g 100011"
-                            placeholderTextColor="#707070"
-                            keyboardType="number-pad"
-                          />
-                        </View>
-                      </View>
-                    </View>
-
-                    <Text style={styles.label}>Country *</Text>
-                    <TouchableOpacity
-                      style={styles.selectWrapper}
-                      onPress={pickCountry}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={[styles.selectText, !country && styles.selectPlaceholder]}>
-                        {country || 'Search Country'}
-                      </Text>
-                      <Ionicons name="chevron-down" size={18} color="#9B9B9B" />
-                    </TouchableOpacity>
-                  </>
-                )}
-
-                {currentStep === 3 && (
-                  <>
-                    <Text style={styles.label}>BVN *</Text>
-                    <View style={styles.inputWrapper}>
-                      <TextInput
-                        style={styles.textInput}
-                        value={bvn}
-                        onChangeText={setBvn}
-                        placeholder="e.g 22456987341"
-                        placeholderTextColor="#707070"
-                        keyboardType="number-pad"
-                        maxLength={11}
-                      />
-                    </View>
-
-                    <View style={styles.rowInputs}>
-                      <View style={styles.rowInputItem}>
-                        <Text style={styles.label}>Date of birth *</Text>
-                        <View style={styles.inputWrapper}>
-                          <TextInput
-                            style={styles.textInput}
-                            value={dateOfBirth}
-                            onChangeText={setDateOfBirth}
-                            placeholder="DD/MM/YYYY"
-                            placeholderTextColor="#707070"
-                          />
-                        </View>
-                      </View>
-
-                      <View style={styles.rowInputItem}>
-                        <Text style={styles.label}>Gender *</Text>
-                        <TouchableOpacity
-                          style={styles.selectWrapper}
-                          onPress={pickGender}
-                          activeOpacity={0.75}
-                        >
-                          <Text style={[styles.selectText, !gender && styles.selectPlaceholder]}>
-                            {gender || 'Select gender'}
-                          </Text>
-                          <Ionicons name="chevron-down" size={18} color="#9B9B9B" />
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-                  </>
-                )}
-
-                <TouchableOpacity
-                  style={[styles.nextButton, isSubmitting && styles.nextButtonDisabled]}
-                  onPress={onNext}
-                  activeOpacity={0.85}
-                  disabled={isSubmitting}
-                >
-                  <Text style={styles.nextButtonText}>
-                    {isSubmitting ? 'Please wait...' : 'Next'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </LinearGradient>
-    </SafeAreaView>
+    <AuthCompleteBvnDob
+      onNext={handleBvnNext}
+      onBack={onBack}
+      initialValues={{
+        bvn,
+        dateOfBirth: formatDobForUi(dateOfBirth),
+        gender,
+      }}
+    />
   );
 };
 
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0A0A0A',
+    backgroundColor: '#08090A',
   },
-  gradient: {
+  centered: {
     flex: 1,
-  },
-  keyboardContainer: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 24,
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 6,
-  },
-  contentContainer: {
-    flex: 1,
     alignItems: 'center',
-    paddingTop: 40,
+    paddingHorizontal: 24,
+    gap: 12,
   },
-  logoMark: {
-    width: 42,
-    height: 20,
-    borderRadius: 3,
-    backgroundColor: '#FFD300',
-    marginBottom: 16,
-    overflow: 'hidden',
-    justifyContent: 'flex-end',
-  },
-  logoSlash: {
-    position: 'absolute',
-    width: 60,
-    height: 11,
-    backgroundColor: '#0A0A0A',
-    transform: [{ rotate: '-12deg' }],
-    top: 4,
-    right: -17,
-  },
-  logoBottomMark: {
-    width: 8,
-    height: 6,
-    borderTopLeftRadius: 1,
-    borderTopRightRadius: 1,
-    backgroundColor: '#0A0A0A',
-    alignSelf: 'center',
-    marginBottom: 2,
-  },
-  title: {
-    color: '#F4F4F4',
-    fontSize: 48,
-    fontWeight: '700',
-    letterSpacing: -0.5,
-  },
-  subtitle: {
-    marginTop: 8,
-    color: '#55565A',
-    fontSize: 17,
-    fontWeight: '500',
+  text: {
+    color: '#E9E9E9',
+    fontSize: 15,
     textAlign: 'center',
   },
-  stepRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 16,
-  },
-  stepDot: {
-    width: 20,
-    height: 4,
-    borderRadius: 10,
-    backgroundColor: '#2C2D30',
-  },
-  stepDotActive: {
-    backgroundColor: '#615211',
-  },
-  stepDotDone: {
-    backgroundColor: '#D2B108',
-  },
-  formSection: {
-    width: '100%',
-    marginTop: 28,
-  },
-  label: {
-    color: '#D7D7D7',
+  linkText: {
+    marginTop: 8,
+    color: '#FFD300',
     fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 10,
-  },
-  inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(79, 79, 79, 0.45)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-    borderRadius: 8,
-    minHeight: 48,
-    paddingHorizontal: 12,
-    marginBottom: 18,
-  },
-  textInput: {
-    flex: 1,
-    color: '#E9E9E9',
-    fontSize: 15,
-    paddingVertical: Platform.OS === 'ios' ? 12 : 8,
-  },
-  rowInputs: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  rowInputItem: {
-    flex: 1,
-  },
-  phoneWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(79, 79, 79, 0.45)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-    borderRadius: 8,
-    minHeight: 48,
-    marginBottom: 18,
-    overflow: 'hidden',
-  },
-  phonePrefix: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    gap: 4,
-    borderRightWidth: 1,
-    borderRightColor: 'rgba(255,255,255,0.08)',
-  },
-  flagText: {
-    fontSize: 18,
-  },
-  phonePrefixText: {
-    color: '#CFCFCF',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  phoneInput: {
-    flex: 1,
-    color: '#E9E9E9',
-    fontSize: 15,
-    paddingHorizontal: 12,
-    paddingVertical: Platform.OS === 'ios' ? 12 : 8,
-  },
-  selectWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(79, 79, 79, 0.45)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.06)',
-    borderRadius: 8,
-    minHeight: 48,
-    paddingHorizontal: 12,
-    marginBottom: 18,
-  },
-  selectText: {
-    color: '#E9E9E9',
-    fontSize: 15,
-    flex: 1,
-  },
-  selectPlaceholder: {
-    color: '#7E7E7E',
-  },
-  nextButton: {
-    marginTop: 6,
-    backgroundColor: '#FFD300',
-    borderRadius: 8,
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  nextButtonDisabled: {
-    opacity: 0.6,
-  },
-  nextButtonText: {
-    color: '#121212',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  loadingWrap: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    color: '#DADADA',
-    fontSize: 16,
+    textDecorationLine: 'underline',
   },
 });
 
