@@ -388,6 +388,26 @@ func (h *UserEventHandler) HandleTier2VerificationRequestedEvent(body []byte) bo
 			return true
 		}
 
+		// Non-retriable client errors from Anchor (4xx): ACK to stop requeue storm
+		if strings.Contains(lowerErr, "status 400") ||
+			strings.Contains(lowerErr, "status 401") ||
+			strings.Contains(lowerErr, "status 403") ||
+			strings.Contains(lowerErr, "status 404") ||
+			strings.Contains(lowerErr, "status 409") ||
+			strings.Contains(lowerErr, "status 422") {
+			log.Printf("Non-retriable client error from Anchor for Tier2 KYC (ACK). UserID %s: %v", event.UserID, err)
+			reason := fmt.Sprintf("Anchor API error: %v", err)
+			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier2", "failed", &reason)
+			return true
+		}
+
+		// Rate limit from Anchor: ACK to avoid hot-looping and API limits
+		if strings.Contains(lowerErr, "status 429") || strings.Contains(lowerErr, "too many requests") {
+			log.Printf("Rate limited by Anchor for Tier2 KYC (ACK). UserID %s: %v", event.UserID, err)
+			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier2", "rate_limited", ptr("Rate limited by Anchor API. Please try again later."))
+			return true
+		}
+
 		log.Printf("ERROR: Failed to trigger Anchor Tier2 KYC for user %s: %v", event.UserID, err)
 		reason := fmt.Sprintf("Failed to trigger Anchor Tier2 KYC: %v", err)
 		_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier2", "failed", &reason)
@@ -442,6 +462,26 @@ func (h *UserEventHandler) HandleTier3VerificationRequestedEvent(body []byte) bo
 			if err := h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier3", "completed", nil); err != nil {
 				log.Printf("Failed to mark tier3 completed for user %s: %v", event.UserID, err)
 			}
+			return true
+		}
+
+		// Non-retriable client errors from Anchor (4xx): ACK to stop requeue storm
+		if strings.Contains(lowerErr, "status 400") ||
+			strings.Contains(lowerErr, "status 401") ||
+			strings.Contains(lowerErr, "status 403") ||
+			strings.Contains(lowerErr, "status 404") ||
+			strings.Contains(lowerErr, "status 409") ||
+			strings.Contains(lowerErr, "status 422") {
+			log.Printf("Non-retriable client error from Anchor for Tier3 KYC (ACK). UserID %s: %v", event.UserID, err)
+			reason := fmt.Sprintf("Anchor API error: %v", err)
+			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier3", "failed", &reason)
+			return true
+		}
+
+		// Rate limit from Anchor: ACK to avoid hot-looping and API limits
+		if strings.Contains(lowerErr, "status 429") || strings.Contains(lowerErr, "too many requests") {
+			log.Printf("Rate limited by Anchor for Tier3 KYC (ACK). UserID %s: %v", event.UserID, err)
+			_ = h.repo.UpsertOnboardingStatus(ctx, event.UserID, "tier3", "rate_limited", ptr("Rate limited by Anchor API. Please try again later."))
 			return true
 		}
 
