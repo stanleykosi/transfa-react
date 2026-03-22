@@ -7,12 +7,11 @@
  * - @supabase/supabase-js: The official Supabase client library.
  * - @clerk/clerk-expo: For getting the JWT to authenticate Supabase requests.
  * - react-native-get-random-values: Polyfill for crypto, needed by Supabase.
- * - react-native-image-picker: For the Asset type definition.
+ * - expo-image-picker: Source of uploaded image asset metadata.
  */
 import 'react-native-get-random-values'; // Required for uuid
 import { SupabaseClient, createClient } from '@supabase/supabase-js';
 import { Clerk } from '@clerk/clerk-expo';
-import type { Asset } from 'react-native-image-picker';
 
 // Retrieve Supabase credentials from environment variables.
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -21,6 +20,8 @@ const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Supabase URL and Anon Key must be provided in environment variables.');
 }
+
+const STORAGE_API_PATH = '/storage/v1/';
 
 // Initialize the Supabase client.
 // We provide a custom global fetch that includes the Clerk JWT for authentication.
@@ -33,11 +34,21 @@ export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnonKe
     // It retrieves the latest Clerk JWT and adds it to the Authorization header.
     // This is how we authenticate with Supabase using our Clerk user identity.
     fetch: async (url, options = {}) => {
-      const clerkToken = await Clerk.session?.getToken({ template: 'supabase' });
-
       const headers = new Headers(options.headers);
-      if (clerkToken) {
-        headers.set('Authorization', `Bearer ${clerkToken}`);
+      const requestUrl =
+        typeof url === 'string'
+          ? url
+          : typeof URL !== 'undefined' && url instanceof URL
+            ? url.toString()
+            : url.url;
+
+      // Supabase Storage rejects some external JWT algorithms.
+      // Keep the default Supabase auth header on storage requests.
+      if (!requestUrl.includes(STORAGE_API_PATH)) {
+        const clerkToken = await Clerk.session?.getToken({ template: 'supabase' });
+        if (clerkToken) {
+          headers.set('Authorization', `Bearer ${clerkToken}`);
+        }
       }
 
       return fetch(url, {
@@ -51,12 +62,18 @@ export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnonKe
 /**
  * Uploads an image asset to the Supabase storage bucket for payment requests.
  *
- * @param asset The image asset object from react-native-image-picker.
+ * @param asset The image asset object from expo-image-picker.
  * @returns A promise that resolves with the public URL of the uploaded image.
  * @throws An error if the upload fails.
  */
-export const uploadImage = async (asset: Asset): Promise<string> => {
-  if (!asset.uri || !asset.fileName || !asset.type) {
+export interface UploadImageAsset {
+  uri?: string;
+  fileName?: string | null;
+  type?: string | null;
+}
+
+export const uploadImage = async (asset: UploadImageAsset): Promise<string> => {
+  if (!asset.uri) {
     throw new Error('Invalid image asset provided for upload.');
   }
 
@@ -67,9 +84,14 @@ export const uploadImage = async (asset: Asset): Promise<string> => {
     throw new Error('User must be authenticated to upload images.');
   }
 
+  const fileName = asset.fileName?.trim() ? asset.fileName : `request-${Date.now()}.jpg`;
+  const contentType = asset.type?.trim() ? asset.type : 'image/jpeg';
+
   // Create a unique file path for the image to avoid name collisions.
-  const fileExt = asset.fileName.split('.').pop();
-  const filePath = `${userId}/${new Date().getTime()}.${fileExt}`;
+  const directExt = fileName.includes('.') ? fileName.split('.').pop() : undefined;
+  const mimeExt = contentType.includes('/') ? contentType.split('/').pop() : undefined;
+  const safeExt = (directExt || mimeExt || 'jpg').replace(/[^a-zA-Z0-9]/g, '') || 'jpg';
+  const filePath = `${userId}/${new Date().getTime()}.${safeExt}`;
 
   // Use the browser's fetch API to get the blob data of the image.
   const response = await fetch(asset.uri);
@@ -79,7 +101,7 @@ export const uploadImage = async (asset: Asset): Promise<string> => {
   const { data, error } = await supabase.storage
     .from('payment-request-images')
     .upload(filePath, blob, {
-      contentType: asset.type,
+      contentType,
       upsert: false,
     });
 

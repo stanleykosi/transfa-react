@@ -1,7 +1,6 @@
 import BackIcon from '@/assets/icons/back.svg';
 import CalendarIcon from '@/assets/icons/calendar1.svg';
 import CancelIcon from '@/assets/icons/cancel.svg';
-import PaidIcon from '@/assets/icons/paid.svg';
 import SearchIcon from '@/assets/icons/search.svg';
 import SettingsIcon from '@/assets/icons/settings.svg';
 import VerifiedBadge from '@/assets/icons/verified.svg';
@@ -151,6 +150,8 @@ const IncomingRequestsScreen = () => {
               const username = stripUsernamePrefix(request.creator_username || 'Transfa User');
               const AvatarComponent = pickAvatarComponent(username || request.id);
               const status = request.display_status;
+              const isDeclined = status === 'declined';
+              const formattedAmount = formatCurrency(request.amount);
 
               return (
                 <TouchableOpacity
@@ -169,11 +170,15 @@ const IncomingRequestsScreen = () => {
                     </View>
                     <View style={styles.requestInfo}>
                       <View style={styles.requestNameRow}>
-                        <Text style={styles.requestName}>{username}</Text>
+                        <Text style={styles.requestName} numberOfLines={1}>
+                          {username}
+                        </Text>
                         <VerifiedBadge width={16} height={16} />
                       </View>
 
-                      <Text style={styles.requestAmount}>{formatCurrency(request.amount)}</Text>
+                      {isDeclined ? (
+                        <Text style={styles.requestAmount}>{formattedAmount}</Text>
+                      ) : null}
 
                       <View style={styles.requestDateRow}>
                         <CalendarIcon width={14} height={14} />
@@ -185,21 +190,19 @@ const IncomingRequestsScreen = () => {
                   </View>
 
                   <View style={styles.requestStatus}>
-                    {status === 'declined' ? (
+                    {!isDeclined ? (
+                      <View style={styles.amountContainer}>
+                        <Text style={styles.requestedAmountLabel}>Requested Amount:</Text>
+                        <Text style={styles.requestedAmountValue}>{formattedAmount}</Text>
+                      </View>
+                    ) : null}
+
+                    {isDeclined ? (
                       <View style={styles.declinedBadge}>
                         <CancelIcon width={10} height={10} />
                         <Text style={styles.declinedText}>Declined</Text>
                       </View>
-                    ) : status === 'paid' ? (
-                      <View style={styles.paidBadge}>
-                        <PaidIcon width={10} height={10} color="#FFFFFF" />
-                        <Text style={styles.paidText}>Paid</Text>
-                      </View>
-                    ) : (
-                      <View style={styles.pendingBadge}>
-                        <Text style={styles.pendingText}>Pending</Text>
-                      </View>
-                    )}
+                    ) : null}
                   </View>
                 </TouchableOpacity>
               );
@@ -352,7 +355,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#000000',
     fontFamily: 'Montserrat_600SemiBold',
-    maxWidth: 130,
+    maxWidth: 140,
   },
   requestAmount: {
     fontSize: 14,
@@ -374,6 +377,23 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     marginLeft: 10,
   },
+  amountContainer: {
+    alignItems: 'flex-end',
+    maxWidth: 120,
+  },
+  requestedAmountLabel: {
+    fontSize: 12,
+    color: '#000000',
+    fontFamily: 'Montserrat_400Regular',
+    marginBottom: 4,
+    textAlign: 'right',
+  },
+  requestedAmountValue: {
+    fontSize: 16,
+    color: '#000000',
+    fontFamily: 'Montserrat_600SemiBold',
+    textAlign: 'right',
+  },
   declinedBadge: {
     backgroundColor: '#FFCDCD',
     borderRadius: 21,
@@ -386,34 +406,6 @@ const styles = StyleSheet.create({
   declinedText: {
     fontSize: 12,
     color: '#FF3737',
-    fontFamily: 'Montserrat_600SemiBold',
-  },
-  paidBadge: {
-    backgroundColor: '#4CD964',
-    borderRadius: 21,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  paidText: {
-    fontSize: 12,
-    color: '#FFFFFF',
-    fontFamily: 'Montserrat_600SemiBold',
-  },
-  pendingBadge: {
-    backgroundColor: '#EFEFEF',
-    borderRadius: 21,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  pendingText: {
-    fontSize: 12,
-    color: '#6C6B6B',
     fontFamily: 'Montserrat_600SemiBold',
   },
 });
