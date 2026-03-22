@@ -1,8 +1,28 @@
-import React, { useMemo, useRef, useState } from 'react';
+import BackIcon from '@/assets/icons/back.svg';
+import EditIcon from '@/assets/icons/edit.svg';
+import SearchIcon from '@/assets/icons/search.svg';
+import VerifiedBadge from '@/assets/icons/verified.svg';
+import Avatar from '@/assets/images/avatar.svg';
+import Avatar1 from '@/assets/images/avatar1.svg';
+import Avatar2 from '@/assets/images/avatar2.svg';
+import Avatar3 from '@/assets/images/avatar3.svg';
+import { useCreateTransferList } from '@/api/transactionApi';
+import { useFrequentUsers, useUserSearch } from '@/api/userDiscoveryApi';
+import type { AppNavigationProp } from '@/types/navigation';
+import { normalizeUsername, usernameKey } from '@/utils/username';
+import { useNavigation } from '@react-navigation/native';
+import { BlurView } from 'expo-blur';
+import { StatusBar } from 'expo-status-bar';
+import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
+  Pressable,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,36 +30,48 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
+import { SvgXml } from 'react-native-svg';
 
-import { useCreateTransferList } from '@/api/transactionApi';
-import { useFrequentUsers, useUserSearch } from '@/api/userDiscoveryApi';
-import type { AppNavigationProp } from '@/types/navigation';
-import { normalizeUsername, usernameKey } from '@/utils/username';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const BRAND_YELLOW = '#FFD300';
-const BG_BOTTOM = '#050607';
+const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="375" height="812" fill="url(#paint0_linear_708_2445)"/>
+<defs>
+<linearGradient id="paint0_linear_708_2445" x1="187.5" y1="0" x2="187.5" y2="812" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2B2B2B"/>
+<stop offset="0.778846" stop-color="#0F0F0F"/>
+</linearGradient>
+</defs>
+</svg>`;
+
+const avatarComponents = [Avatar, Avatar1, Avatar2, Avatar3];
+
+const avatarIndexFromSeed = (seed: string) => {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) % 1000000007;
+  }
+  return Math.abs(hash) % avatarComponents.length;
+};
+
+const getAvatarComponent = (index: number) => avatarComponents[index] || Avatar;
+
+type DisplayUser = {
+  id: string;
+  username: string;
+  fullName: string;
+  avatarIndex: number;
+  verified: boolean;
+};
 
 const CreateTransferListScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
 
+  const [listName, setListName] = useState('Name List');
+  const [isEditingName, setIsEditingName] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selected, setSelected] = useState<
-    Record<
-      string,
-      {
-        username: string;
-        fullName?: string | null;
-      }
-    >
-  >({});
-  const [listName, setListName] = useState('');
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [showEmptyTitleModal, setShowEmptyTitleModal] = useState(false);
-  const titleInputRef = useRef<TextInput | null>(null);
+  const [selectedUsers, setSelectedUsers] = useState<Record<string, DisplayUser>>({});
+  const [showErrorModal, setShowErrorModal] = useState(false);
 
   const normalizedQuery = searchQuery.trim();
   const { data: searchData, isLoading: isSearching } = useUserSearch(normalizedQuery, 30);
@@ -54,55 +86,77 @@ const CreateTransferListScreen = () => {
     },
   });
 
-  const suggestions = useMemo(() => {
+  const displayUsers = useMemo<DisplayUser[]>(() => {
     const source =
       normalizedQuery.length > 0 ? (searchData?.users ?? []) : (frequentData?.users ?? []);
-    const seen = new Set<string>();
-    const unique = [] as typeof source;
 
-    source.forEach((user) => {
+    const seen = new Set<string>();
+    const unique = source.filter((user) => {
       const key = usernameKey(user.username);
       if (!key || seen.has(key)) {
-        return;
+        return false;
       }
       seen.add(key);
-      unique.push(user);
+      return true;
     });
 
-    return unique;
+    return unique
+      .map((user) => ({
+        id: user.id,
+        username: normalizeUsername(user.username),
+        fullName: user.full_name || 'Transfa User',
+        avatarIndex: avatarIndexFromSeed(user.username),
+        verified: true,
+      }))
+      .sort((a, b) => a.username.localeCompare(b.username));
   }, [frequentData?.users, normalizedQuery.length, searchData?.users]);
 
-  const groupedSuggestions = useMemo(() => {
-    const byLetter = new Map<string, typeof suggestions>();
+  const selectedUsersList = useMemo(
+    () => Object.values(selectedUsers).sort((a, b) => a.username.localeCompare(b.username)),
+    [selectedUsers]
+  );
 
-    suggestions.forEach((user) => {
-      const normalized = normalizeUsername(user.username);
-      const letter = normalized.slice(0, 1).toUpperCase() || '#';
-      const bucket = byLetter.get(letter) ?? [];
-      bucket.push(user);
-      byLetter.set(letter, bucket);
-    });
-
-    return [...byLetter.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([letter, users]) => ({
-        letter,
-        users: users.sort((a, b) =>
-          normalizeUsername(a.username).localeCompare(normalizeUsername(b.username))
-        ),
-      }));
-  }, [suggestions]);
-
-  const selectedCount = Object.keys(selected).length;
-
-  const toggleUser = (rawUsername: string, fullName?: string | null) => {
-    const username = rawUsername.trim();
-    if (!username) {
-      return;
+  const selectedFilteredUsers = useMemo(() => {
+    if (!normalizedQuery) {
+      return selectedUsersList;
     }
 
-    const key = usernameKey(username);
-    setSelected((prev) => {
+    const query = normalizedQuery.toLowerCase();
+    return selectedUsersList.filter(
+      (user) =>
+        user.username.toLowerCase().includes(query) || user.fullName.toLowerCase().includes(query)
+    );
+  }, [normalizedQuery, selectedUsersList]);
+
+  const groupedUsers = useMemo(() => {
+    const selectedKeys = new Set(Object.keys(selectedUsers));
+    const remainingUsers = displayUsers.filter(
+      (user) => !selectedKeys.has(usernameKey(user.username))
+    );
+
+    const groups: Record<string, DisplayUser[]> = {};
+    remainingUsers.forEach((user) => {
+      const firstLetter = user.username.charAt(0).toUpperCase() || '#';
+      if (!groups[firstLetter]) {
+        groups[firstLetter] = [];
+      }
+      groups[firstLetter].push(user);
+    });
+
+    return Object.keys(groups)
+      .sort()
+      .map((letter) => ({
+        letter,
+        users: groups[letter].sort((a, b) => a.username.localeCompare(b.username)),
+      }));
+  }, [displayUsers, selectedUsers]);
+
+  const selectedCount = selectedUsersList.length;
+
+  const toggleUserSelection = (user: DisplayUser) => {
+    const key = usernameKey(user.username);
+
+    setSelectedUsers((prev) => {
       if (prev[key]) {
         const next = { ...prev };
         delete next[key];
@@ -116,381 +170,507 @@ const CreateTransferListScreen = () => {
 
       return {
         ...prev,
-        [key]: {
-          username,
-          fullName,
-        },
+        [key]: user,
       };
     });
   };
 
-  const focusTitleEditor = () => {
-    setIsEditingTitle(true);
-    setTimeout(() => titleInputRef.current?.focus(), 80);
-  };
-
-  const handleConfirmSave = async () => {
+  const handleSave = async () => {
     if (selectedCount === 0) {
       Alert.alert('No users selected', 'Choose at least one user before saving this list.');
       return;
     }
 
     const trimmedName = listName.trim();
-    if (!trimmedName) {
-      setShowEmptyTitleModal(true);
+    if (!trimmedName || trimmedName === 'Name List') {
+      setShowErrorModal(true);
       return;
     }
 
     await createMutation.mutateAsync({
       name: trimmedName,
-      member_usernames: Object.values(selected)
+      member_usernames: selectedUsersList
         .map((entry) => normalizeUsername(entry.username))
         .filter(Boolean),
     });
   };
 
   return (
-    <View style={styles.root}>
-      <LinearGradient
-        colors={['#1A1B1E', '#0C0D0F', BG_BOTTOM]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={StyleSheet.absoluteFillObject}
-      />
+    <SafeAreaView style={styles.container}>
+      <StatusBar style="light" />
+      <View style={styles.backgroundContainer}>
+        <SvgXml xml={backgroundSvg} width={SCREEN_WIDTH} height={SCREEN_HEIGHT} />
+      </View>
 
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={22} color="#ECECEC" />
-        </TouchableOpacity>
-
-        <View style={styles.titleRow}>
-          {isEditingTitle ? (
-            <TextInput
-              ref={titleInputRef}
-              style={styles.titleInput}
-              value={listName}
-              onChangeText={setListName}
-              placeholder="Name List"
-              placeholderTextColor="#8E9096"
-              maxLength={80}
-              autoCapitalize="words"
-              onBlur={() => setIsEditingTitle(false)}
-            />
-          ) : (
-            <Text style={styles.title}>{listName.trim() || 'Name List'}</Text>
-          )}
-          <TouchableOpacity
-            onPress={() => {
-              if (isEditingTitle) {
-                setIsEditingTitle(false);
-                return;
-              }
-              focusTitleEditor();
-            }}
-            hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
-          >
-            <Ionicons
-              name={isEditingTitle ? 'checkmark-outline' : 'create-outline'}
-              size={16}
-              color="#B6B7BC"
-            />
+      <View style={styles.topBar}>
+        <View style={styles.topBarLeft}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <BackIcon width={24} height={24} />
           </TouchableOpacity>
         </View>
+      </View>
 
-        <View style={styles.searchWrap}>
-          <Ionicons name="search" size={16} color="#9FA1A7" />
-          <TextInput
-            style={styles.searchInput}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder="Search"
-            placeholderTextColor="#6F727A"
-            autoCapitalize="none"
-          />
-        </View>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.titleContainer}>
+            {isEditingName ? (
+              <TextInput
+                style={styles.titleInput}
+                value={listName}
+                onChangeText={setListName}
+                autoFocus
+                onBlur={() => setIsEditingName(false)}
+                returnKeyType="done"
+                onSubmitEditing={() => setIsEditingName(false)}
+              />
+            ) : (
+              <TouchableOpacity
+                style={styles.titleWrapper}
+                onPress={() => setIsEditingName(true)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.title}>{listName}</Text>
+                <View>
+                  <EditIcon width={20} height={20} color="#FFFFFF" />
+                </View>
+              </TouchableOpacity>
+            )}
+          </View>
 
-        <View style={styles.selectedCounterWrap}>
-          <Text style={styles.selectedCounterText}>Selected: {selectedCount}/10</Text>
-        </View>
+          <View style={styles.searchContainer}>
+            <View style={styles.searchIconContainer}>
+              <SearchIcon width={16} height={16} color="#FFFFFF" />
+            </View>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search user"
+              placeholderTextColor="#6C6B6B"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCapitalize="none"
+            />
+          </View>
 
-        <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-          <Text style={styles.sectionLabel}>Suggestions</Text>
-
-          {isSearching ? (
-            <ActivityIndicator size="small" color={BRAND_YELLOW} />
-          ) : groupedSuggestions.length === 0 ? (
-            <Text style={styles.emptyText}>No user found</Text>
-          ) : (
-            groupedSuggestions.map((group) => (
-              <View key={group.letter}>
-                <Text style={styles.groupLetter}>{group.letter}</Text>
-
-                {group.users.map((user) => {
-                  const displayUsername = normalizeUsername(user.username);
-                  const isSelected = !!selected[usernameKey(user.username)];
-
-                  return (
-                    <View key={user.id} style={styles.userCard}>
-                      <View style={styles.userInfo}>
-                        <View style={styles.userAvatar}>
-                          <Text style={styles.userAvatarInitial}>
-                            {displayUsername.slice(0, 1).toUpperCase()}
-                          </Text>
+          {selectedFilteredUsers.length > 0 && (
+            <View style={styles.selectedSection}>
+              {selectedFilteredUsers.map((user) => {
+                const AvatarComponent = getAvatarComponent(user.avatarIndex);
+                return (
+                  <TouchableOpacity
+                    key={`selected-${user.id}`}
+                    style={styles.userCard}
+                    onPress={() => toggleUserSelection(user)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.userAvatarContainer}>
+                      <AvatarComponent width={48} height={48} />
+                      {user.verified && (
+                        <View style={styles.verifiedBadgeContainer}>
+                          <VerifiedBadge width={15} height={15} />
                         </View>
-                        <View style={styles.userTextWrap}>
-                          <Text style={styles.username}>{displayUsername}</Text>
-                          <Text style={styles.fullName}>{user.full_name || 'Transfa User'}</Text>
-                        </View>
-                      </View>
-
-                      <TouchableOpacity
-                        style={[styles.toggleCircle, isSelected && styles.toggleCircleActive]}
-                        onPress={() => toggleUser(user.username, user.full_name)}
-                      />
+                      )}
                     </View>
-                  );
-                })}
-              </View>
-            ))
+
+                    <View style={styles.userInfo}>
+                      <View style={styles.usernameRow}>
+                        <Text style={styles.username}>{user.username}</Text>
+                        {user.verified && <VerifiedBadge width={15} height={15} />}
+                      </View>
+                      <Text style={styles.fullName}>{user.fullName}</Text>
+                    </View>
+
+                    <View style={styles.checkboxContainer}>
+                      <View style={[styles.checkbox, styles.checkboxChecked]} />
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           )}
+
+          <View style={styles.listHeaderContainer}>
+            <Text style={styles.sectionTitle}>Suggestions</Text>
+          </View>
+
+          <View style={styles.usersSection}>
+            {isSearching ? (
+              <ActivityIndicator size="small" color="#FFD300" />
+            ) : groupedUsers.length > 0 ? (
+              groupedUsers.map((group) => (
+                <View key={group.letter} style={styles.letterGroup}>
+                  <Text style={styles.letterHeader}>{group.letter}</Text>
+
+                  {group.users.map((user) => {
+                    const AvatarComponent = getAvatarComponent(user.avatarIndex);
+                    return (
+                      <TouchableOpacity
+                        key={user.id}
+                        style={styles.userCard}
+                        onPress={() => toggleUserSelection(user)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.userAvatarContainer}>
+                          <AvatarComponent width={48} height={48} />
+                          {user.verified && (
+                            <View style={styles.verifiedBadgeContainer}>
+                              <VerifiedBadge width={15} height={15} />
+                            </View>
+                          )}
+                        </View>
+
+                        <View style={styles.userInfo}>
+                          <View style={styles.usernameRow}>
+                            <Text style={styles.username}>{user.username}</Text>
+                            {user.verified && <VerifiedBadge width={15} height={15} />}
+                          </View>
+                          <Text style={styles.fullName}>{user.fullName}</Text>
+                        </View>
+
+                        <View style={styles.checkboxContainer}>
+                          <View style={[styles.checkbox, styles.checkboxUnchecked]} />
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ))
+            ) : (
+              <Text style={styles.emptyText}>No users found</Text>
+            )}
+          </View>
         </ScrollView>
 
-        <TouchableOpacity
-          style={[styles.saveButton, selectedCount === 0 && styles.saveButtonDisabled]}
-          disabled={selectedCount === 0}
-          onPress={handleConfirmSave}
-        >
-          <Text style={styles.saveButtonText}>Save</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
+        <View style={styles.saveButtonContainer}>
+          <TouchableOpacity
+            style={[
+              styles.saveButton,
+              (createMutation.isPending || selectedCount === 0) && styles.saveButtonDisabled,
+            ]}
+            onPress={() => {
+              handleSave().catch(() => undefined);
+            }}
+            activeOpacity={0.8}
+            disabled={createMutation.isPending || selectedCount === 0}
+          >
+            {createMutation.isPending ? (
+              <ActivityIndicator size="small" color="#111111" />
+            ) : (
+              <Text style={styles.saveButtonText}>Save</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
 
       <Modal
-        visible={showEmptyTitleModal}
-        transparent
         animationType="fade"
-        onRequestClose={() => setShowEmptyTitleModal(false)}
+        transparent
+        visible={showErrorModal}
+        onRequestClose={() => setShowErrorModal(false)}
       >
-        <View style={styles.modalBackdrop}>
-          <View style={styles.errorModalCard}>
-            <Text style={styles.errorTitle}>You can't have an empty title</Text>
-            <Text style={styles.errorBody}>Please enter a name for your List</Text>
-
-            <TouchableOpacity
-              style={styles.okButton}
-              onPress={() => {
-                setShowEmptyTitleModal(false);
-                focusTitleEditor();
-              }}
-            >
-              <Text style={styles.okButtonText}>OK</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        <BlurView intensity={10} tint="dark" style={StyleSheet.absoluteFill}>
+          <Pressable style={styles.modalOverlay} onPress={() => setShowErrorModal(false)}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>You can&apos;t have an empty title</Text>
+              </View>
+              <View style={styles.divider} />
+              <View style={styles.modalBody}>
+                <Text style={styles.modalMessage}>Please enter a name for your List</Text>
+                <TouchableOpacity
+                  style={styles.modalButton}
+                  onPress={() => {
+                    setShowErrorModal(false);
+                    setIsEditingName(true);
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.modalButtonText}>OK</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </Pressable>
+        </BlurView>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  root: {
+  container: {
     flex: 1,
-    backgroundColor: BG_BOTTOM,
+    backgroundColor: '#000000',
   },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: 16,
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
+  },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 20,
+    zIndex: 1,
+  },
+  topBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
   },
   backButton: {
-    width: 28,
-    marginTop: 4,
+    padding: 4,
   },
-  titleRow: {
-    marginTop: 8,
-    flexDirection: 'row',
-    justifyContent: 'center',
+  scrollView: {
+    flex: 1,
+    zIndex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 100,
+  },
+  titleContainer: {
     alignItems: 'center',
-    gap: 6,
+    marginBottom: 24,
   },
-  title: {
-    color: '#F0F0F2',
-    fontSize: 24,
-    fontWeight: '700',
-  },
-  titleInput: {
-    minWidth: 170,
-    maxWidth: 240,
-    height: 36,
-    color: '#F0F0F2',
-    fontSize: 24,
-    fontWeight: '700',
-    textAlign: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.2)',
-  },
-  searchWrap: {
-    marginTop: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    height: 42,
-    paddingHorizontal: 12,
+  titleWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
+  title: {
+    fontSize: 24,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_700Bold',
+    textAlign: 'center',
+  },
+  titleInput: {
+    fontSize: 24,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_700Bold',
+    textAlign: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#FFD300',
+    paddingBottom: 4,
+    minWidth: 150,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#333333',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  searchIconContainer: {
+    marginRight: 12,
+  },
   searchInput: {
     flex: 1,
-    color: '#ECEDEF',
     fontSize: 16,
-    paddingVertical: 0,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_400Regular',
   },
-  selectedCounterWrap: {
-    marginTop: 8,
-    alignItems: 'flex-end',
+  selectedSection: {
+    marginBottom: 24,
   },
-  selectedCounterText: {
-    color: '#B3B5BA',
-    fontSize: 13,
+  listHeaderContainer: {
+    marginBottom: 16,
   },
-  scroll: {
-    marginTop: 6,
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 90,
-  },
-  sectionLabel: {
-    color: '#9EA0A6',
-    fontSize: 18,
-    marginBottom: 8,
-  },
-  groupLetter: {
-    marginTop: 8,
-    marginBottom: 6,
-    color: '#D4B315',
+  sectionTitle: {
     fontSize: 16,
-    fontWeight: '700',
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_400Regular',
+    opacity: 0.8,
   },
-  userCard: {
-    minHeight: 72,
-    borderRadius: 11,
-    backgroundColor: '#F4F4F4',
-    marginBottom: 10,
-    paddingHorizontal: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  userInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    marginRight: 10,
-  },
-  userAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 13,
-    backgroundColor: '#ABABFD',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  userAvatarInitial: {
-    color: '#131313',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  userTextWrap: {
-    marginLeft: 10,
-    flex: 1,
-  },
-  username: {
-    color: '#18191B',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  fullName: {
-    marginTop: 1,
-    color: '#5A5C61',
-    fontSize: 14,
-  },
-  toggleCircle: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: '#CACBD0',
-    backgroundColor: '#FFFFFF',
-  },
-  toggleCircleActive: {
-    borderColor: '#E6C111',
-    backgroundColor: '#E6C111',
+  usersSection: {
+    marginBottom: 24,
   },
   emptyText: {
-    color: '#9EA0A6',
-    fontSize: 15,
+    fontSize: 14,
+    color: '#6C6B6B',
+    fontFamily: 'Montserrat_400Regular',
+    textAlign: 'center',
+    marginTop: 20,
   },
-  saveButton: {
-    position: 'absolute',
-    left: 110,
-    right: 110,
-    bottom: 20,
-    height: 46,
-    borderRadius: 10,
-    backgroundColor: BRAND_YELLOW,
+  letterGroup: {
+    marginBottom: 24,
+  },
+  letterHeader: {
+    fontSize: 18,
+    color: '#FFD300',
+    fontFamily: 'Montserrat_400Regular',
+    marginBottom: 12,
+  },
+  userCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+    height: 80,
+  },
+  userAvatarContainer: {
+    marginRight: 12,
+    position: 'relative',
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  verifiedBadgeContainer: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 15,
+    height: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userInfo: {
+    flex: 1,
+  },
+  usernameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  username: {
+    fontSize: 16,
+    color: '#000000',
+    fontFamily: 'Montserrat_600SemiBold',
+  },
+  fullName: {
+    fontSize: 14,
+    color: '#000000',
+    fontFamily: 'Montserrat_400Regular',
+  },
+  checkboxContainer: {
+    marginLeft: 12,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#DADADA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxUnchecked: {
+    borderColor: '#DADADA',
+    borderWidth: 2,
+  },
+  checkboxChecked: {
+    backgroundColor: '#FFD300',
+    borderColor: '#FFD300',
+  },
+  saveButtonContainer: {
+    position: 'absolute',
+    bottom: 20,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 10,
+    paddingHorizontal: 20,
+  },
+  saveButton: {
+    backgroundColor: '#FFD300',
+    width: '65%',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
   },
   saveButtonDisabled: {
     opacity: 0.55,
   },
   saveButtonText: {
-    color: '#0D0E10',
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 18,
+    color: '#000000',
+    fontFamily: 'Montserrat_700Bold',
   },
-  modalBackdrop: {
+  modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.52)',
-    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
-    paddingHorizontal: 22,
+    alignItems: 'center',
+    paddingHorizontal: 40,
   },
-  errorModalCard: {
-    width: '88%',
-    borderRadius: 8,
+  modalContent: {
     backgroundColor: '#FFFFFF',
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 10,
+    borderRadius: 6,
+    width: '80%',
+    maxWidth: 320,
+    overflow: 'hidden',
+  },
+  modalHeader: {
+    paddingTop: 18,
+    paddingBottom: 8,
+    paddingHorizontal: 20,
     alignItems: 'center',
   },
-  errorTitle: {
-    color: '#121315',
-    fontSize: 28,
-    fontWeight: '700',
+  divider: {
+    height: 1,
+    backgroundColor: '#000000',
+    marginHorizontal: 25,
+  },
+  modalTitle: {
+    fontSize: 18,
+    color: '#000000',
+    fontFamily: 'Montserrat_700Bold',
     textAlign: 'center',
   },
-  errorBody: {
-    marginTop: 8,
-    color: '#65676D',
-    fontSize: 20,
-    textAlign: 'center',
-  },
-  okButton: {
-    marginTop: 12,
-    width: '82%',
-    height: 40,
-    borderRadius: 7,
-    backgroundColor: '#060708',
+  modalBody: {
+    paddingTop: 8,
+    paddingBottom: 16,
+    paddingHorizontal: 20,
     alignItems: 'center',
-    justifyContent: 'center',
   },
-  okButtonText: {
-    color: '#FFFFFF',
+  modalMessage: {
+    fontSize: 15,
+    color: '#000000',
+    fontFamily: 'Montserrat_400Regular',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  modalButton: {
+    backgroundColor: '#000000',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    width: '60%',
+    alignItems: 'center',
+  },
+  modalButtonText: {
     fontSize: 16,
-    fontWeight: '700',
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_700Bold',
   },
 });
 

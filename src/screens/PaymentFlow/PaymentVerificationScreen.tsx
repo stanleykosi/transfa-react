@@ -6,8 +6,7 @@ import Avatar from '@/assets/images/avatar.svg';
 import AvatarAlt1 from '@/assets/images/avatar1.svg';
 import AvatarAlt2 from '@/assets/images/avatar2.svg';
 import AvatarAlt3 from '@/assets/images/avatar3.svg';
-import ProcessIllustration from '@/assets/images/processing.svg';
-import SuccessIllustration from '@/assets/images/success.svg';
+import ProcessIllustration from '@/assets/images/processing.png';
 import {
   fetchTransactionStatus,
   useBulkP2PTransfer,
@@ -35,6 +34,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Dimensions,
+  Image,
   Modal,
   SafeAreaView,
   StyleSheet,
@@ -956,17 +956,25 @@ const PaymentVerificationScreen = () => {
         <View style={styles.modalOverlay}>
           <Animated.View style={[styles.modalContent, modalAnimatedStyle]}>
             {modalStatus === 'processing' ? (
-              <View style={styles.processingContent}>
-                <View style={styles.airplaneContainer}>
-                  <ProcessIllustration width={130} height={130} />
+              <View style={styles.successContent}>
+                <View style={styles.successIconContainer}>
+                  <Image
+                    source={ProcessIllustration}
+                    style={styles.successIllustration}
+                    resizeMode="contain"
+                  />
                 </View>
-                <Text style={styles.processingTitle}>Processing</Text>
-                <Text style={styles.processingSubtitle}>Your transfer is processing</Text>
+                <Text style={styles.successTitle}>Processing</Text>
+                <Text style={styles.successMessage}>Your transfer is processing</Text>
               </View>
             ) : (
               <View style={styles.successContent}>
                 <View style={styles.successIconContainer}>
-                  <SuccessIllustration width={130} height={130} />
+                  <Image
+                    source={require('@/assets/images/a.png')}
+                    style={styles.successIllustration}
+                    resizeMode="contain"
+                  />
                 </View>
                 <Text style={styles.successTitle}>{result?.title || 'Success!'}</Text>
                 <Text style={styles.successMessage}>
@@ -1196,33 +1204,11 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingTop: 40,
-    paddingBottom: 40,
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    paddingBottom: 20,
     paddingHorizontal: 24,
     alignItems: 'center',
-  },
-  processingContent: {
-    alignItems: 'center',
-    width: '100%',
-    minHeight: SCREEN_HEIGHT * 0.33,
-    justifyContent: 'center',
-  },
-  airplaneContainer: {
-    marginBottom: 24,
-  },
-  processingTitle: {
-    fontSize: 32,
-    color: '#000000',
-    fontFamily: 'Montserrat_700Bold',
-    marginBottom: 8,
-  },
-  processingSubtitle: {
-    fontSize: 16,
-    color: '#6C6B6B',
-    fontFamily: 'Montserrat_400Regular',
-    textAlign: 'center',
   },
   successContent: {
     alignItems: 'center',
@@ -1231,42 +1217,48 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   successIconContainer: {
-    marginBottom: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successIllustration: {
+    width: 300,
+    height: 300,
   },
   successTitle: {
     fontSize: 32,
     color: '#000000',
     fontFamily: 'Montserrat_700Bold',
-    marginBottom: 12,
+    marginTop: -50,
+    marginBottom: 10,
     textAlign: 'center',
   },
   successMessage: {
-    fontSize: 16,
+    fontSize: 18,
     color: '#000000',
     fontFamily: 'Montserrat_400Regular',
-    marginBottom: 32,
+    marginBottom: 18,
     textAlign: 'center',
   },
   doneButton: {
     backgroundColor: '#000000',
     borderRadius: 12,
     paddingVertical: 18,
-    paddingHorizontal: 48,
-    minWidth: 200,
+    paddingHorizontal: 24,
+    minWidth: 130,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   doneButtonText: {
-    fontSize: 18,
+    fontSize: 20,
     color: '#FFFFFF',
-    fontFamily: 'Montserrat_600SemiBold',
+    fontFamily: 'Montserrat_700Bold',
   },
   viewReceiptButton: {
     paddingVertical: 12,
   },
   viewReceiptText: {
-    fontSize: 16,
+    fontSize: 18,
     color: '#000000',
     fontFamily: 'Montserrat_600SemiBold',
     textDecorationLine: 'underline',
