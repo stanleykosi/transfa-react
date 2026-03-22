@@ -38,6 +38,7 @@ import PayUserScreen from '@/screens/PaymentFlow/PayUserScreen';
 import SelfTransferScreen from '@/screens/PaymentFlow/SelfTransferScreen';
 import TransferStatusScreen from '@/screens/PaymentFlow/TransferStatusScreen';
 import MultiReceiptScreen from '@/screens/PaymentFlow/MultiReceiptScreen';
+import PaymentVerificationScreen from '@/screens/PaymentFlow/PaymentVerificationScreen';
 import CreateRequestScreen from '@/screens/PaymentRequests/CreateRequestScreen';
 import PaymentRequestSuccessScreen from '@/screens/PaymentRequests/PaymentRequestSuccessScreen';
 import PaymentRequestsListScreen from '@/screens/PaymentRequests/PaymentRequestsListScreen';
@@ -130,6 +131,34 @@ export type AppStackParamList = {
   IncomingRequestDetail: { requestId: string; notificationId?: string };
   RequestPaymentSummary: { requestId: string };
   RequestPaymentAuth: { requestId: string };
+  PaymentVerification:
+    | {
+        intent: 'transfer';
+        transfers: Array<{
+          recipientUserId?: string;
+          recipientUsername: string;
+          recipientFullName?: string | null;
+          amount: number;
+          narration: string;
+          avatarIndex?: number;
+          verified?: boolean;
+        }>;
+        fromList?: boolean;
+        listName?: string;
+        listEmoji?: string;
+      }
+    | {
+        intent: 'withdraw';
+        beneficiaryId: string;
+        accountName: string;
+        accountNumberMasked: string;
+        bankName: string;
+        amount: number;
+      }
+    | {
+        intent: 'request_payment';
+        requestId: string;
+      };
   TransferLists: undefined;
   TransferListCreate: undefined;
   TransferListDetail: { listId: string };
@@ -339,6 +368,11 @@ const AppStack = () => {
       <Stack.Screen
         name="RequestPaymentAuth"
         component={RequestPaymentAuthScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="PaymentVerification"
+        component={PaymentVerificationScreen}
         options={{ headerShown: false }}
       />
       <Stack.Screen

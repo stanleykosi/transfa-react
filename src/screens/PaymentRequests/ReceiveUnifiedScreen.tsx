@@ -425,6 +425,13 @@ const ReceiveUnifiedScreen = ({
       .slice(0, 5);
   }, [displayUsername, searchData?.users, searchQuery]);
 
+  const selectedRecipientName = selectedRecipient
+    ? normalizeUsername(selectedRecipient.username)
+    : '';
+  const SelectedRecipientAvatar = selectedRecipient
+    ? pickAvatarComponent(selectedRecipientName || selectedRecipient.id)
+    : null;
+
   useEffect(() => {
     if (!initialRecipient) {
       return;
@@ -545,6 +552,11 @@ const ReceiveUnifiedScreen = ({
   const handleSelectRecipient = (user: UserDiscoveryResult) => {
     setSelectedRecipient(user);
     setRecipientUsername(normalizeUsername(user.username));
+  };
+
+  const handleClearRecipientSelection = () => {
+    setSelectedRecipient(null);
+    setRecipientUsername('');
   };
 
   const handleRecipientInputChange = (value: string) => {
@@ -1024,37 +1036,52 @@ const ReceiveUnifiedScreen = ({
               {requestType === 'individual' ? (
                 <View style={styles.formFieldGroup}>
                   <Text style={styles.formFieldLabel}>Username</Text>
-                  <View
-                    style={[
-                      styles.formInputWrapper,
-                      focusedInput === 'username' && styles.formInputWrapperFocused,
-                    ]}
-                  >
-                    <View style={styles.usernameIconContainer}>
-                      <UsernameIcon width={20} height={21} />
+                  {!selectedRecipient ? (
+                    <View
+                      style={[
+                        styles.formInputWrapper,
+                        focusedInput === 'username' && styles.formInputWrapperFocused,
+                      ]}
+                    >
+                      <View style={styles.usernameIconContainer}>
+                        <UsernameIcon width={20} height={21} />
+                      </View>
+                      <TextInput
+                        style={styles.formInput}
+                        placeholder="Enter Username"
+                        placeholderTextColor="rgba(255, 255, 255, 0.32)"
+                        value={recipientUsername}
+                        onChangeText={handleRecipientInputChange}
+                        autoCapitalize="none"
+                        onFocus={() => setFocusedInput('username')}
+                        onBlur={() => setFocusedInput(null)}
+                      />
                     </View>
-                    <TextInput
-                      style={styles.formInput}
-                      placeholder="Enter Username"
-                      placeholderTextColor="rgba(255, 255, 255, 0.32)"
-                      value={recipientUsername}
-                      onChangeText={handleRecipientInputChange}
-                      autoCapitalize="none"
-                      onFocus={() => setFocusedInput('username')}
-                      onBlur={() => setFocusedInput(null)}
-                    />
-                  </View>
-
-                  {selectedRecipient ? (
-                    <View style={styles.selectedRecipientCard}>
-                      <Text style={styles.selectedRecipientUsername}>
-                        {normalizeUsername(selectedRecipient.username)}
-                      </Text>
-                      <TouchableOpacity onPress={() => setSelectedRecipient(null)}>
+                  ) : (
+                    <View style={[styles.searchResultCard, styles.selectedRecipientCard]}>
+                      <View style={styles.searchResultAvatarWrap}>
+                        {SelectedRecipientAvatar ? (
+                          <SelectedRecipientAvatar width={40} height={40} />
+                        ) : null}
+                      </View>
+                      <View style={styles.searchResultTextWrap}>
+                        <View style={styles.selectedRecipientUsernameRow}>
+                          <Text style={styles.searchResultUsername}>{selectedRecipientName}</Text>
+                          <VerifiedBadge width={15} height={15} />
+                        </View>
+                        <Text style={styles.searchResultFullName} numberOfLines={1}>
+                          {selectedRecipient.full_name || 'Transfa User'}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.selectedRecipientCancelButton}
+                        onPress={handleClearRecipientSelection}
+                        activeOpacity={0.7}
+                      >
                         <CancelIcon width={18} height={18} />
                       </TouchableOpacity>
                     </View>
-                  ) : null}
+                  )}
 
                   {!selectedRecipient && searchQuery.length > 0 ? (
                     isSearching ? (
@@ -1824,18 +1851,16 @@ const styles = StyleSheet.create({
   },
   selectedRecipientCard: {
     marginTop: 10,
-    borderRadius: 10,
-    backgroundColor: '#FFFFFF',
-    paddingHorizontal: 12,
-    height: 48,
+    minHeight: 60,
+  },
+  selectedRecipientUsernameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 6,
   },
-  selectedRecipientUsername: {
-    color: '#17181B',
-    fontFamily: 'Montserrat_700Bold',
-    fontSize: 14,
+  selectedRecipientCancelButton: {
+    padding: 4,
+    marginLeft: 8,
   },
   uploadingState: {
     flexDirection: 'row',

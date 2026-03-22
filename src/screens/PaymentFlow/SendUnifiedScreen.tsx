@@ -20,12 +20,11 @@ import WalletModal from '@/components/WalletModal';
 import { useNavigation } from '@react-navigation/native';
 import { BlurView } from 'expo-blur';
 import { StatusBar } from 'expo-status-bar';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -36,34 +35,19 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import ReactNativeBiometrics from 'react-native-biometrics';
 import { SvgXml } from 'react-native-svg';
 
 import { useListBeneficiaries } from '@/api/accountApi';
 import { useUserSearch } from '@/api/userDiscoveryApi';
 import {
-  fetchTransactionStatus,
   useAccountBalance,
-  useBulkP2PTransfer,
   useGetTransferList,
-  useP2PTransfer,
-  useSelfTransfer,
   useTransactionFees,
   useUserProfile,
 } from '@/api/transactionApi';
 import type { AppNavigationProp } from '@/types/navigation';
-import type {
-  BulkP2PTransferFailure,
-  BulkP2PTransferResponse,
-  UserDiscoveryResult,
-} from '@/types/api';
-import { useSecurityStore } from '@/store/useSecurityStore';
+import type { UserDiscoveryResult } from '@/types/api';
 import { formatCurrency, nairaToKobo } from '@/utils/formatCurrency';
-import {
-  ensureMinimumProcessingDisplay,
-  toTransferSettlementStatus,
-  waitForMs,
-} from '@/utils/transferFlow';
 import { normalizeUsername, usernameKey } from '@/utils/username';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -79,7 +63,6 @@ const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill=
 </svg>`;
 
 const avatarComponents = [Avatar, AvatarAlt1, AvatarAlt2, AvatarAlt3];
-const rnBiometrics = new ReactNativeBiometrics();
 const MAX_RECIPIENTS = 10;
 
 interface TransferUser {
@@ -117,26 +100,6 @@ interface SearchUser {
   verified: boolean;
 }
 
-interface TransferReceipt {
-  transactionId: string;
-  amount: number;
-  fee: number;
-  description: string;
-  recipientUsername: string;
-  initialStatus?: 'completed' | 'failed';
-}
-
-type SubmitMode = 'transfer' | 'withdraw' | 'list';
-
-interface SubmitResult {
-  submitMode: SubmitMode;
-  type: 'success' | 'partial' | 'failure';
-  title: string;
-  message: string;
-  receipts: TransferReceipt[];
-  failures: BulkP2PTransferFailure[];
-}
-
 interface SendUnifiedScreenProps {
   initialMode?: 'transfer' | 'withdraw';
   listId?: string;
@@ -152,9 +115,6 @@ const avatarIndexFromSeed = (seed: string) => {
   }
   return Math.abs(hash) % avatarComponents.length;
 };
-
-const toDisplayStatus = (status?: string): 'completed' | 'failed' | 'processing' | 'pending' =>
-  toTransferSettlementStatus(status) ?? 'pending';
 
 const parseAmountInputToKobo = (value: string) => {
   const normalized = value.replace(/,/g, '').trim();
@@ -173,192 +133,6 @@ const nairaInputFromKobo = (value: number) => {
     return '';
   }
   return (value / 100).toFixed(2);
-};
-
-const waitForSingleTransferSettlement = async (
-  transactionId: string,
-  initialStatus?: string
-): Promise<{ status: 'completed' | 'failed'; failureReason?: string }> => {
-  const status = toDisplayStatus(initialStatus);
-  if (status === 'completed') {
-    return { status: 'completed' };
-  }
-  if (status === 'failed') {
-    return { status: 'failed' };
-  }
-
-  const timeoutAt = Date.now() + 60000;
-  while (Date.now() < timeoutAt) {
-    await waitForMs(1500);
-    try {
-      const { data } = await fetchTransactionStatus(transactionId);
-      const current = toDisplayStatus(data?.status);
-      if (current === 'completed') {
-        return { status: 'completed' };
-      }
-      if (current === 'failed') {
-        return {
-          status: 'failed',
-          failureReason: data?.failure_reason || data?.anchor_reason || data?.status,
-        };
-      }
-    } catch {
-      // Keep polling until timeout to tolerate transient network errors.
-    }
-  }
-
-  throw new Error(
-    'Transfer is still processing on the server. Please wait a moment and check History.'
-  );
-};
-
-const waitForBulkTransferSettlement = async (
-  response: BulkP2PTransferResponse,
-  payload: Array<{ recipientUsername: string; amount: number; narration: string }>,
-  feePerTransfer: number
-): Promise<{ receipts: TransferReceipt[]; failures: BulkP2PTransferFailure[] }> => {
-  const receipts: TransferReceipt[] = [];
-  const failures: BulkP2PTransferFailure[] = [...response.failed_transfers];
-  const failedSet = new Set(
-    response.failed_transfers.map((failure) => usernameKey(failure.recipient_username))
-  );
-
-  const successfulPayloadItems = payload.filter(
-    (item) => !failedSet.has(usernameKey(item.recipientUsername))
-  );
-
-  const pendingChecks = new Map<
-    string,
-    {
-      transactionId: string;
-      amount: number;
-      fee: number;
-      description: string;
-      recipientUsername: string;
-      fallbackFailureReason: string;
-    }
-  >();
-
-  response.successful_transfers.forEach((transaction, index) => {
-    const item = successfulPayloadItems[index];
-    const transactionId = transaction.transaction_id;
-    const amount = transaction.amount ?? item?.amount ?? 0;
-    const fee = transaction.fee ?? feePerTransfer;
-    const description = item?.narration ?? '';
-    const recipientUsername = normalizeUsername(item?.recipientUsername || '');
-    const fallbackFailureReason = transaction.message || transaction.status || 'Transfer failed.';
-    const initialStatus = toDisplayStatus(transaction.status);
-
-    if (initialStatus === 'completed') {
-      receipts.push({
-        transactionId,
-        amount,
-        fee,
-        description,
-        recipientUsername,
-        initialStatus: 'completed',
-      });
-      return;
-    }
-
-    if (initialStatus === 'failed') {
-      failures.push({
-        recipient_username: recipientUsername || 'unknown',
-        amount,
-        description,
-        error: fallbackFailureReason,
-      });
-      return;
-    }
-
-    pendingChecks.set(transactionId, {
-      transactionId,
-      amount,
-      fee,
-      description,
-      recipientUsername,
-      fallbackFailureReason,
-    });
-  });
-
-  const timeoutAt = Date.now() + 60000;
-  while (pendingChecks.size > 0 && Date.now() < timeoutAt) {
-    await waitForMs(1500);
-    const ids = Array.from(pendingChecks.keys());
-    const updates = await Promise.all(
-      ids.map(async (transactionId) => {
-        try {
-          const { data } = await fetchTransactionStatus(transactionId);
-          return { transactionId, data };
-        } catch {
-          return null;
-        }
-      })
-    );
-
-    updates.forEach((update) => {
-      if (!update) {
-        return;
-      }
-
-      const candidate = pendingChecks.get(update.transactionId);
-      if (!candidate) {
-        return;
-      }
-
-      const status = toDisplayStatus(update.data?.status);
-      if (status === 'completed') {
-        receipts.push({
-          transactionId: candidate.transactionId,
-          amount: candidate.amount,
-          fee: candidate.fee,
-          description: candidate.description,
-          recipientUsername: candidate.recipientUsername,
-          initialStatus: 'completed',
-        });
-        pendingChecks.delete(candidate.transactionId);
-        return;
-      }
-
-      if (status === 'failed') {
-        failures.push({
-          recipient_username: candidate.recipientUsername || 'unknown',
-          amount: candidate.amount,
-          description: candidate.description,
-          error:
-            update.data?.failure_reason ||
-            update.data?.anchor_reason ||
-            update.data?.status ||
-            candidate.fallbackFailureReason,
-        });
-        pendingChecks.delete(candidate.transactionId);
-      }
-    });
-  }
-
-  if (pendingChecks.size > 0) {
-    throw new Error(
-      'Some transfers are still processing on the server. Please wait a moment and check History.'
-    );
-  }
-
-  return { receipts, failures };
-};
-
-const buildWithdrawalDescription = (bankName: string) => {
-  if (!bankName) {
-    return 'Wallet withdrawal';
-  }
-  const value = `Wallet withdrawal to ${bankName}`;
-  return value.slice(0, 100);
-};
-
-const resolveDevelopmentPin = async (getPin: () => Promise<string | null>) => {
-  const stored = await getPin();
-  if (stored && stored.length === 4) {
-    return stored;
-  }
-  return process.env.EXPO_PUBLIC_DEV_TRANSACTION_PIN || '0000';
 };
 
 const SendUnifiedScreen = ({
@@ -402,17 +176,6 @@ const SendUnifiedScreen = ({
   const [accountCardDimensions, setAccountCardDimensions] = useState<
     Record<string, { width: number; height: number }>
   >({});
-
-  const [authVisible, setAuthVisible] = useState(false);
-  const [authMode, setAuthMode] = useState<'pin' | 'biometric'>('pin');
-  const [pinValues, setPinValues] = useState(['', '', '', '']);
-  const [authError, setAuthError] = useState<string | null>(null);
-  const pinInputRefs = useRef<Array<TextInput | null>>([]);
-
-  const [processingVisible, setProcessingVisible] = useState(false);
-  const [resultState, setResultState] = useState<SubmitResult | null>(null);
-
-  const { getPin, biometricsEnabled } = useSecurityStore();
   const { data: profile } = useUserProfile();
   const {
     data: balanceData,
@@ -428,16 +191,23 @@ const SendUnifiedScreen = ({
   } = useListBeneficiaries();
   const { data: listData, isLoading: isLoadingList } = useGetTransferList(listId);
 
-  const p2pTransfer = useP2PTransfer();
-  const bulkP2PTransfer = useBulkP2PTransfer();
-  const selfTransfer = useSelfTransfer();
-
-  const isSubmitting = p2pTransfer.isPending || bulkP2PTransfer.isPending || selfTransfer.isPending;
-
   const username = normalizeUsername(profile?.username || 'you');
   const balance = balanceData?.available_balance ?? 0;
   const p2pFeeKobo = fees?.p2p_fee_kobo ?? 0;
   const selfFeeKobo = fees?.self_fee_kobo ?? 0;
+  const profileRecipientUser = useMemo<SearchUser | null>(() => {
+    if (!initialRecipient || isFromList) {
+      return null;
+    }
+    return {
+      id: initialRecipient.id,
+      username: normalizeUsername(initialRecipient.username),
+      fullName: initialRecipient.full_name || 'Transfa User',
+      avatarIndex: avatarIndexFromSeed(initialRecipient.username),
+      verified: true,
+    };
+  }, [initialRecipient, isFromList]);
+  const isProfileRecipientFlow = !!profileRecipientUser;
 
   const listMembers = useMemo<ListMember[]>(
     () =>
@@ -529,17 +299,12 @@ const SendUnifiedScreen = ({
   }, [isFromList, listMembers]);
 
   useEffect(() => {
-    if (initialRecipient && !isFromList) {
-      setSelectedUserForTransfer({
-        id: initialRecipient.id,
-        username: normalizeUsername(initialRecipient.username),
-        fullName: initialRecipient.full_name || 'Transfa User',
-        avatarIndex: avatarIndexFromSeed(initialRecipient.username),
-        verified: true,
-      });
-      setSearchQuery(normalizeUsername(initialRecipient.username));
+    if (!profileRecipientUser) {
+      return;
     }
-  }, [initialRecipient, isFromList]);
+    setSelectedUserForTransfer(profileRecipientUser);
+    setSearchQuery('');
+  }, [profileRecipientUser]);
 
   useEffect(() => {
     if (isFromList && transferUsers.length > 0) {
@@ -571,6 +336,12 @@ const SendUnifiedScreen = ({
       setSelectedAccountId(linkedAccounts[0].id);
     }
   }, [activeMode, linkedAccounts, selectedAccountId]);
+
+  useEffect(() => {
+    if (isProfileRecipientFlow && activeMode !== 'transfer') {
+      setActiveMode('transfer');
+    }
+  }, [activeMode, isProfileRecipientFlow]);
 
   const formatBalance = (amount: number) => formatCurrency(amount);
   const formatAmount = (amount: number) => formatCurrency(amount);
@@ -608,6 +379,9 @@ const SendUnifiedScreen = ({
   };
 
   const handleCloseUserForm = () => {
+    if (isProfileRecipientFlow) {
+      return;
+    }
     setSelectedUserForTransfer(null);
   };
 
@@ -736,6 +510,35 @@ const SendUnifiedScreen = ({
   };
 
   const transferUsersWithAmount = transferUsers.filter((user) => user.amount > 0);
+  const hasSavedProfileRecipientTransfer =
+    isProfileRecipientFlow &&
+    !!profileRecipientUser &&
+    transferUsersWithAmount.some(
+      (user) => usernameKey(user.username) === usernameKey(profileRecipientUser.username)
+    );
+
+  useEffect(() => {
+    if (!isProfileRecipientFlow || !profileRecipientUser || hasSavedProfileRecipientTransfer) {
+      return;
+    }
+
+    if (
+      !selectedUserForTransfer ||
+      usernameKey(selectedUserForTransfer.username) !== usernameKey(profileRecipientUser.username)
+    ) {
+      setSelectedUserForTransfer(profileRecipientUser);
+    }
+
+    if (searchQuery) {
+      setSearchQuery('');
+    }
+  }, [
+    hasSavedProfileRecipientTransfer,
+    isProfileRecipientFlow,
+    profileRecipientUser,
+    searchQuery,
+    selectedUserForTransfer,
+  ]);
 
   const calculateTotal = () => {
     if (activeMode === 'withdraw') {
@@ -786,253 +589,6 @@ const SendUnifiedScreen = ({
     setFormError(null);
   };
 
-  const runSubmissionWithPin = async (pin: string) => {
-    const processingStartedAt = Date.now();
-    setAuthVisible(false);
-    setProcessingVisible(true);
-    setAuthError(null);
-
-    try {
-      if (activeMode === 'withdraw') {
-        const selectedAccount = linkedAccounts.find((acc) => acc.id === selectedAccountId);
-        const amount = parseAmountInputToKobo(withdrawAmount);
-
-        if (!selectedAccount || amount <= 0) {
-          setFormError('Complete withdrawal details before continuing.');
-          return;
-        }
-
-        const response = await selfTransfer.mutateAsync({
-          beneficiary_id: selectedAccount.id,
-          amount,
-          description: buildWithdrawalDescription(selectedAccount.bankName),
-          transaction_pin: pin,
-        });
-
-        const settlement = await waitForSingleTransferSettlement(
-          response.transaction_id,
-          response.status
-        );
-
-        if (settlement.status === 'failed') {
-          setResultState({
-            submitMode: 'withdraw',
-            type: 'failure',
-            title: 'Transfer Failed',
-            message: settlement.failureReason || 'Your withdrawal could not be completed.',
-            receipts: [],
-            failures: [],
-          });
-          return;
-        }
-
-        setResultState({
-          submitMode: 'withdraw',
-          type: 'success',
-          title: 'Success!',
-          message: 'Your transaction was successful.',
-          receipts: [
-            {
-              transactionId: response.transaction_id,
-              amount,
-              fee: response.fee ?? selfFeeKobo,
-              description: buildWithdrawalDescription(selectedAccount.bankName),
-              recipientUsername: selectedAccount.accountName,
-              initialStatus: 'completed',
-            },
-          ],
-          failures: [],
-        });
-        return;
-      }
-
-      const payload = transferUsersWithAmount.map((user) => ({
-        recipientUsername: normalizeUsername(user.username),
-        amount: user.amount,
-        narration: user.narration,
-      }));
-
-      if (payload.length === 0) {
-        setFormError('Add at least one valid transfer before confirming.');
-        return;
-      }
-
-      if (payload.length === 1) {
-        const single = payload[0];
-        const response = await p2pTransfer.mutateAsync({
-          recipient_username: single.recipientUsername,
-          amount: single.amount,
-          description: single.narration,
-          transaction_pin: pin,
-        });
-
-        const settlement = await waitForSingleTransferSettlement(
-          response.transaction_id,
-          response.status
-        );
-
-        if (settlement.status === 'failed') {
-          setResultState({
-            submitMode: isFromList ? 'list' : 'transfer',
-            type: 'failure',
-            title: 'Transfer Failed',
-            message: settlement.failureReason || 'Your transfer could not be completed.',
-            receipts: [],
-            failures: [],
-          });
-          return;
-        }
-
-        setResultState({
-          submitMode: isFromList ? 'list' : 'transfer',
-          type: 'success',
-          title: 'Success!',
-          message: 'Your transaction was successful.',
-          receipts: [
-            {
-              transactionId: response.transaction_id,
-              amount: single.amount,
-              fee: response.fee ?? p2pFeeKobo,
-              description: single.narration,
-              recipientUsername: single.recipientUsername,
-              initialStatus: 'completed',
-            },
-          ],
-          failures: [],
-        });
-        return;
-      }
-
-      const bulkResponse = await bulkP2PTransfer.mutateAsync({
-        transaction_pin: pin,
-        transfers: payload.map((item) => ({
-          recipient_username: item.recipientUsername,
-          amount: item.amount,
-          description: item.narration,
-        })),
-      });
-
-      const settlement = await waitForBulkTransferSettlement(bulkResponse, payload, p2pFeeKobo);
-      if (settlement.receipts.length > 0 && settlement.failures.length === 0) {
-        setResultState({
-          submitMode: isFromList ? 'list' : 'transfer',
-          type: 'success',
-          title: 'Success!',
-          message: 'Your transaction was successful.',
-          receipts: settlement.receipts,
-          failures: settlement.failures,
-        });
-        return;
-      }
-
-      if (settlement.receipts.length > 0 && settlement.failures.length > 0) {
-        setResultState({
-          submitMode: isFromList ? 'list' : 'transfer',
-          type: 'partial',
-          title: 'Partially Completed',
-          message: 'Some transfers failed. Review receipts for details.',
-          receipts: settlement.receipts,
-          failures: settlement.failures,
-        });
-        return;
-      }
-
-      setResultState({
-        submitMode: isFromList ? 'list' : 'transfer',
-        type: 'failure',
-        title: 'Transfer Failed',
-        message: settlement.failures[0]?.error || 'No transfer was completed.',
-        receipts: settlement.receipts,
-        failures: settlement.failures,
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Could not process transfer.';
-      const normalized = message.toLowerCase();
-
-      if (normalized.includes('invalid transaction pin') || normalized.includes('unauthorized')) {
-        setAuthVisible(true);
-        setAuthMode('pin');
-        setAuthError('Wrong PIN. Please try again.');
-      } else if (normalized.includes('pin is not set')) {
-        navigation.navigate('CreatePin');
-      } else if (normalized.includes('temporarily locked') || normalized.includes('too many')) {
-        setAuthVisible(true);
-        setAuthMode('pin');
-        setAuthError('PIN is temporarily locked. Please wait and try again.');
-      } else {
-        setFormError(message);
-      }
-    } finally {
-      await ensureMinimumProcessingDisplay(processingStartedAt);
-      setProcessingVisible(false);
-      setPinValues(['', '', '', '']);
-    }
-  };
-
-  const handlePinChange = async (value: string, index: number) => {
-    if (value && !/^\d$/.test(value)) {
-      return;
-    }
-
-    const next = [...pinValues];
-    next[index] = value;
-    setPinValues(next);
-    setAuthError(null);
-
-    if (value && index < 3) {
-      pinInputRefs.current[index + 1]?.focus();
-    }
-
-    if (value && index === 3 && next.every((digit) => digit !== '') && !isSubmitting) {
-      await runSubmissionWithPin(next.join(''));
-    }
-  };
-
-  const handlePinKeyPress = (key: string, index: number) => {
-    if (key === 'Backspace' && !pinValues[index] && index > 0) {
-      pinInputRefs.current[index - 1]?.focus();
-    }
-  };
-
-  const handleBiometricVerify = async () => {
-    setAuthError(null);
-    if (!biometricsEnabled) {
-      setAuthError('Biometrics is disabled. Enable it in settings.');
-      return;
-    }
-
-    try {
-      const { available, biometryType } = await rnBiometrics.isSensorAvailable();
-      if (!available || !biometryType) {
-        setAuthError('Biometric authentication is not available on this device.');
-        return;
-      }
-
-      const { success } = await rnBiometrics.simplePrompt({
-        promptMessage:
-          activeMode === 'withdraw'
-            ? 'Verify to continue withdrawal'
-            : 'Verify to continue transfer',
-        cancelButtonText: 'Cancel',
-      });
-
-      if (!success) {
-        setAuthError('Biometric verification was cancelled.');
-        return;
-      }
-
-      const pin = await getPin();
-      if (!pin) {
-        setAuthError('PIN is required for biometrics. Use PIN instead.');
-        return;
-      }
-
-      await runSubmissionWithPin(pin);
-    } catch {
-      setAuthError('Biometric verification failed.');
-    }
-  };
-
   const validateBeforeConfirm = (): string | null => {
     if (activeMode === 'withdraw') {
       const amount = parseAmountInputToKobo(withdrawAmount);
@@ -1076,7 +632,7 @@ const SendUnifiedScreen = ({
     return null;
   };
 
-  const handleConfirm = async () => {
+  const handleConfirm = () => {
     const validationError = validateBeforeConfirm();
     if (validationError) {
       setFormError(validationError);
@@ -1084,17 +640,43 @@ const SendUnifiedScreen = ({
     }
 
     setFormError(null);
-    const shouldSkipPrompt = process.env.EXPO_PUBLIC_SKIP_PIN_CHECK === 'true';
-    if (shouldSkipPrompt) {
-      const devPin = await resolveDevelopmentPin(getPin);
-      await runSubmissionWithPin(devPin);
+
+    if (activeMode === 'withdraw') {
+      const selectedAccount = linkedAccounts.find((account) => account.id === selectedAccountId);
+      const amount = parseAmountInputToKobo(withdrawAmount);
+      if (!selectedAccount || amount <= 0) {
+        setFormError('Complete withdrawal details before continuing.');
+        return;
+      }
+
+      navigation.navigate('PaymentVerification', {
+        intent: 'withdraw',
+        beneficiaryId: selectedAccount.id,
+        accountName: selectedAccount.accountName,
+        accountNumberMasked: selectedAccount.accountNumber,
+        bankName: selectedAccount.bankName,
+        amount,
+      });
       return;
     }
 
-    setPinValues(['', '', '', '']);
-    setAuthError(null);
-    setAuthMode('pin');
-    setAuthVisible(true);
+    const transfers = transferUsersWithAmount.map((user) => ({
+      recipientUserId: user.userId,
+      recipientUsername: normalizeUsername(user.username),
+      recipientFullName: user.fullName,
+      amount: user.amount,
+      narration: user.narration,
+      avatarIndex: user.avatarIndex,
+      verified: user.verified,
+    }));
+
+    navigation.navigate('PaymentVerification', {
+      intent: 'transfer',
+      transfers,
+      fromList: isFromList,
+      listName: isFromList ? listTitle : undefined,
+      listEmoji: isFromList ? listEmoji : undefined,
+    });
   };
 
   const summary = calculateTotal();
@@ -1175,8 +757,8 @@ const SendUnifiedScreen = ({
             </View>
           </View>
 
-          {/* Transfer/Withdraw Actions - Only show if not from list */}
-          {!isFromList && (
+          {/* Transfer/Withdraw Actions - hide in profile-recipient send flow */}
+          {!isFromList && !isProfileRecipientFlow && (
             <View style={styles.transferActions}>
               <View
                 style={styles.transferActionButtonWrapper}
@@ -1274,203 +856,212 @@ const SendUnifiedScreen = ({
 
           {/* Form Section */}
           {activeMode === 'transfer' ? (
-            <View style={styles.formSection}>
-              {!isFromList && (
-                <>
-                  {!selectedUserForTransfer ? (
-                    <View style={styles.searchSection}>
-                      <View style={styles.inputGroup}>
-                        <View
-                          style={[
-                            styles.inputWrapper,
-                            focusedField === 'search' && styles.inputWrapperFocused,
-                          ]}
-                        >
-                          <View style={styles.inputIcon}>
-                            <SearchIcon width={20} height={20} color="rgba(255, 255, 255, 0.5)" />
+            !(!isFromList && isProfileRecipientFlow && hasSavedProfileRecipientTransfer) ? (
+              <View style={styles.formSection}>
+                {!isFromList && (
+                  <>
+                    {!selectedUserForTransfer && !isProfileRecipientFlow ? (
+                      <View style={styles.searchSection}>
+                        <View style={styles.inputGroup}>
+                          <View
+                            style={[
+                              styles.inputWrapper,
+                              focusedField === 'search' && styles.inputWrapperFocused,
+                            ]}
+                          >
+                            <View style={styles.inputIcon}>
+                              <SearchIcon width={20} height={20} color="rgba(255, 255, 255, 0.5)" />
+                            </View>
+                            <TextInput
+                              style={styles.input}
+                              placeholder={searchQuery ? '' : 'Search Username'}
+                              placeholderTextColor="rgba(255, 255, 255, 0.32)"
+                              value={searchQuery}
+                              onChangeText={handleSearch}
+                              autoCapitalize="none"
+                              onFocus={() => setFocusedField('search')}
+                              onBlur={() => setFocusedField(null)}
+                            />
                           </View>
+                        </View>
+
+                        {isSearching ? (
+                          <View style={styles.searchResultsContainer}>
+                            <ActivityIndicator size="small" color="#FFD300" />
+                          </View>
+                        ) : searchResults.length > 0 ? (
+                          <View style={styles.searchResultsContainer}>
+                            {searchResults.map((user) => {
+                              const AvatarComponent = avatarComponents[user.avatarIndex];
+                              return (
+                                <Pressable
+                                  key={user.id}
+                                  style={({ pressed }) => [
+                                    styles.searchResultCard,
+                                    pressed && styles.searchResultCardPressed,
+                                  ]}
+                                  onPress={() => handleSelectUser(user)}
+                                >
+                                  <AvatarComponent width={50} height={50} />
+                                  <View style={styles.searchResultInfo}>
+                                    <View style={styles.searchResultUsernameRow}>
+                                      <Text style={styles.searchResultUsername}>
+                                        {user.username}
+                                      </Text>
+                                      {user.verified && <VerifiedBadge width={16} height={16} />}
+                                    </View>
+                                    <Text style={styles.searchResultFullname} numberOfLines={1}>
+                                      {user.fullName || 'Transfa User'}
+                                    </Text>
+                                  </View>
+                                </Pressable>
+                              );
+                            })}
+                          </View>
+                        ) : null}
+
+                        {!searchQuery && transferUsers.length === 0 && (
+                          <View style={styles.noUserSelectedContainer}>
+                            <Text style={styles.noUserSelectedText}>No User Selected</Text>
+                          </View>
+                        )}
+                      </View>
+                    ) : selectedUserForTransfer ? (
+                      <View style={styles.newTransferCard}>
+                        <View style={styles.newTransferHeader}>
+                          <View style={styles.newTransferUserRow}>
+                            <View style={styles.newTransferAvatar}>
+                              {(() => {
+                                const AvatarComp =
+                                  avatarComponents[selectedUserForTransfer.avatarIndex];
+                                return <AvatarComp width={50} height={50} />;
+                              })()}
+                            </View>
+                            <View>
+                              <View style={styles.usernameRow}>
+                                <Text style={styles.newTransferUsername}>
+                                  {selectedUserForTransfer.username}
+                                </Text>
+                                {selectedUserForTransfer.verified && (
+                                  <VerifiedBadge width={16} height={16} />
+                                )}
+                              </View>
+                              <Text style={styles.newTransferFullname}>
+                                {selectedUserForTransfer.fullName}
+                              </Text>
+                            </View>
+                          </View>
+                          {!isProfileRecipientFlow ? (
+                            <TouchableOpacity
+                              onPress={handleCloseUserForm}
+                              style={styles.closeButton}
+                            >
+                              <CloseIcon width={14} height={14} color="#000000" />
+                            </TouchableOpacity>
+                          ) : null}
+                        </View>
+
+                        <Text style={styles.cardLabel}>Amount</Text>
+                        <View style={styles.cardInputWrapper}>
+                          <NairaIcon width={16} height={16} color="#0F0F0F" />
                           <TextInput
-                            style={styles.input}
-                            placeholder={searchQuery ? '' : 'Search Username'}
-                            placeholderTextColor="rgba(255, 255, 255, 0.32)"
-                            value={searchQuery}
-                            onChangeText={handleSearch}
-                            autoCapitalize="none"
-                            onFocus={() => setFocusedField('search')}
-                            onBlur={() => setFocusedField(null)}
+                            style={styles.cardInput}
+                            placeholder="Enter Amount"
+                            placeholderTextColor="#6C6B6B"
+                            keyboardType="numeric"
+                            value={formAmount}
+                            onChangeText={setFormAmount}
                           />
                         </View>
-                      </View>
 
-                      {isSearching ? (
-                        <View style={styles.searchResultsContainer}>
-                          <ActivityIndicator size="small" color="#FFD300" />
-                        </View>
-                      ) : searchResults.length > 0 ? (
-                        <View style={styles.searchResultsContainer}>
-                          {searchResults.map((user) => {
-                            const AvatarComponent = avatarComponents[user.avatarIndex];
-                            return (
-                              <Pressable
-                                key={user.id}
-                                style={({ pressed }) => [
-                                  styles.searchResultCard,
-                                  pressed && styles.searchResultCardPressed,
+                        <Text style={styles.cardLabel}>Narration</Text>
+                        <TextInput
+                          style={styles.cardNarrationInput}
+                          placeholder="Enter Narration"
+                          placeholderTextColor="#6C6B6B"
+                          value={formNarration}
+                          onChangeText={handleNarrationChange}
+                        />
+
+                        <View style={styles.chipsContainer}>
+                          {NARRATION_CHIPS.map((chip) => (
+                            <TouchableOpacity
+                              key={chip}
+                              style={[styles.chip, selectedChip === chip && styles.chipSelected]}
+                              onPress={() => handleChipSelect(chip)}
+                            >
+                              <Text
+                                style={[
+                                  styles.chipText,
+                                  selectedChip === chip && styles.chipTextSelected,
                                 ]}
-                                onPress={() => handleSelectUser(user)}
                               >
-                                <AvatarComponent width={50} height={50} />
-                                <View style={styles.searchResultInfo}>
-                                  <View style={styles.searchResultUsernameRow}>
-                                    <Text style={styles.searchResultUsername}>{user.username}</Text>
-                                    {user.verified && <VerifiedBadge width={16} height={16} />}
-                                  </View>
-                                  <Text style={styles.searchResultFullname} numberOfLines={1}>
-                                    {user.fullName || 'Transfa User'}
-                                  </Text>
-                                </View>
-                              </Pressable>
-                            );
-                          })}
-                        </View>
-                      ) : null}
-
-                      {!searchQuery && transferUsers.length === 0 && (
-                        <View style={styles.noUserSelectedContainer}>
-                          <Text style={styles.noUserSelectedText}>No User Selected</Text>
-                        </View>
-                      )}
-                    </View>
-                  ) : (
-                    <View style={styles.newTransferCard}>
-                      <View style={styles.newTransferHeader}>
-                        <View style={styles.newTransferUserRow}>
-                          <View style={styles.newTransferAvatar}>
-                            {(() => {
-                              const AvatarComp =
-                                avatarComponents[selectedUserForTransfer.avatarIndex];
-                              return <AvatarComp width={50} height={50} />;
-                            })()}
-                          </View>
-                          <View>
-                            <View style={styles.usernameRow}>
-                              <Text style={styles.newTransferUsername}>
-                                {selectedUserForTransfer.username}
+                                {chip}
                               </Text>
-                              {selectedUserForTransfer.verified && (
-                                <VerifiedBadge width={16} height={16} />
-                              )}
-                            </View>
-                            <Text style={styles.newTransferFullname}>
-                              {selectedUserForTransfer.fullName}
-                            </Text>
-                          </View>
+                            </TouchableOpacity>
+                          ))}
                         </View>
-                        <TouchableOpacity onPress={handleCloseUserForm} style={styles.closeButton}>
-                          <CloseIcon width={14} height={14} color="#000000" />
+
+                        <TouchableOpacity style={styles.saveNewButton} onPress={handleSaveTransfer}>
+                          <Text style={styles.saveNewButtonText}>Save</Text>
                         </TouchableOpacity>
                       </View>
+                    ) : null}
+                  </>
+                )}
 
-                      <Text style={styles.cardLabel}>Amount</Text>
-                      <View style={styles.cardInputWrapper}>
-                        <NairaIcon width={16} height={16} color="#0F0F0F" />
+                {isFromList ? (
+                  <>
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.inputLabel}>Amount</Text>
+                      <View
+                        style={[
+                          styles.inputWrapper,
+                          focusedField === 'listAmount' && styles.inputWrapperFocused,
+                        ]}
+                      >
+                        <View style={styles.inputIcon}>
+                          <NairaIcon width={17} height={15} color="#FFFFFF" />
+                        </View>
                         <TextInput
-                          style={styles.cardInput}
-                          placeholder="Enter Amount"
-                          placeholderTextColor="#6C6B6B"
-                          keyboardType="numeric"
+                          style={styles.input}
+                          placeholder="Amount"
+                          placeholderTextColor="rgba(255, 255, 255, 0.32)"
                           value={formAmount}
                           onChangeText={setFormAmount}
+                          keyboardType="numeric"
+                          onFocus={() => setFocusedField('listAmount')}
+                          onBlur={() => setFocusedField(null)}
                         />
                       </View>
+                    </View>
 
-                      <Text style={styles.cardLabel}>Narration</Text>
-                      <TextInput
-                        style={styles.cardNarrationInput}
-                        placeholder="Enter Narration"
-                        placeholderTextColor="#6C6B6B"
-                        value={formNarration}
-                        onChangeText={handleNarrationChange}
-                      />
-
-                      <View style={styles.chipsContainer}>
-                        {NARRATION_CHIPS.map((chip) => (
-                          <TouchableOpacity
-                            key={chip}
-                            style={[styles.chip, selectedChip === chip && styles.chipSelected]}
-                            onPress={() => handleChipSelect(chip)}
-                          >
-                            <Text
-                              style={[
-                                styles.chipText,
-                                selectedChip === chip && styles.chipTextSelected,
-                              ]}
-                            >
-                              {chip}
-                            </Text>
-                          </TouchableOpacity>
-                        ))}
+                    <View style={styles.inputGroup}>
+                      <Text style={styles.inputLabel}>Narration</Text>
+                      <View
+                        style={[
+                          styles.inputWrapper,
+                          focusedField === 'listNarration' && styles.inputWrapperFocused,
+                        ]}
+                      >
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Enter Narration"
+                          placeholderTextColor="rgba(255, 255, 255, 0.32)"
+                          value={formNarration}
+                          onChangeText={handleNarrationChange}
+                          onFocus={() => setFocusedField('listNarration')}
+                          onBlur={() => setFocusedField(null)}
+                        />
                       </View>
-
-                      <TouchableOpacity style={styles.saveNewButton} onPress={handleSaveTransfer}>
-                        <Text style={styles.saveNewButtonText}>Save</Text>
-                      </TouchableOpacity>
                     </View>
-                  )}
-                </>
-              )}
+                  </>
+                ) : null}
 
-              {isFromList ? (
-                <>
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Amount</Text>
-                    <View
-                      style={[
-                        styles.inputWrapper,
-                        focusedField === 'listAmount' && styles.inputWrapperFocused,
-                      ]}
-                    >
-                      <View style={styles.inputIcon}>
-                        <NairaIcon width={17} height={15} color="#FFFFFF" />
-                      </View>
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Amount"
-                        placeholderTextColor="rgba(255, 255, 255, 0.32)"
-                        value={formAmount}
-                        onChangeText={setFormAmount}
-                        keyboardType="numeric"
-                        onFocus={() => setFocusedField('listAmount')}
-                        onBlur={() => setFocusedField(null)}
-                      />
-                    </View>
-                  </View>
-
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Narration</Text>
-                    <View
-                      style={[
-                        styles.inputWrapper,
-                        focusedField === 'listNarration' && styles.inputWrapperFocused,
-                      ]}
-                    >
-                      <TextInput
-                        style={styles.input}
-                        placeholder="Enter Narration"
-                        placeholderTextColor="rgba(255, 255, 255, 0.32)"
-                        value={formNarration}
-                        onChangeText={handleNarrationChange}
-                        onFocus={() => setFocusedField('listNarration')}
-                        onBlur={() => setFocusedField(null)}
-                      />
-                    </View>
-                  </View>
-                </>
-              ) : null}
-
-              {/* Divider after Amount/Narration when from list */}
-              {isFromList && <View style={styles.sectionDivider} />}
-            </View>
+                {/* Divider after Amount/Narration when from list */}
+                {isFromList && <View style={styles.sectionDivider} />}
+              </View>
+            ) : null
           ) : (
             <View style={styles.formSection}>
               {/* Withdraw Amount Input */}
@@ -1563,7 +1154,9 @@ const SendUnifiedScreen = ({
           )}
 
           {/* Divider after Transfer Form */}
-          {activeMode === 'transfer' && !isFromList && <View style={styles.sectionDivider} />}
+          {activeMode === 'transfer' && !isFromList && !hasSavedProfileRecipientTransfer && (
+            <View style={styles.sectionDivider} />
+          )}
 
           {/* Outgoing Transfers List (if any) - Only show in transfer mode and not from list */}
           {activeMode === 'transfer' && transferUsersWithAmount.length > 0 && !isFromList && (
@@ -1739,195 +1332,14 @@ const SendUnifiedScreen = ({
 
           {/* Confirm Button */}
           <TouchableOpacity
-            style={[
-              styles.confirmButton,
-              (!hasTransactions || isSubmitting) && styles.confirmButtonDisabled,
-            ]}
+            style={[styles.confirmButton, !hasTransactions && styles.confirmButtonDisabled]}
             onPress={handleConfirm}
-            disabled={!hasTransactions || isSubmitting}
+            disabled={!hasTransactions}
           >
-            {isSubmitting ? (
-              <ActivityIndicator size="small" color="#111111" />
-            ) : (
-              <Text style={styles.confirmButtonText}>Confirm</Text>
-            )}
+            <Text style={styles.confirmButtonText}>Confirm</Text>
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
-
-      <Modal
-        transparent
-        animationType="fade"
-        visible={authVisible}
-        onRequestClose={() => {
-          if (!isSubmitting) {
-            setAuthVisible(false);
-            setAuthError(null);
-            setPinValues(['', '', '', '']);
-            setAuthMode('pin');
-          }
-        }}
-      >
-        <View style={styles.authOverlay}>
-          <View style={styles.authCard}>
-            {authMode === 'pin' ? (
-              <>
-                <Text style={styles.authTitle}>
-                  {activeMode === 'withdraw' ? 'Enter PIN to Withdraw' : 'Enter PIN to Pay'}
-                </Text>
-                <Pressable
-                  style={styles.pinInputContainer}
-                  onPress={() => pinInputRefs.current[0]?.focus()}
-                >
-                  {pinValues.map((digit, index) => (
-                    <View key={index} style={styles.pinInput}>
-                      <TextInput
-                        ref={(ref) => {
-                          pinInputRefs.current[index] = ref;
-                        }}
-                        style={styles.pinInputText}
-                        value={digit}
-                        onChangeText={(value) => handlePinChange(value, index)}
-                        onKeyPress={({ nativeEvent }) => handlePinKeyPress(nativeEvent.key, index)}
-                        keyboardType="number-pad"
-                        maxLength={1}
-                        secureTextEntry={false}
-                        textAlign="center"
-                        autoFocus={index === 0}
-                        placeholder="—"
-                        placeholderTextColor="#6C6B6B"
-                        selectionColor="#FFD300"
-                      />
-                    </View>
-                  ))}
-                </Pressable>
-                <TouchableOpacity
-                  style={styles.switchModeButton}
-                  onPress={() => setAuthMode('biometric')}
-                  disabled={isSubmitting}
-                >
-                  <Text style={styles.switchModeText}>
-                    {activeMode === 'withdraw' ? 'Withdraw with Biometrics' : 'Pay with Biometrics'}
-                  </Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                <Text style={styles.authTitle}>
-                  {activeMode === 'withdraw' ? 'Withdraw with Biometrics' : 'Pay with Biometrics'}
-                </Text>
-                <TouchableOpacity
-                  style={styles.verifyButton}
-                  onPress={handleBiometricVerify}
-                  disabled={isSubmitting}
-                >
-                  <Text style={styles.verifyButtonText}>Verify Biometrics</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.switchModeButton}
-                  onPress={() => setAuthMode('pin')}
-                  disabled={isSubmitting}
-                >
-                  <Text style={styles.switchModeText}>
-                    {activeMode === 'withdraw' ? 'Withdraw with PIN' : 'Pay with PIN'}
-                  </Text>
-                </TouchableOpacity>
-              </>
-            )}
-
-            {authError ? <Text style={styles.authErrorText}>{authError}</Text> : null}
-
-            <TouchableOpacity
-              style={styles.closeAuthButton}
-              onPress={() => {
-                if (isSubmitting) {
-                  return;
-                }
-                setAuthVisible(false);
-                setAuthMode('pin');
-                setPinValues(['', '', '', '']);
-                setAuthError(null);
-              }}
-            >
-              <Text style={styles.closeAuthButtonText}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal transparent animationType="fade" visible={processingVisible}>
-        <View style={styles.processingOverlay}>
-          <View style={styles.processingCard}>
-            <ActivityIndicator size="large" color="#FFD300" />
-            <Text style={styles.processingTitle}>Processing</Text>
-            <Text style={styles.processingSubtitle}>Your transfer is processing</Text>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        transparent
-        animationType="fade"
-        visible={!!resultState}
-        onRequestClose={() => setResultState(null)}
-      >
-        <View style={styles.resultOverlay}>
-          <View style={styles.resultCard}>
-            <Text style={styles.resultTitle}>{resultState?.title || 'Success!'}</Text>
-            <Text style={styles.resultMessage}>
-              {resultState?.message || 'Your transaction was successful.'}
-            </Text>
-            <TouchableOpacity
-              style={styles.doneButton}
-              onPress={() => {
-                setResultState(null);
-                navigation.navigate('AppTabs', { screen: 'Home' });
-              }}
-            >
-              <Text style={styles.doneButtonText}>Done</Text>
-            </TouchableOpacity>
-            {(resultState?.receipts.length ?? 0) > 0 ? (
-              <TouchableOpacity
-                style={styles.viewReceiptButton}
-                onPress={() => {
-                  if (!resultState || resultState.receipts.length === 0) {
-                    return;
-                  }
-
-                  const receipts = resultState.receipts;
-                  const failures = resultState.failures;
-                  setResultState(null);
-
-                  if (receipts.length > 1 || failures.length > 0) {
-                    navigation.navigate('MultiTransferReceipts', {
-                      receipts,
-                      failures,
-                    });
-                    return;
-                  }
-
-                  const first = receipts[0];
-                  navigation.navigate('TransferStatus', {
-                    transactionId: first.transactionId,
-                    amount: first.amount,
-                    fee: first.fee,
-                    description: first.description,
-                    recipientUsername: first.recipientUsername,
-                    transferType: resultState.submitMode === 'withdraw' ? 'self_transfer' : 'p2p',
-                    initialStatus: first.initialStatus ?? 'completed',
-                  });
-                }}
-              >
-                <Text style={styles.viewReceiptText}>
-                  {resultState && resultState.receipts.length > 1
-                    ? 'View Receipts'
-                    : 'View Receipt'}
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-        </View>
-      </Modal>
 
       {/* Wallet Modal */}
       <WalletModal visible={walletModalVisible} onClose={() => setWalletModalVisible(false)} />
@@ -2706,168 +2118,6 @@ const styles = StyleSheet.create({
     color: '#FF9D9D',
     fontSize: 13,
     fontFamily: 'Montserrat_500Medium',
-  },
-  authOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-  },
-  authCard: {
-    width: '100%',
-    borderRadius: 16,
-    paddingVertical: 20,
-    paddingHorizontal: 16,
-    backgroundColor: '#1C1C1C',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  authTitle: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontFamily: 'Montserrat_600SemiBold',
-    textAlign: 'center',
-    marginBottom: 14,
-  },
-  pinInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  pinInput: {
-    width: 48,
-    height: 56,
-    borderRadius: 10,
-    backgroundColor: '#2A2A2A',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pinInputText: {
-    width: '100%',
-    height: '100%',
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontFamily: 'Montserrat_600SemiBold',
-  },
-  switchModeButton: {
-    marginTop: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  switchModeText: {
-    color: '#FFD300',
-    fontSize: 13,
-    fontFamily: 'Montserrat_600SemiBold',
-  },
-  verifyButton: {
-    backgroundColor: '#FFD300',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
-  },
-  verifyButtonText: {
-    color: '#000000',
-    fontSize: 15,
-    fontFamily: 'Montserrat_700Bold',
-  },
-  authErrorText: {
-    marginTop: 10,
-    color: '#FF9D9D',
-    textAlign: 'center',
-    fontSize: 12,
-    fontFamily: 'Montserrat_500Medium',
-  },
-  closeAuthButton: {
-    marginTop: 10,
-    alignItems: 'center',
-  },
-  closeAuthButtonText: {
-    color: '#D9D9D9',
-    fontSize: 13,
-    fontFamily: 'Montserrat_500Medium',
-  },
-  processingOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-  },
-  processingCard: {
-    width: '100%',
-    borderRadius: 18,
-    paddingVertical: 26,
-    paddingHorizontal: 16,
-    backgroundColor: '#1A1A1A',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  processingTitle: {
-    marginTop: 14,
-    color: '#FFFFFF',
-    fontSize: 20,
-    fontFamily: 'Montserrat_600SemiBold',
-  },
-  processingSubtitle: {
-    marginTop: 8,
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 14,
-    fontFamily: 'Montserrat_400Regular',
-  },
-  resultOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-  },
-  resultCard: {
-    width: '100%',
-    borderRadius: 18,
-    paddingVertical: 24,
-    paddingHorizontal: 18,
-    backgroundColor: '#1A1A1A',
-    alignItems: 'center',
-  },
-  resultTitle: {
-    color: '#FFFFFF',
-    fontSize: 22,
-    fontFamily: 'Montserrat_600SemiBold',
-    marginBottom: 10,
-  },
-  resultMessage: {
-    color: 'rgba(255,255,255,0.76)',
-    fontSize: 14,
-    textAlign: 'center',
-    fontFamily: 'Montserrat_400Regular',
-    marginBottom: 18,
-  },
-  doneButton: {
-    width: '100%',
-    backgroundColor: '#FFD300',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  doneButtonText: {
-    color: '#000000',
-    fontSize: 16,
-    fontFamily: 'Montserrat_700Bold',
-  },
-  viewReceiptButton: {
-    marginTop: 12,
-  },
-  viewReceiptText: {
-    color: '#FFD300',
-    fontSize: 14,
-    fontFamily: 'Montserrat_600SemiBold',
   },
 });
 
