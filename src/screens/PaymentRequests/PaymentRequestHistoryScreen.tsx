@@ -1,6 +1,28 @@
+import BackIcon from '@/assets/icons/back.svg';
+import CalendarIcon from '@/assets/icons/calendar1.svg';
+import CancelIcon from '@/assets/icons/cancel.svg';
+import PendingIcon from '@/assets/icons/pending.svg';
+import PaidIcon from '@/assets/icons/paid.svg';
+import RequestIcon from '@/assets/icons/request.svg';
+import SearchIcon from '@/assets/icons/search.svg';
+import SettingsIcon from '@/assets/icons/settings.svg';
+import VerifiedBadge from '@/assets/icons/verified.svg';
+import Avatar1 from '@/assets/images/avatar1.svg';
+import Avatar2 from '@/assets/images/avatar2.svg';
+import Avatar3 from '@/assets/images/avatar3.svg';
+import { useListPaymentRequests } from '@/api/transactionApi';
+import DashedBorder from '@/components/DashedBorder';
+import { AppStackParamList } from '@/navigation/AppStack';
+import type { PaymentRequest } from '@/types/api';
+import { formatCurrency } from '@/utils/formatCurrency';
+import { normalizeUsername } from '@/utils/username';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { StatusBar } from 'expo-status-bar';
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -10,42 +32,58 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { LinearGradient } from 'expo-linear-gradient';
+import { SvgXml } from 'react-native-svg';
 
-import { useListPaymentRequests } from '@/api/transactionApi';
-import { AppStackParamList } from '@/navigation/AppStack';
-import type { PaymentRequest } from '@/types/api';
-import { formatCurrency } from '@/utils/formatCurrency';
-import { normalizeUsername } from '@/utils/username';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const BRAND_YELLOW = '#FFD300';
+const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="375" height="812" fill="url(#paint0_linear_708_2445)"/>
+<defs>
+<linearGradient id="paint0_linear_708_2445" x1="187.5" y1="0" x2="187.5" y2="812" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2B2B2B"/>
+<stop offset="0.778846" stop-color="#0F0F0F"/>
+</linearGradient>
+</defs>
+</svg>`;
 
 type NavigationProp = NativeStackNavigationProp<AppStackParamList>;
+type AvatarComponent = React.ComponentType<{ width?: number; height?: number }>;
+type NormalizedRequestStatus = 'declined' | 'paid' | 'pending';
 
-const stripUsernamePrefix = (value?: string | null) => normalizeUsername(value || 'unknown');
+const avatarPool: AvatarComponent[] = [Avatar1, Avatar2, Avatar3];
 
-const normalizeStatus = (status: PaymentRequest['display_status']) => {
-  if (status === 'paid') {
-    return 'Paid';
+const pickAvatarComponent = (seed: string): AvatarComponent => {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) % 1000000007;
   }
-  if (status === 'declined') {
-    return 'Declined';
-  }
-  return 'Pending';
+
+  return avatarPool[Math.abs(hash) % avatarPool.length] || Avatar1;
 };
 
-const statusStyle = (status: PaymentRequest['display_status']) => {
-  if (status === 'paid') {
-    return { bg: '#BFF2B6', text: '#25A641' };
-  }
+const normalizeRequestStatus = (
+  status?: PaymentRequest['display_status']
+): NormalizedRequestStatus => {
   if (status === 'declined') {
-    return { bg: '#FFCACA', text: '#F14D4D' };
+    return 'declined';
   }
-  return { bg: 'rgba(255,211,0,0.25)', text: '#D7A800' };
+  if (status === 'paid') {
+    return 'paid';
+  }
+  return 'pending';
 };
+
+const formatRequestDate = (isoDate: string) =>
+  new Date(isoDate).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+const buildRequestName = (request: PaymentRequest) =>
+  request.request_type === 'general'
+    ? 'General Request'
+    : normalizeUsername(request.recipient_username || 'Transfa User');
 
 const RequestHistoryCard = ({
   request,
@@ -54,69 +92,57 @@ const RequestHistoryCard = ({
   request: PaymentRequest;
   onPress: () => void;
 }) => {
-  const username =
-    request.request_type === 'general'
-      ? 'General Request'
-      : stripUsernamePrefix(request.recipient_username);
-
-  const fullName =
-    request.request_type === 'general'
-      ? request.title
-      : request.recipient_full_name?.trim() || request.title || 'Individual request';
-
-  const statusColors = statusStyle(request.display_status);
+  const status = normalizeRequestStatus(request.display_status);
+  const name = buildRequestName(request);
+  const isGeneral = request.request_type === 'general';
+  const AvatarComponent = pickAvatarComponent(name || request.id);
 
   return (
-    <TouchableOpacity style={styles.historyCard} activeOpacity={0.88} onPress={onPress}>
-      <View style={styles.cardAvatar}>
-        <Text style={styles.cardAvatarInitial}>{username.slice(0, 1).toUpperCase()}</Text>
-      </View>
-
-      <View style={styles.cardTextWrap}>
-        <View style={styles.usernameRow}>
-          <Text style={styles.cardUsername} numberOfLines={1}>
-            {username}
-          </Text>
-          {request.request_type !== 'general' ? (
-            <View style={styles.lockBadge}>
-              <Ionicons name="lock-closed" size={8} color="#090909" />
-            </View>
-          ) : null}
+    <TouchableOpacity style={styles.requestCard} onPress={onPress} activeOpacity={0.7}>
+      <View style={styles.requestLeft}>
+        {isGeneral ? (
+          <View style={styles.generalRequestIcon}>
+            <DashedBorder size={48} borderWidth={2} color="#000000" dashCount={18} gapRatio={0.7} />
+            <RequestIcon width={24} height={24} color="#000000" />
+          </View>
+        ) : (
+          <View style={styles.requestAvatarContainer}>
+            <AvatarComponent width={48} height={48} />
+          </View>
+        )}
+        <View style={styles.requestInfo}>
+          <View style={styles.requestNameRow}>
+            <Text style={styles.requestName} numberOfLines={1}>
+              {name}
+            </Text>
+            {!isGeneral ? <VerifiedBadge width={16} height={16} /> : null}
+          </View>
+          <Text style={styles.requestAmount}>{formatCurrency(request.amount)}</Text>
+          <View style={styles.requestDateRow}>
+            <CalendarIcon width={14} height={14} />
+            <Text style={styles.requestDate}>{formatRequestDate(request.created_at)}</Text>
+          </View>
         </View>
-
-        <Text style={styles.cardAmount}>{formatCurrency(request.amount)}</Text>
-
-        <View style={styles.dateRow}>
-          <Ionicons name="calendar-outline" size={11} color="#72757C" />
-          <Text style={styles.cardDate}>
-            {new Date(request.created_at).toLocaleDateString('en-US', {
-              month: 'short',
-              day: 'numeric',
-              year: 'numeric',
-            })}
-          </Text>
-        </View>
-
-        <Text style={styles.cardFullName} numberOfLines={1}>
-          {fullName}
-        </Text>
       </View>
-
-      <View style={[styles.statusPill, { backgroundColor: statusColors.bg }]}>
-        <Ionicons
-          name={
-            request.display_status === 'paid'
-              ? 'checkmark-circle'
-              : request.display_status === 'declined'
-                ? 'close-circle'
-                : 'time'
-          }
-          size={10}
-          color={statusColors.text}
-        />
-        <Text style={[styles.statusText, { color: statusColors.text }]}>
-          {normalizeStatus(request.display_status)}
-        </Text>
+      <View style={styles.requestStatus}>
+        {status === 'declined' ? (
+          <View style={styles.declinedBadge}>
+            <CancelIcon width={10} height={10} />
+            <Text style={styles.declinedText}>Declined</Text>
+          </View>
+        ) : null}
+        {status === 'paid' ? (
+          <View style={styles.paidBadge}>
+            <PaidIcon width={10} height={10} color="#FFFFFF" />
+            <Text style={styles.paidText}>Paid</Text>
+          </View>
+        ) : null}
+        {status === 'pending' ? (
+          <View style={styles.pendingBadge}>
+            <PendingIcon width={10} height={10} />
+            <Text style={styles.pendingText}>Pending</Text>
+          </View>
+        ) : null}
       </View>
     </TouchableOpacity>
   );
@@ -124,254 +150,316 @@ const RequestHistoryCard = ({
 
 const PaymentRequestHistoryScreen = () => {
   const navigation = useNavigation<NavigationProp>();
-  const [query, setQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const query = searchQuery.trim();
 
-  const trimmedQuery = useMemo(() => query.trim(), [query]);
-
-  const {
-    data: requests,
-    isLoading,
-    isError,
-    error,
-    refetch,
-    isRefetching,
-  } = useListPaymentRequests({
+  const { data, isLoading, isError, error, refetch, isRefetching } = useListPaymentRequests({
     limit: 100,
     offset: 0,
-    q: trimmedQuery.length > 0 ? trimmedQuery : undefined,
+    q: query || undefined,
   });
 
-  const historyItems = requests ?? [];
+  const requests = useMemo(() => data ?? [], [data]);
+
+  const filteredRequests = useMemo(() => {
+    if (!query) {
+      return requests;
+    }
+
+    const lowered = query.toLowerCase();
+    return requests.filter((request) => {
+      const name = buildRequestName(request).toLowerCase();
+      const title = (request.title || '').toLowerCase();
+      return name.includes(lowered) || title.includes(lowered);
+    });
+  }, [query, requests]);
 
   return (
-    <View style={styles.root}>
-      <LinearGradient
-        colors={['#1A1B1E', '#0C0D0F', '#050607']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={StyleSheet.absoluteFillObject}
-      />
+    <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
+      <StatusBar style="light" />
+      <View style={styles.backgroundContainer}>
+        <SvgXml xml={backgroundSvg} width={SCREEN_WIDTH} height={SCREEN_HEIGHT} />
+      </View>
 
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <View style={styles.container}>
-          <View style={styles.headerRow}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerButton}>
-              <Ionicons name="arrow-back" size={20} color="#ECEDED" />
-            </TouchableOpacity>
-
-            <Text style={styles.headerTitle}>Request History</Text>
-
-            <TouchableOpacity style={styles.headerButton} activeOpacity={0.9}>
-              <Ionicons name="settings-outline" size={18} color="#ECEDED" />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.searchWrap}>
-            <Ionicons name="search" size={16} color="#D2D3D5" />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Search user"
-              placeholderTextColor="#9D9EA2"
-              style={styles.searchInput}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-          </View>
-
-          <ScrollView
-            style={styles.listScroll}
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}
-            refreshControl={
-              <RefreshControl
-                refreshing={isRefetching}
-                onRefresh={refetch}
-                tintColor={BRAND_YELLOW}
-              />
-            }
-          >
-            {isLoading ? (
-              <View style={styles.centerState}>
-                <ActivityIndicator size="small" color={BRAND_YELLOW} />
-              </View>
-            ) : isError && !requests ? (
-              <View style={styles.emptyCard}>
-                <Text style={styles.emptyText}>
-                  {error?.message ||
-                    'Unable to load request history. Pull to refresh and try again.'}
-                </Text>
-              </View>
-            ) : historyItems.length === 0 ? (
-              <View style={styles.emptyCard}>
-                <Text style={styles.emptyText}>No request history found.</Text>
-              </View>
-            ) : (
-              historyItems.map((item) => (
-                <RequestHistoryCard
-                  key={item.id}
-                  request={item}
-                  onPress={() =>
-                    navigation.navigate('PaymentRequestSuccess', { requestId: item.id })
-                  }
-                />
-              ))
-            )}
-          </ScrollView>
+      <View style={styles.topBar}>
+        <View style={styles.topBarLeft}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <BackIcon width={24} height={24} />
+          </TouchableOpacity>
         </View>
-      </SafeAreaView>
-    </View>
+        <View style={styles.topBarRight}>
+          <View style={styles.statusIcons} />
+          <TouchableOpacity style={styles.settingsButton} activeOpacity={0.8}>
+            <SettingsIcon width={24} height={24} color="#FFFFFF" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefetching}
+            onRefresh={refetch}
+            tintColor="#FFFFFF"
+            colors={['#FFFFFF']}
+          />
+        }
+      >
+        <Text style={styles.title}>Outgoing Request</Text>
+
+        <View style={styles.searchContainer}>
+          <View style={styles.searchIconContainer}>
+            <SearchIcon width={16} height={16} color="#FFFFFF" />
+          </View>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search user"
+            placeholderTextColor="#6C6B6B"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+        </View>
+
+        <View style={styles.requestsList}>
+          {isLoading && requests.length === 0 ? (
+            <View style={styles.stateWrap}>
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            </View>
+          ) : isError && requests.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyText}>
+                {error?.message || 'Unable to load request history.'}
+              </Text>
+            </View>
+          ) : filteredRequests.length === 0 ? (
+            <View style={styles.emptyCard}>
+              <Text style={styles.emptyText}>No request history found.</Text>
+            </View>
+          ) : (
+            filteredRequests.map((request) => (
+              <RequestHistoryCard
+                key={request.id}
+                request={request}
+                onPress={() =>
+                  navigation.navigate('PaymentRequestSuccess', { requestId: request.id })
+                }
+              />
+            ))
+          )}
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: '#050607',
-  },
-  safeArea: {
-    flex: 1,
-  },
   container: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 8,
+    backgroundColor: '#000000',
   },
-  headerRow: {
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
+  },
+  topBar: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 20,
+    zIndex: 1,
   },
-  headerButton: {
-    width: 28,
-    paddingVertical: 4,
-    alignItems: 'center',
-  },
-  headerTitle: {
-    color: '#F2F2F3',
-    fontSize: 24,
-    fontWeight: '500',
-  },
-  searchWrap: {
-    marginTop: 18,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+  topBarLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    gap: 8,
+    gap: 16,
+  },
+  backButton: {
+    padding: 4,
+  },
+  topBarRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  statusIcons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  settingsButton: {
+    padding: 4,
+  },
+  scrollView: {
+    flex: 1,
+    zIndex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+  },
+  title: {
+    fontSize: 24,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_400Regular',
+    marginBottom: 24,
+    textAlign: 'center',
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#333333',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  searchIconContainer: {
+    marginRight: 12,
   },
   searchInput: {
     flex: 1,
-    color: '#ECECEF',
-    fontSize: 14,
-    paddingVertical: 0,
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_400Regular',
   },
-  listScroll: {
-    flex: 1,
-    marginTop: 14,
-  },
-  listContent: {
-    paddingBottom: 32,
+  requestsList: {
     gap: 12,
   },
-  historyCard: {
-    minHeight: 88,
-    borderRadius: 10,
-    backgroundColor: '#F6F6F7',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  cardAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: '#ABABFD',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardAvatarInitial: {
-    color: '#121316',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  cardTextWrap: {
-    flex: 1,
-  },
-  usernameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  cardUsername: {
-    color: '#111214',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  lockBadge: {
-    width: 15,
-    height: 15,
-    borderRadius: 7.5,
-    backgroundColor: BRAND_YELLOW,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardAmount: {
-    color: '#17181A',
-    fontSize: 16,
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  dateRow: {
-    marginTop: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-  },
-  cardDate: {
-    color: '#6D7077',
-    fontSize: 11,
-  },
-  cardFullName: {
-    color: '#55585F',
-    fontSize: 12,
-    marginTop: 1,
-  },
-  statusPill: {
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-  },
-  statusText: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  centerState: {
-    marginTop: 36,
+  stateWrap: {
+    marginTop: 20,
     alignItems: 'center',
   },
   emptyCard: {
-    minHeight: 100,
     borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    paddingVertical: 16,
+    paddingHorizontal: 12,
     alignItems: 'center',
-    justifyContent: 'center',
   },
   emptyText: {
-    color: '#A5A7AC',
     fontSize: 13,
+    color: '#D6D6D7',
+    fontFamily: 'Montserrat_400Regular',
+    textAlign: 'center',
+  },
+  requestCard: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 10,
+    padding: 16,
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  requestLeft: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    flex: 1,
+  },
+  requestAvatarContainer: {
+    width: 48,
+    height: 48,
+  },
+  generalRequestIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  requestInfo: {
+    flex: 1,
+  },
+  requestNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  requestName: {
+    fontSize: 18,
+    color: '#000000',
+    fontFamily: 'Montserrat_700Bold',
+    maxWidth: 140,
+  },
+  requestAmount: {
+    fontSize: 16,
+    color: '#000000',
+    fontFamily: 'Montserrat_500Medium',
+    marginBottom: 6,
+  },
+  requestDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  requestDate: {
+    fontSize: 14,
+    color: '#000000',
+    fontFamily: 'Montserrat_400Regular',
+  },
+  requestStatus: {
+    alignItems: 'flex-end',
+    marginLeft: 10,
+  },
+  declinedBadge: {
+    backgroundColor: '#FFCDCD',
+    borderRadius: 21,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  declinedText: {
+    fontSize: 12,
+    color: '#FF3737',
+    fontFamily: 'Montserrat_600SemiBold',
+  },
+  paidBadge: {
+    backgroundColor: '#CBF9BD',
+    borderRadius: 21,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  paidText: {
+    fontSize: 12,
+    color: '#33DA00',
+    fontFamily: 'Montserrat_600SemiBold',
+  },
+  pendingBadge: {
+    backgroundColor: '#FEF5CB',
+    borderRadius: 21,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  pendingText: {
+    fontSize: 12,
+    color: '#EBB351',
+    fontFamily: 'Montserrat_600SemiBold',
   },
 });
 

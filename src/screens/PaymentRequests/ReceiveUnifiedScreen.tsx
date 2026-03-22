@@ -891,7 +891,7 @@ const ReceiveUnifiedScreen = ({
                 style={styles.historyButton}
                 onPress={() => navigation.navigate('PaymentRequestHistory')}
               >
-                <Text style={styles.historyButtonText}>Request History</Text>
+                <Text style={styles.historyButtonText}>Show more</Text>
               </TouchableOpacity>
             </View>
 
@@ -947,7 +947,9 @@ const ReceiveUnifiedScreen = ({
 
                         <View style={styles.requestInfo}>
                           <View style={styles.requestNameRow}>
-                            <Text style={styles.requestName}>{name}</Text>
+                            <Text style={styles.requestName} numberOfLines={1}>
+                              {name}
+                            </Text>
                             {!isGeneral ? <VerifiedBadge width={16} height={16} /> : null}
                           </View>
                           <Text style={styles.requestAmount}>{formatCurrency(request.amount)}</Text>
@@ -1410,7 +1412,7 @@ const styles = StyleSheet.create({
   requestCard: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
+    borderRadius: 10,
     padding: 16,
     justifyContent: 'space-between',
     alignItems: 'flex-start',
@@ -1444,14 +1446,15 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   requestName: {
-    fontSize: 16,
+    fontSize: 18,
     color: '#000000',
-    fontFamily: 'Montserrat_600SemiBold',
+    fontFamily: 'Montserrat_700Bold',
+    maxWidth: 140,
   },
   requestAmount: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#000000',
-    fontFamily: 'Montserrat_400Regular',
+    fontFamily: 'Montserrat_500Medium',
     marginBottom: 6,
   },
   requestDateRow: {
@@ -1460,16 +1463,17 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   requestDate: {
-    fontSize: 12,
-    color: '#292D32',
+    fontSize: 14,
+    color: '#000000',
     fontFamily: 'Montserrat_400Regular',
   },
   requestStatus: {
     alignItems: 'flex-end',
+    marginLeft: 10,
   },
   pendingBadge: {
     backgroundColor: '#FEF5CB',
-    borderRadius: 16,
+    borderRadius: 21,
     paddingHorizontal: 12,
     paddingVertical: 6,
     flexDirection: 'row',
@@ -1482,8 +1486,8 @@ const styles = StyleSheet.create({
     fontFamily: 'Montserrat_600SemiBold',
   },
   paidBadge: {
-    backgroundColor: '#4CD964',
-    borderRadius: 16,
+    backgroundColor: '#CBF9BD',
+    borderRadius: 21,
     paddingHorizontal: 12,
     paddingVertical: 6,
     flexDirection: 'row',
@@ -1492,12 +1496,12 @@ const styles = StyleSheet.create({
   },
   paidText: {
     fontSize: 12,
-    color: '#FFFFFF',
+    color: '#33DA00',
     fontFamily: 'Montserrat_600SemiBold',
   },
   declinedBadge: {
     backgroundColor: '#FFCDCD',
-    borderRadius: 16,
+    borderRadius: 21,
     paddingHorizontal: 12,
     paddingVertical: 6,
     flexDirection: 'row',
