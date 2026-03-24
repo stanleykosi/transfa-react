@@ -1,8 +1,11 @@
+import BackIcon from '@/assets/icons/back.svg';
+import ScanIcon from '@/assets/icons/scan.svg';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Pressable,
+  Animated,
+  Dimensions,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -11,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
+import { StatusBar } from 'expo-status-bar';
 
 import { searchUsers } from '@/api/authApi';
 import {
@@ -26,6 +30,8 @@ import { normalizeUsername, usernameKey } from '@/utils/username';
 const BRAND_YELLOW = '#FFD300';
 const CARD_BG = '#E8E8E8';
 const DARK_BG = '#050607';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const SHEET_HEIGHT = SCREEN_HEIGHT * 0.6;
 const VISION_CAMERA_UNAVAILABLE_NOTICE =
   'QR scanning is unavailable in Expo Go. Use a development build to scan.';
 
@@ -63,6 +69,11 @@ const formatCardDate = (isoDate?: string) => {
   return `${day}/${month}/${year}`;
 };
 
+type DetectionBounds = {
+  origin: { x: number; y: number };
+  size: { width: number; height: number };
+};
+
 const ScanScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
   const isFocused = useIsFocused();
@@ -73,6 +84,8 @@ const ScanScreen = () => {
   const [activePayload, setActivePayload] = useState<ParsedScanPayload | null>(null);
   const [scanNotice, setScanNotice] = useState<string | null>(null);
   const [isResolvingUser, setIsResolvingUser] = useState(false);
+  const [detectionBounds, setDetectionBounds] = useState<DetectionBounds | null>(null);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
 
   const lastScanRef = useRef<{ value: string; ts: number } | null>(null);
   const isMountedRef = useRef(true);
@@ -97,9 +110,32 @@ const ScanScreen = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!detectionBounds) {
+      return;
+    }
+
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 180,
+      useNativeDriver: true,
+    }).start();
+
+    const timer = setTimeout(() => {
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 450,
+        useNativeDriver: true,
+      }).start(() => setDetectionBounds(null));
+    }, 1400);
+
+    return () => clearTimeout(timer);
+  }, [detectionBounds, fadeAnim]);
+
   const resetToScan = useCallback(() => {
     setActivePayload(null);
     setScanNotice(null);
+    setDetectionBounds(null);
   }, []);
 
   const setEphemeralNotice = useCallback((message: string) => {
@@ -171,7 +207,25 @@ const ScanScreen = () => {
         return;
       }
 
-      const value = codes[0]?.value?.trim();
+      const firstCode = codes[0] as
+        | { value?: string; frame?: { x: number; y: number; width: number; height: number } }
+        | undefined;
+
+      const frame = firstCode?.frame;
+      if (
+        frame &&
+        Number.isFinite(frame.x) &&
+        Number.isFinite(frame.y) &&
+        Number.isFinite(frame.width) &&
+        Number.isFinite(frame.height)
+      ) {
+        setDetectionBounds({
+          origin: { x: frame.x, y: frame.y },
+          size: { width: frame.width, height: frame.height },
+        });
+      }
+
+      const value = firstCode?.value?.trim();
       if (!value) {
         return;
       }
@@ -224,6 +278,7 @@ const ScanScreen = () => {
 
   return (
     <View style={styles.root}>
+      <StatusBar style="light" />
       {camera && CameraView ? (
         <CameraView
           style={StyleSheet.absoluteFill}
@@ -237,26 +292,48 @@ const ScanScreen = () => {
 
       <View style={styles.overlayDim} />
 
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-          activeOpacity={0.85}
+      {detectionBounds ? (
+        <Animated.View
+          style={[
+            styles.detectionOverlay,
+            {
+              width: Math.max(24, detectionBounds.size.width + 20),
+              height: Math.max(24, detectionBounds.size.height + 20),
+              left: detectionBounds.origin.x - 10,
+              top: detectionBounds.origin.y - 10,
+              opacity: fadeAnim,
+            },
+          ]}
         >
-          <Ionicons name="arrow-back" size={28} color="#F4F4F4" />
-        </TouchableOpacity>
-      </SafeAreaView>
-
-      {isVisionCameraAvailable ? (
-        <View style={styles.scanReticleWrap}>
-          <View style={styles.scanReticle}>
-            <Corner position="topLeft" />
-            <Corner position="topRight" />
-            <Corner position="bottomLeft" />
-            <Corner position="bottomRight" />
+          <View style={[styles.corner, styles.topLeft]} />
+          <View style={[styles.corner, styles.topRight]} />
+          <View style={[styles.corner, styles.bottomLeft]} />
+          <View style={[styles.corner, styles.bottomRight]} />
+        </Animated.View>
+      ) : isVisionCameraAvailable ? (
+        <View style={styles.staticViewfinderContainer}>
+          <View style={styles.staticViewfinder}>
+            <View style={[styles.corner, styles.topLeft, styles.inactiveCorner]} />
+            <View style={[styles.corner, styles.topRight, styles.inactiveCorner]} />
+            <View style={[styles.corner, styles.bottomLeft, styles.inactiveCorner]} />
+            <View style={[styles.corner, styles.bottomRight, styles.inactiveCorner]} />
           </View>
         </View>
       ) : null}
+
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.85}
+          >
+            <BackIcon width={24} height={24} color="#FFF" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Scan QR Code</Text>
+          <View style={styles.headerSpacer} />
+        </View>
+      </SafeAreaView>
 
       <View style={styles.noticePill}>
         {isVisionCameraAvailable && (!hasPermission || !camera || isResolvingUser) ? (
@@ -266,43 +343,58 @@ const ScanScreen = () => {
       </View>
 
       {!isVisionCameraAvailable ? (
-        <View style={styles.permissionCard}>
-          <Text style={styles.permissionTitle}>Use a Development Build</Text>
-          <Text style={styles.permissionText}>
-            Expo Go cannot load the native camera scanner module. Run `npx expo run:android` or `npx
-            expo run:ios`, then open the dev build.
-          </Text>
+        <View style={styles.permissionContainer}>
+          <View style={styles.permissionCard}>
+            <Text style={styles.permissionTitle}>Use a Development Build</Text>
+            <Text style={styles.permissionText}>
+              Expo Go cannot load the native camera scanner module. Run `npx expo run:android` or
+              `npx expo run:ios`, then open the dev build.
+            </Text>
+          </View>
         </View>
       ) : null}
 
       {isVisionCameraAvailable && !hasPermission ? (
-        <View style={styles.permissionCard}>
-          <Text style={styles.permissionTitle}>Enable Camera Access</Text>
-          <Text style={styles.permissionText}>
-            You need camera access to scan payment and money drop QR codes.
-          </Text>
-          <TouchableOpacity
-            style={styles.permissionButton}
-            onPress={() => requestPermission()}
-            activeOpacity={0.9}
-          >
-            <Text style={styles.permissionButtonText}>Allow Camera</Text>
-          </TouchableOpacity>
+        <View style={styles.permissionContainer}>
+          <View style={styles.permissionCard}>
+            <Text style={styles.permissionTitle}>Enable Camera Access</Text>
+            <Text style={styles.permissionText}>
+              You need camera access to scan payment and money drop QR codes.
+            </Text>
+            <TouchableOpacity
+              style={styles.permissionButton}
+              onPress={() => requestPermission()}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.permissionButtonText}>Grant Permission</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       ) : null}
 
       {activePayload?.type === 'payment_request' ? (
         <>
-          <View style={styles.sheetTopActions}>
-            <Pressable style={styles.sheetRoundIcon} onPress={resetToScan}>
+          <View style={styles.bottomControls}>
+            <TouchableOpacity
+              style={styles.controlButton}
+              onPress={resetToScan}
+              activeOpacity={0.8}
+            >
               <Ionicons name="close" size={24} color="#1C1C1C" />
-            </Pressable>
-            <Pressable style={styles.sheetRoundIcon} onPress={resetToScan}>
-              <Ionicons name="scan-outline" size={22} color="#1C1C1C" />
-            </Pressable>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.controlButton}
+              onPress={resetToScan}
+              activeOpacity={0.8}
+            >
+              <ScanIcon width={24} height={24} />
+            </TouchableOpacity>
           </View>
 
           <View style={styles.sheetWrap}>
+            <View style={styles.dragHandleContainer}>
+              <View style={styles.dragHandle} />
+            </View>
             <Text style={styles.sheetTitle}>Make Payment</Text>
 
             {isLoadingIncomingRequest ? (
@@ -387,14 +479,6 @@ const ScanScreen = () => {
   );
 };
 
-const Corner = ({
-  position,
-}: {
-  position: 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight';
-}) => {
-  return <View style={[styles.corner, styles[position]]} />;
-};
-
 const styles = StyleSheet.create({
   root: {
     flex: 1,
@@ -414,83 +498,116 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
   },
-  backButton: {
-    width: 42,
-    height: 42,
-    marginLeft: 16,
-    marginTop: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scanReticleWrap: {
+  header: {
     position: 'absolute',
+    top: 6,
     left: 0,
     right: 0,
-    top: '35%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    zIndex: 10,
+  },
+  backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  scanReticle: {
-    width: 190,
-    height: 190,
+  headerTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontFamily: 'Montserrat_600SemiBold',
+  },
+  headerSpacer: {
+    width: 44,
+    height: 44,
+  },
+  detectionOverlay: {
+    position: 'absolute',
+    zIndex: 5,
+  },
+  staticViewfinderContainer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  staticViewfinder: {
+    width: SCREEN_WIDTH * 0.7,
+    height: SCREEN_WIDTH * 0.7,
+    position: 'relative',
   },
   corner: {
     position: 'absolute',
-    width: 46,
-    height: 46,
+    width: 44,
+    height: 44,
     borderColor: BRAND_YELLOW,
-    borderWidth: 7,
-    borderRadius: 27,
+    borderWidth: 10,
   },
+  inactiveCorner: { opacity: 0.5 },
   topLeft: {
     top: 0,
     left: 0,
     borderRightWidth: 0,
     borderBottomWidth: 0,
+    borderTopLeftRadius: 22,
   },
   topRight: {
     top: 0,
     right: 0,
     borderLeftWidth: 0,
     borderBottomWidth: 0,
+    borderTopRightRadius: 22,
   },
   bottomLeft: {
     bottom: 0,
     left: 0,
     borderTopWidth: 0,
     borderRightWidth: 0,
+    borderBottomLeftRadius: 22,
   },
   bottomRight: {
     bottom: 0,
     right: 0,
     borderTopWidth: 0,
     borderLeftWidth: 0,
+    borderBottomRightRadius: 22,
   },
   noticePill: {
     position: 'absolute',
     left: 16,
     right: 16,
-    bottom: 242,
+    bottom: 130,
     borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: 'rgba(18,19,22,0.74)',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    zIndex: 4,
   },
   noticeText: {
     color: '#EFEFF1',
     fontSize: 13,
-    fontWeight: '500',
+    fontFamily: 'Montserrat_500Medium',
+    flexShrink: 1,
+  },
+  permissionContainer: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    zIndex: 8,
   },
   permissionCard: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 24,
     borderRadius: 16,
-    padding: 16,
+    padding: 20,
     backgroundColor: 'rgba(16,17,19,0.92)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
@@ -498,18 +615,21 @@ const styles = StyleSheet.create({
   permissionTitle: {
     color: '#F5F5F6',
     fontSize: 17,
-    fontWeight: '700',
+    fontFamily: 'Montserrat_700Bold',
+    textAlign: 'center',
   },
   permissionText: {
-    marginTop: 8,
+    marginTop: 10,
     color: '#CBCDD1',
-    fontSize: 13,
-    lineHeight: 19,
+    fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
+    lineHeight: 21,
+    textAlign: 'center',
   },
   permissionButton: {
-    marginTop: 14,
-    height: 46,
-    borderRadius: 10,
+    marginTop: 18,
+    height: 52,
+    borderRadius: 16,
     backgroundColor: BRAND_YELLOW,
     alignItems: 'center',
     justifyContent: 'center',
@@ -517,22 +637,24 @@ const styles = StyleSheet.create({
   permissionButtonText: {
     color: '#101114',
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: 'Montserrat_700Bold',
   },
-  sheetTopActions: {
+  bottomControls: {
     position: 'absolute',
-    left: 24,
-    right: 24,
-    bottom: 333,
+    bottom: SHEET_HEIGHT + 34,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     justifyContent: 'space-between',
+    paddingHorizontal: 32,
     alignItems: 'center',
+    zIndex: 11,
   },
-  sheetRoundIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#ECEDEF',
+  controlButton: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -541,24 +663,34 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    minHeight: 330,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    minHeight: SHEET_HEIGHT,
+    borderTopLeftRadius: 36,
+    borderTopRightRadius: 36,
     backgroundColor: CARD_BG,
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 26,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    zIndex: 10,
+  },
+  dragHandleContainer: {
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  dragHandle: {
+    width: 48,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#E0E0E0',
   },
   sheetTitle: {
     color: '#292A2D',
-    fontSize: 26 / 2,
-    fontWeight: '500',
+    fontSize: 16,
+    fontFamily: 'Montserrat_500Medium',
     textAlign: 'center',
-    marginBottom: 10,
+    marginBottom: 16,
   },
   sheetLoadingWrap: {
-    borderRadius: 12,
-    backgroundColor: '#D7D7D7',
+    borderRadius: 20,
+    backgroundColor: '#EFEFEF',
     borderWidth: 1,
     borderColor: '#CFCFCF',
     paddingVertical: 24,
@@ -569,17 +701,18 @@ const styles = StyleSheet.create({
   },
   sheetLoadingText: {
     color: '#222326',
-    fontSize: 13,
+    fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
     textAlign: 'center',
   },
   infoBlock: {
-    borderRadius: 10,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: '#D9D9D9',
-    backgroundColor: '#DEDEDE',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 8,
+    backgroundColor: '#EFEFEF',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 10,
     gap: 8,
   },
   rowSpace: {
@@ -609,17 +742,17 @@ const styles = StyleSheet.create({
   label: {
     color: '#7A7A7D',
     fontSize: 15,
-    fontWeight: '500',
+    fontFamily: 'Montserrat_400Regular',
   },
   toValue: {
     color: '#292A2D',
-    fontSize: 28 / 2,
-    fontWeight: '500',
+    fontSize: 14,
+    fontFamily: 'Montserrat_500Medium',
   },
   value: {
     color: '#2A2A2D',
-    fontSize: 25 / 2,
-    fontWeight: '500',
+    fontSize: 15,
+    fontFamily: 'Montserrat_500Medium',
   },
   totalRow: {
     flexDirection: 'row',
@@ -629,12 +762,13 @@ const styles = StyleSheet.create({
   totalLabel: {
     color: '#6A6A6D',
     fontSize: 15,
+    fontFamily: 'Montserrat_400Regular',
   },
   totalValue: {
     marginTop: 2,
     color: '#101114',
-    fontSize: 46 / 2,
-    fontWeight: '700',
+    fontSize: 24,
+    fontFamily: 'Montserrat_700Bold',
   },
   detailsButton: {
     height: 34,
@@ -647,20 +781,20 @@ const styles = StyleSheet.create({
   detailsButtonText: {
     color: '#404246',
     fontSize: 13,
-    fontWeight: '500',
+    fontFamily: 'Montserrat_500Medium',
   },
   confirmButton: {
-    marginTop: 8,
-    height: 48,
-    borderRadius: 10,
+    marginTop: 12,
+    height: 56,
+    borderRadius: 16,
     backgroundColor: BRAND_YELLOW,
     alignItems: 'center',
     justifyContent: 'center',
   },
   confirmButtonText: {
     color: '#0F1013',
-    fontSize: 29 / 2,
-    fontWeight: '700',
+    fontSize: 18,
+    fontFamily: 'Montserrat_700Bold',
   },
   outlineAction: {
     marginTop: 10,
@@ -675,7 +809,7 @@ const styles = StyleSheet.create({
   outlineActionText: {
     color: '#1E1F22',
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: 'Montserrat_600SemiBold',
   },
 });
 

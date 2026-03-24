@@ -11,9 +11,8 @@ import { moderateScale, scale, verticalScale } from '@/utils/responsive';
 import BottomSheet, { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
-import { useNavigation } from '@react-navigation/native';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { Alert, Dimensions, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Extrapolation,
   interpolate,
@@ -21,29 +20,37 @@ import Animated, {
   useSharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AppNavigationProp } from '@/types/navigation';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-interface Transaction {
+type AvatarKey = 'avatar' | 'avatar1' | 'avatar2' | 'avatar3';
+
+export interface UserProfileModalTransaction {
   id: string;
   type: 'sent' | 'received';
   description: string;
   amount: number;
-  fromUser: string;
-  toUser: string;
 }
 
 interface UserProfileModalProps {
   visible: boolean;
   onClose: () => void;
-  username?: string;
-  fullName?: string;
-  avatar?: string;
+  username: string;
+  fullName: string;
+  avatar?: AvatarKey;
   verified?: boolean;
+  transactions: UserProfileModalTransaction[];
+  isLoading?: boolean;
+  isRefetching?: boolean;
+  isError?: boolean;
+  errorMessage?: string;
+  onRetry?: () => void;
+  onSend: () => void;
+  onRequest: () => void;
+  onShare: () => void;
 }
 
-const avatarMap: Record<string, React.ComponentType<{ width?: number; height?: number }>> = {
+const avatarMap: Record<AvatarKey, React.ComponentType<{ width?: number; height?: number }>> = {
   avatar: Avatar,
   avatar1: Avatar1,
   avatar2: Avatar2,
@@ -62,10 +69,10 @@ const TransactionItem = React.memo(
     transaction,
     AvatarComponent,
   }: {
-    transaction: Transaction;
+    transaction: UserProfileModalTransaction;
     AvatarComponent: React.ComponentType<{ width?: number; height?: number }>;
   }) => {
-    const isFromCurrentUser = transaction.fromUser === '_HNCH25';
+    const isFromCurrentUser = transaction.type === 'sent';
     const SenderAvatar = isFromCurrentUser ? Avatar : AvatarComponent;
     const ReceiverAvatar = isFromCurrentUser ? AvatarComponent : Avatar;
 
@@ -122,18 +129,26 @@ const UserProfileBackdrop = ({
 export default function UserProfileModal({
   visible,
   onClose,
-  username = 'Titi_823',
-  fullName = 'Oluwatiti Adenuga',
+  username,
+  fullName,
   avatar = 'avatar1',
   verified = true,
+  transactions,
+  isLoading = false,
+  isRefetching = false,
+  isError = false,
+  errorMessage,
+  onRetry,
+  onSend,
+  onRequest,
+  onShare,
 }: UserProfileModalProps) {
-  const navigation = useNavigation<AppNavigationProp>();
   const bottomSheetRef = useRef<BottomSheet>(null);
   const insets = useSafeAreaInsets();
   const animatedIndex = useSharedValue(-1);
   const animatedPosition = useSharedValue(SCREEN_HEIGHT);
 
-  const AvatarComponent = avatar && avatarMap[avatar] ? avatarMap[avatar] : null;
+  const AvatarComponent = avatarMap[avatar] || null;
   const snapPoints = useMemo(() => ['80%'], []);
   const TOP_BAR_OFFSET = useMemo(() => scale(65), []);
 
@@ -172,32 +187,23 @@ export default function UserProfileModal({
 
   const handleSend = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onClose();
-    navigation.navigate('PayUser');
-  }, [navigation, onClose]);
+    onSend();
+  }, [onSend]);
 
   const handleRequest = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    onClose();
-    navigation.navigate('CreatePaymentRequest', { forceMode: 'individual' });
-  }, [navigation, onClose]);
+    onRequest();
+  }, [onRequest]);
 
   const handleClose = useCallback(() => {
     Haptics.selectionAsync();
     bottomSheetRef.current?.close();
   }, []);
 
-  const handleShare = useCallback(async () => {
+  const handleShare = useCallback(() => {
     Haptics.selectionAsync();
-    try {
-      await Share.share({
-        message: `Check out ${fullName}'s profile on Transfa: https://transfa.app/${username}`,
-        url: `https://transfa.app/${username}`,
-      });
-    } catch (error: any) {
-      Alert.alert('Error', error.message);
-    }
-  }, [username, fullName]);
+    onShare();
+  }, [onShare]);
 
   const renderBackdrop = useCallback(
     (props: any) => <UserProfileBackdrop {...props} onPress={handleClose} />,
@@ -211,60 +217,6 @@ export default function UserProfileModal({
       }
     },
     [onClose]
-  );
-
-  const transactions: Transaction[] = useMemo(
-    () => [
-      {
-        id: '1',
-        type: 'sent',
-        description: `TRF FRM _HNCH25 TO ${username} - B69`,
-        amount: 15000,
-        fromUser: '_HNCH25',
-        toUser: username,
-      },
-      {
-        id: '2',
-        type: 'received',
-        description: `TRF FRM ${username} TO _HNCH25 - B69`,
-        amount: 5000,
-        fromUser: username,
-        toUser: '_HNCH25',
-      },
-      {
-        id: '3',
-        type: 'sent',
-        description: `TRF FRM _HNCH25 TO ${username} - B69`,
-        amount: 2500,
-        fromUser: '_HNCH25',
-        toUser: username,
-      },
-      {
-        id: '6',
-        type: 'sent',
-        description: `TRF FRM _HNCH25 TO ${username} - B69`,
-        amount: 2500,
-        fromUser: '_HNCH25',
-        toUser: username,
-      },
-      {
-        id: '4',
-        type: 'received',
-        description: `TRF FRM _HNCH25 TO ${username} - B69`,
-        amount: 2500,
-        fromUser: '_HNCH25',
-        toUser: username,
-      },
-      {
-        id: '5',
-        type: 'sent',
-        description: `TRF FRM _HNCH25 TO ${username} - B69`,
-        amount: 2500,
-        fromUser: '_HNCH25',
-        toUser: username,
-      },
-    ],
-    [username]
   );
 
   return (
@@ -327,17 +279,44 @@ export default function UserProfileModal({
           </View>
 
           <View style={[styles.transactionSection, { paddingBottom: insets.bottom }]}>
-            <Text style={styles.transactionTitle}>Transaction History</Text>
-            <BottomSheetFlatList
-              data={transactions}
-              keyExtractor={(item: Transaction) => item.id}
-              renderItem={({ item }: { item: Transaction }) => (
-                <TransactionItem transaction={item} AvatarComponent={AvatarComponent || Avatar1} />
-              )}
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.transactionListContent}
-              nestedScrollEnabled
-            />
+            <View style={styles.transactionHeader}>
+              <Text style={styles.transactionTitle}>Transaction History</Text>
+              {(isLoading || isRefetching) && <ActivityIndicator size="small" color="#000000" />}
+            </View>
+            {isError ? (
+              <View style={styles.stateCard}>
+                <Text style={styles.stateText}>
+                  {errorMessage || 'Unable to load transactions.'}
+                </Text>
+                {onRetry ? (
+                  <Pressable style={styles.retryButton} onPress={onRetry}>
+                    <Text style={styles.retryButtonText}>Retry</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ) : isLoading && transactions.length === 0 ? (
+              <View style={styles.stateCard}>
+                <Text style={styles.stateText}>Loading transactions...</Text>
+              </View>
+            ) : transactions.length === 0 ? (
+              <View style={styles.stateCard}>
+                <Text style={styles.stateText}>No transactions with this user yet.</Text>
+              </View>
+            ) : (
+              <BottomSheetFlatList
+                data={transactions}
+                keyExtractor={(item: UserProfileModalTransaction) => item.id}
+                renderItem={({ item }: { item: UserProfileModalTransaction }) => (
+                  <TransactionItem
+                    transaction={item}
+                    AvatarComponent={AvatarComponent || Avatar1}
+                  />
+                )}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.transactionListContent}
+                nestedScrollEnabled
+              />
+            )}
           </View>
         </View>
       </BottomSheet>
@@ -379,7 +358,7 @@ const styles = StyleSheet.create({
   },
   modalTopBar: {
     position: 'absolute',
-    top: verticalScale(10),
+    top: verticalScale(8),
     left: 0,
     right: 0,
     zIndex: 100,
@@ -479,11 +458,16 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: scale(20),
   },
+  transactionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: verticalScale(16),
+  },
   transactionTitle: {
     fontSize: moderateScale(18),
     color: '#000000',
     fontFamily: 'Montserrat_400Regular',
-    marginBottom: verticalScale(16),
   },
   transactionListContent: {
     paddingBottom: verticalScale(20),
@@ -546,5 +530,34 @@ const styles = StyleSheet.create({
   },
   receivedAmount: {
     color: '#000000',
+  },
+  stateCard: {
+    borderRadius: scale(12),
+    backgroundColor: 'rgba(0, 0, 0, 0.08)',
+    paddingHorizontal: scale(14),
+    paddingVertical: verticalScale(14),
+    alignItems: 'center',
+    gap: verticalScale(10),
+  },
+  stateText: {
+    fontSize: moderateScale(14),
+    color: '#111111',
+    fontFamily: 'Montserrat_400Regular',
+    textAlign: 'center',
+  },
+  retryButton: {
+    minWidth: scale(96),
+    height: verticalScale(36),
+    borderRadius: scale(10),
+    borderCurve: 'continuous',
+    backgroundColor: '#111111',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: scale(12),
+  },
+  retryButtonText: {
+    fontSize: moderateScale(14),
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_600SemiBold',
   },
 });

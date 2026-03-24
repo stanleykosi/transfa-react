@@ -241,6 +241,7 @@ const ForgotPasswordScreen = () => {
                     placeholderTextColor="#7E7E7E"
                     autoCapitalize="none"
                     keyboardType="email-address"
+                    keyboardAppearance="dark"
                     textContentType="emailAddress"
                     autoCorrect={false}
                     editable={step === 'request'}
@@ -278,6 +279,7 @@ const ForgotPasswordScreen = () => {
                         placeholder="At least 8 characters"
                         placeholderTextColor="#7E7E7E"
                         autoCapitalize="none"
+                        keyboardAppearance="dark"
                         secureTextEntry={!isNewPasswordVisible}
                         textContentType="newPassword"
                       />
@@ -304,6 +306,7 @@ const ForgotPasswordScreen = () => {
                         placeholder="Re-enter password"
                         placeholderTextColor="#7E7E7E"
                         autoCapitalize="none"
+                        keyboardAppearance="dark"
                         secureTextEntry={!isConfirmPasswordVisible}
                         textContentType="newPassword"
                       />

@@ -1,24 +1,46 @@
-import React from 'react';
+import AddIcon from '@/assets/icons/add.svg';
+import ArrowRightIcon from '@/assets/icons/arrow-right1.svg';
+import BackIcon from '@/assets/icons/back.svg';
+import { useListTransferLists } from '@/api/transactionApi';
+import type { AppNavigationProp } from '@/types/navigation';
+import { normalizeUsername } from '@/utils/username';
+import { useNavigation } from '@react-navigation/native';
+import { StatusBar } from 'expo-status-bar';
+import React, { useMemo } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   RefreshControl,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
+import { SvgXml } from 'react-native-svg';
 
-import { useListTransferLists } from '@/api/transactionApi';
-import type { AppNavigationProp } from '@/types/navigation';
-import { normalizeUsername } from '@/utils/username';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const BRAND_YELLOW = '#FFD300';
-const BG_BOTTOM = '#050607';
+const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="375" height="812" fill="url(#paint0_linear_708_2445)"/>
+<defs>
+<linearGradient id="paint0_linear_708_2445" x1="187.5" y1="0" x2="187.5" y2="812" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2B2B2B"/>
+<stop offset="0.778846" stop-color="#0F0F0F"/>
+</linearGradient>
+</defs>
+</svg>`;
+
+const LIST_EMOJIS = ['👩🏼‍🤝‍👨🏾', '💪', '🛒', '👶', '📚', '🎯', '🍽️', '🎉', '📦', '🚕'];
+
+const emojiFromSeed = (seed: string) => {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) % 1000000007;
+  }
+  return LIST_EMOJIS[Math.abs(hash) % LIST_EMOJIS.length] || '📋';
+};
 
 const stripUsernamePrefix = (username: string) => normalizeUsername(username);
 
@@ -26,201 +48,217 @@ const TransferListsScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
   const { data, isLoading, refetch, isRefetching } = useListTransferLists({ limit: 50, offset: 0 });
 
+  const lists = useMemo(() => data ?? [], [data]);
+
   return (
-    <View style={styles.root}>
-      <LinearGradient
-        colors={['#1A1B1E', '#0C0D0F', BG_BOTTOM]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={StyleSheet.absoluteFillObject}
-      />
+    <SafeAreaView style={styles.container}>
+      <StatusBar style="light" />
+      <View style={styles.backgroundContainer}>
+        <SvgXml xml={backgroundSvg} width={SCREEN_WIDTH} height={SCREEN_HEIGHT} />
+      </View>
 
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={22} color="#ECECEC" />
-        </TouchableOpacity>
+      <View style={styles.topBar}>
+        <View style={styles.topBarLeft}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <BackIcon width={24} height={24} />
+          </TouchableOpacity>
+        </View>
+      </View>
 
-        <Text style={styles.title}>List</Text>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor="#FFD300" />
+        }
+      >
+        <View style={styles.titleContainer}>
+          <Text style={styles.title}>List</Text>
+        </View>
 
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefetching}
-              onRefresh={refetch}
-              tintColor={BRAND_YELLOW}
-            />
-          }
-        >
+        <View style={styles.listsSection}>
           {isLoading ? (
             <View style={styles.loadingWrap}>
-              <ActivityIndicator size="small" color={BRAND_YELLOW} />
+              <ActivityIndicator size="small" color="#FFD300" />
             </View>
-          ) : (data ?? []).length === 0 ? (
+          ) : lists.length === 0 ? (
             <View style={styles.emptyCard}>
               <Text style={styles.emptyTitle}>No list yet</Text>
               <Text style={styles.emptyText}>Create a list to send to multiple users faster.</Text>
             </View>
           ) : (
-            (data ?? []).map((item) => {
-              const preview = item.member_usernames
+            lists.map((list) => {
+              const subtitle = list.member_usernames
                 .slice(0, 3)
-                .map((name) => stripUsernamePrefix(name))
+                .map((username) => stripUsernamePrefix(username))
                 .join(', ');
 
               return (
                 <TouchableOpacity
-                  key={item.id}
+                  key={list.id}
                   style={styles.listCard}
-                  activeOpacity={0.85}
-                  onPress={() => navigation.navigate('TransferListDetail', { listId: item.id })}
+                  activeOpacity={0.7}
+                  onPress={() => navigation.navigate('TransferListDetail', { listId: list.id })}
                 >
-                  <View style={styles.cardLeft}>
-                    <View style={styles.iconSquare}>
-                      <Text style={styles.iconText}>{item.name.slice(0, 1).toUpperCase()}</Text>
-                    </View>
-
-                    <View style={styles.textWrap}>
-                      <Text style={styles.cardTitle} numberOfLines={1}>
-                        {item.name}
-                      </Text>
-                      <Text style={styles.cardSub} numberOfLines={1}>
-                        {preview || `${item.member_count} members`}
-                      </Text>
-                    </View>
+                  <View style={styles.listIconContainer}>
+                    <Text style={styles.emojiText}>{emojiFromSeed(list.id || list.name)}</Text>
                   </View>
 
-                  <Ionicons name="chevron-forward" size={18} color="#A3A4A9" />
+                  <View style={styles.listTextContainer}>
+                    <Text style={styles.listTitle} numberOfLines={1}>
+                      {list.name}
+                    </Text>
+                    <Text style={styles.listSubtitle} numberOfLines={1}>
+                      {subtitle || `${list.member_count} members`}
+                    </Text>
+                  </View>
+
+                  <ArrowRightIcon width={20} height={20} />
                 </TouchableOpacity>
               );
             })
           )}
-        </ScrollView>
+        </View>
 
         <TouchableOpacity
           style={styles.createButton}
-          activeOpacity={0.9}
+          activeOpacity={0.7}
           onPress={() => navigation.navigate('TransferListCreate')}
         >
-          <Ionicons name="add" size={18} color="#D9D9D9" />
+          <AddIcon width={20} height={20} color="#6C6B6B" />
           <Text style={styles.createButtonText}>Create new list</Text>
         </TouchableOpacity>
-      </SafeAreaView>
-    </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  root: {
+  container: {
     flex: 1,
-    backgroundColor: BG_BOTTOM,
+    backgroundColor: '#000000',
   },
-  safeArea: {
-    flex: 1,
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
+  },
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 20,
+    zIndex: 1,
+  },
+  topBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
   },
   backButton: {
-    width: 28,
-    marginTop: 4,
-    marginBottom: 16,
+    padding: 4,
   },
-  title: {
-    color: '#ECEDEF',
-    fontSize: 25,
-    fontWeight: '700',
-    marginBottom: 12,
-  },
-  scroll: {
+  scrollView: {
     flex: 1,
+    zIndex: 1,
   },
   scrollContent: {
-    paddingBottom: 22,
+    paddingHorizontal: 20,
+    paddingBottom: 100,
+  },
+  titleContainer: {
+    marginBottom: 32,
+    marginTop: 8,
+  },
+  title: {
+    fontSize: 24,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_600SemiBold',
+  },
+  listsSection: {
     gap: 12,
+    marginBottom: 24,
   },
   loadingWrap: {
-    paddingTop: 40,
+    paddingVertical: 20,
     alignItems: 'center',
   },
   emptyCard: {
-    marginTop: 24,
-    borderRadius: 14,
-    padding: 16,
+    backgroundColor: '#333333',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   emptyTitle: {
-    color: '#ECEDEF',
-    fontSize: 15,
-    fontWeight: '700',
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_600SemiBold',
+    marginBottom: 6,
   },
   emptyText: {
-    marginTop: 6,
-    color: '#A0A2A8',
-    fontSize: 13,
+    fontSize: 14,
+    color: '#C2C2C2',
+    fontFamily: 'Montserrat_400Regular',
   },
   listCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#333333',
     borderRadius: 12,
-    minHeight: 68,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
-  cardLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    flex: 1,
-    marginRight: 8,
-  },
-  iconSquare: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+  listIconContainer: {
+    width: 32,
+    height: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F4DDB5',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 7,
   },
-  iconText: {
-    color: '#141415',
-    fontSize: 14,
-    fontWeight: '800',
+  emojiText: {
+    fontSize: 18,
   },
-  textWrap: {
+  listTextContainer: {
     flex: 1,
   },
-  cardTitle: {
-    color: '#F3F4F6',
-    fontSize: 18,
-    fontWeight: '700',
+  listTitle: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_600SemiBold',
+    marginBottom: 4,
   },
-  cardSub: {
-    marginTop: 2,
-    color: '#989AA0',
-    fontSize: 13,
+  listSubtitle: {
+    fontSize: 14,
+    color: '#9A9A9A',
+    fontFamily: 'Montserrat_400Regular',
   },
   createButton: {
-    marginTop: 8,
-    marginBottom: 16,
-    height: 48,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.26)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
+    gap: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.24)',
+    paddingVertical: 14,
+    marginTop: 8,
   },
   createButtonText: {
-    color: '#D9D9D9',
     fontSize: 20,
-    fontWeight: '600',
+    color: '#D9D9D9',
+    fontFamily: 'Montserrat_600SemiBold',
   },
 });
 

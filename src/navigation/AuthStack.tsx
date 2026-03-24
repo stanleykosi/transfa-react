@@ -12,13 +12,14 @@
  *   UI for the authentication experience, allowing full control over the screen layout.
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import SignInScreen from '@/screens/Auth/SignInScreen';
 import SignUpScreen from '@/screens/Auth/SignUpScreen';
 import VerifyCodeScreen from '@/screens/Auth/VerifyCodeScreen';
 import ForgotPasswordScreen from '@/screens/Auth/ForgotPasswordScreen';
 import OnboardingWelcomeScreen from '@/screens/Auth/OnboardingWelcomeScreen';
+import { consumeNextAuthInitialRoute } from './authStackEntry';
 
 // Define the parameter list for the AuthStack routes for type safety.
 export type AuthStackParamList = {
@@ -36,9 +37,11 @@ export type AuthStackParamList = {
 const Stack = createNativeStackNavigator<AuthStackParamList>();
 
 const AuthStack = () => {
+  const initialRouteName = useMemo(() => consumeNextAuthInitialRoute() ?? 'OnboardingWelcome', []);
+
   return (
     <Stack.Navigator
-      initialRouteName="OnboardingWelcome"
+      initialRouteName={initialRouteName}
       screenOptions={{
         headerShown: false, // Hides the default header for a custom UI
       }}

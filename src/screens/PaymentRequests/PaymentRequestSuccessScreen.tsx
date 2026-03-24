@@ -1,7 +1,32 @@
+import BackIcon from '@/assets/icons/back.svg';
+import CalendarIcon from '@/assets/icons/calendar1.svg';
+import CancelIcon from '@/assets/icons/cancel.svg';
+import CopyIcon from '@/assets/icons/document-copy.svg';
+import DownloadIcon from '@/assets/icons/download.svg';
+import GalleryExportIcon from '@/assets/icons/gallery-export.svg';
+import PaidIcon from '@/assets/icons/paid.svg';
+import PendingIcon from '@/assets/icons/pending.svg';
+import RequestIcon from '@/assets/icons/request.svg';
+import SettingsIcon from '@/assets/icons/settings.svg';
+import ShareIcon from '@/assets/icons/share.svg';
+import TrashIcon from '@/assets/icons/trash.svg';
+import VerifiedBadge from '@/assets/icons/verified.svg';
+import Avatar1 from '@/assets/images/avatar1.svg';
+import Avatar2 from '@/assets/images/avatar2.svg';
+import Avatar3 from '@/assets/images/avatar3.svg';
+import { useDeletePaymentRequest, useGetPaymentRequest } from '@/api/transactionApi';
+import { AppStackParamList } from '@/navigation/AppStack';
+import { formatCurrency } from '@/utils/formatCurrency';
+import { normalizeUsername } from '@/utils/username';
+import * as Clipboard from 'expo-clipboard';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as MediaLibrary from 'expo-media-library';
+import { StatusBar } from 'expo-status-bar';
 import React from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   Image,
   ScrollView,
   Share,
@@ -13,35 +38,77 @@ import {
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import QRCode from 'react-native-qrcode-svg';
-import * as Clipboard from 'expo-clipboard';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as MediaLibrary from 'expo-media-library';
+import { SvgXml } from 'react-native-svg';
 
-import { useDeletePaymentRequest, useGetPaymentRequest } from '@/api/transactionApi';
-import { AppStackParamList } from '@/navigation/AppStack';
-import { formatCurrency } from '@/utils/formatCurrency';
-import { normalizeUsername } from '@/utils/username';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const BRAND_YELLOW = '#FFD300';
+const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="375" height="812" fill="white"/>
+<rect width="375" height="812" fill="url(#paint0_linear_708_2445)"/>
+<rect width="375" height="812" fill="black" fill-opacity="0.2"/>
+<defs>
+<linearGradient id="paint0_linear_708_2445" x1="187.5" y1="0" x2="187.5" y2="812" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2B2B2B"/>
+<stop offset="0.778846" stop-color="#0F0F0F"/>
+</linearGradient>
+</defs>
+</svg>`;
 
 type RouteProps = RouteProp<AppStackParamList, 'PaymentRequestSuccess'>;
 type NavigationProp = NativeStackNavigationProp<AppStackParamList>;
+type RequestStatus = 'pending' | 'paid' | 'declined';
+type AvatarComponent = React.ComponentType<{ width?: number; height?: number }>;
+
+const avatarPool: AvatarComponent[] = [Avatar1, Avatar2, Avatar3];
 
 const stripUsernamePrefix = (value?: string | null) => normalizeUsername(value || 'unknown');
 
-const mapStatus = (status: string) => {
-  const normalized = status.toLowerCase();
+const normalizeRequestStatus = (status?: string): RequestStatus => {
+  const normalized = (status || '').toLowerCase();
   if (normalized === 'paid' || normalized === 'fulfilled') {
-    return { label: 'Paid', text: '#25A641', bg: '#BFF2B6', icon: 'checkmark-circle' as const };
+    return 'paid';
   }
   if (normalized === 'declined') {
-    return { label: 'Declined', text: '#F14D4D', bg: '#FFCACA', icon: 'close-circle' as const };
+    return 'declined';
   }
-  return { label: 'Pending', text: '#D7A800', bg: 'rgba(255,211,0,0.25)', icon: 'time' as const };
+  return 'pending';
 };
+
+const getStatusLabel = (status: RequestStatus) => {
+  if (status === 'paid') {
+    return 'Paid';
+  }
+  if (status === 'declined') {
+    return 'Declined';
+  }
+  return 'Pending';
+};
+
+const getStatusColor = (status: RequestStatus) => {
+  if (status === 'paid') {
+    return '#33DA00';
+  }
+  if (status === 'declined') {
+    return '#FF3737';
+  }
+  return '#EBB351';
+};
+
+const pickAvatarComponent = (seed: string): AvatarComponent => {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) % 1000000007;
+  }
+  return avatarPool[Math.abs(hash) % avatarPool.length] || Avatar1;
+};
+
+const formatRequestDate = (isoDate: string) =>
+  new Date(isoDate).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 
 const PaymentRequestSuccessScreen = () => {
   const navigation = useNavigation<NavigationProp>();
@@ -69,22 +136,23 @@ const PaymentRequestSuccessScreen = () => {
   });
 
   const shareableLink =
-    request?.shareable_link || `https://transfa.app/pay?request_id=${requestId}`;
+    request?.shareable_link || `https://TryTransfa.com/request/${encodeURIComponent(requestId)}`;
   const qrValue = request?.qr_code_content || shareableLink;
 
   const onCopyLink = async () => {
     await Clipboard.setStringAsync(shareableLink);
-    Alert.alert('Copied', 'Sharable link copied to clipboard.');
+    Alert.alert('Copied', 'Link copied to clipboard');
   };
 
   const onShare = async () => {
     try {
       await Share.share({
-        message: `Pay me with this Transfa request link: ${shareableLink}`,
+        message: shareableLink,
         url: shareableLink,
       });
-    } catch (caughtError: any) {
-      Alert.alert('Share failed', caughtError?.message || 'Could not share request link.');
+    } catch {
+      await Clipboard.setStringAsync(shareableLink);
+      Alert.alert('Copied', 'Link copied to clipboard');
     }
   };
 
@@ -95,8 +163,8 @@ const PaymentRequestSuccessScreen = () => {
       const permission = await MediaLibrary.requestPermissionsAsync();
       if (!permission.granted) {
         Alert.alert(
-          'Permission needed',
-          'Allow photo access to download and save the request QR image.'
+          'Permission Required',
+          'Transfa needs gallery permission to save your request card.'
         );
         return;
       }
@@ -131,7 +199,7 @@ const PaymentRequestSuccessScreen = () => {
       try {
         await MediaLibrary.createAlbumAsync('Transfa', asset, false);
       } catch {
-        // Album may already exist or creation may fail; asset is already saved to gallery.
+        // Asset may already be in album or album creation may fail.
       }
 
       Alert.alert('Downloaded', 'Request QR image has been saved to your gallery.');
@@ -160,7 +228,7 @@ const PaymentRequestSuccessScreen = () => {
   if (isLoading) {
     return (
       <View style={styles.loadingRoot}>
-        <ActivityIndicator size="small" color={BRAND_YELLOW} />
+        <ActivityIndicator size="small" color="#FFD300" />
         <Text style={styles.loadingText}>Loading request...</Text>
       </View>
     );
@@ -193,220 +261,238 @@ const PaymentRequestSuccessScreen = () => {
     );
   }
 
-  const status = mapStatus(request.display_status || request.status);
+  const status = normalizeRequestStatus(request.display_status || request.status);
   const isGeneral = request.request_type === 'general';
 
   if (isGeneral) {
     return (
-      <View style={styles.rootDark}>
-        <LinearGradient
-          colors={['#1A1B1E', '#0C0D0F', '#050607']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
-        />
+      <SafeAreaView style={styles.container}>
+        <StatusBar style="light" />
+        <View style={styles.backgroundContainer}>
+          <SvgXml xml={backgroundSvg} width={SCREEN_WIDTH} height={SCREEN_HEIGHT} />
+        </View>
 
-        <SafeAreaView style={styles.safeAreaDark} edges={['top', 'left', 'right']}>
-          <View style={styles.darkHeaderRow}>
-            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerIconButton}>
-              <Ionicons name="arrow-back" size={20} color="#ECECEC" />
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+              <BackIcon width={24} height={24} />
             </TouchableOpacity>
-
-            <Text style={styles.darkHeaderTitle}>General Request</Text>
-
-            <TouchableOpacity style={styles.headerIconButton} activeOpacity={0.9}>
-              <Ionicons name="settings-outline" size={18} color="#ECECEC" />
+            <Text style={styles.headerTitle}>General Request</Text>
+            <TouchableOpacity style={styles.settingsButton}>
+              <SettingsIcon width={20} height={20} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
 
-          <ScrollView
-            contentContainerStyle={styles.darkContent}
-            showsVerticalScrollIndicator={false}
-          >
+          <View style={styles.qrSection}>
             <View style={styles.qrCard}>
-              <View style={styles.qrWrap}>
-                <QRCode ref={qrCodeRef} value={qrValue} size={210} />
-                <View style={styles.qrCenterBadge}>
-                  <Ionicons name="receipt-outline" size={22} color={BRAND_YELLOW} />
+              <View style={styles.qrCodeContainer}>
+                <QRCode
+                  ref={qrCodeRef}
+                  value={qrValue}
+                  size={200}
+                  color="#000000"
+                  backgroundColor="#FFFFFF"
+                />
+                <View style={styles.qrCenterIcon}>
+                  <RequestIcon width={40} height={40} color="#FFD300" />
                 </View>
               </View>
-
-              <Text style={styles.qrHintText}>Scan QR to claim</Text>
+              <Text style={styles.scanText}>Scan QR to claim</Text>
             </View>
-
             <TouchableOpacity
-              style={styles.secondaryActionButton}
+              style={[styles.downloadButton, isDownloading && { opacity: 0.6 }]}
               onPress={onDownload}
-              activeOpacity={0.88}
+              disabled={isDownloading}
             >
               {isDownloading ? (
-                <ActivityIndicator size="small" color="#E7E8EA" />
+                <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
                 <>
-                  <Ionicons name="download-outline" size={16} color="#E7E8EA" />
-                  <Text style={styles.secondaryActionText}>Download</Text>
+                  <DownloadIcon width={20} height={20} color="#FFFFFF" />
+                  <Text style={styles.downloadButtonText}>Download</Text>
                 </>
               )}
             </TouchableOpacity>
+          </View>
 
-            <Text style={styles.sectionLabel}>Sharable Link</Text>
-            <TouchableOpacity style={styles.linkCard} onPress={onCopyLink} activeOpacity={0.9}>
-              <Ionicons name="link-outline" size={16} color="#A9ACB3" />
+          <View style={styles.linkSection}>
+            <Text style={styles.sectionTitle}>Sharable Link</Text>
+            <TouchableOpacity style={styles.linkContainer} onPress={onCopyLink} activeOpacity={0.7}>
+              <CopyIcon width={20} height={20} />
               <Text style={styles.linkText} numberOfLines={1}>
                 {shareableLink}
               </Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.secondaryActionButton}
-              onPress={onShare}
-              activeOpacity={0.88}
-            >
-              <Ionicons name="share-social-outline" size={16} color="#E7E8EA" />
-              <Text style={styles.secondaryActionText}>Share Link</Text>
+            <TouchableOpacity style={styles.shareButton} onPress={onShare}>
+              <ShareIcon width={19} height={20} />
+              <Text style={styles.shareButtonText}>Share Link</Text>
             </TouchableOpacity>
+          </View>
 
-            <Text style={styles.sectionLabel}>Request Info</Text>
-            <View style={styles.infoCardDark}>
-              <View style={styles.infoRowDark}>
-                <Text style={styles.infoLabelDark}>Title</Text>
-                <Text style={styles.infoValueDark} numberOfLines={1}>
+          <View style={styles.infoSection}>
+            <Text style={styles.sectionTitle}>Request Info</Text>
+
+            <View style={styles.infoCard}>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Title</Text>
+                <Text style={styles.infoValue} numberOfLines={1}>
                   {request.title}
                 </Text>
               </View>
 
-              <View style={styles.infoRowDark}>
-                <Text style={styles.infoLabelDark}>Requested Amount</Text>
-                <Text style={styles.infoValueDark}>{formatCurrency(request.amount)}</Text>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Requested Amount</Text>
+                <Text style={styles.infoValue}>{formatCurrency(request.amount)}</Text>
               </View>
 
-              <View style={styles.infoRowDark}>
-                <Text style={styles.infoLabelDark}>Status</Text>
-                <Text style={[styles.infoValueDark, { color: status.text }]}>{status.label}</Text>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Status</Text>
+                <Text style={[styles.infoValue, { color: getStatusColor(status) }]}>
+                  {getStatusLabel(status)}
+                </Text>
               </View>
 
               {request.description ? (
-                <View style={styles.descriptionBlockDark}>
-                  <Text style={styles.infoLabelDark}>Description</Text>
-                  <Text style={styles.descriptionTextDark}>{request.description}</Text>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Description</Text>
+                  <Text style={styles.infoDescription}>{request.description}</Text>
                 </View>
               ) : null}
 
               {request.image_url ? (
-                <View style={styles.imageRowDark}>
-                  <Text style={styles.infoLabelDark}>Image</Text>
-                  <Image source={{ uri: request.image_url }} style={styles.thumbImageDark} />
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Image</Text>
+                  <View style={styles.imageContainer}>
+                    <Image
+                      source={{ uri: request.image_url }}
+                      style={styles.uploadedImageThumbnail}
+                      resizeMode="center"
+                    />
+                  </View>
                 </View>
               ) : null}
             </View>
+          </View>
 
-            <TouchableOpacity
-              style={[styles.deleteButtonDark, isDeleting && styles.deleteButtonDisabled]}
-              onPress={onDelete}
-              disabled={isDeleting}
-              activeOpacity={0.88}
-            >
-              <Text style={styles.deleteButtonDarkText}>
-                {isDeleting ? 'Deleting...' : 'Delete Request'}
-              </Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </SafeAreaView>
-      </View>
+          <View style={styles.divider} />
+
+          <TouchableOpacity
+            style={[styles.deleteButton, isDeleting && styles.deleteButtonDisabled]}
+            onPress={onDelete}
+            disabled={isDeleting}
+          >
+            <TrashIcon width={20} height={20} />
+            <Text style={styles.deleteButtonText}>
+              {isDeleting ? 'Deleting...' : 'Delete Request'}
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </SafeAreaView>
     );
   }
 
   const recipientUsername = stripUsernamePrefix(request.recipient_username);
+  const recipientName = request.recipient_full_name || 'Transfa User';
+  const AvatarComponent = pickAvatarComponent(recipientUsername || request.id);
 
   return (
-    <View style={styles.rootLight}>
-      <SafeAreaView style={styles.safeAreaLight} edges={['top', 'left', 'right']}>
-        <View style={styles.mediaArea}>
-          {request.image_url ? (
-            <Image
-              source={{ uri: request.image_url }}
-              style={styles.mediaImage}
-              resizeMode="cover"
-            />
-          ) : (
-            <View style={styles.mediaPlaceholder}>
-              <Ionicons name="image-outline" size={64} color="#B5B5B7" />
-            </View>
-          )}
+    <SafeAreaView style={styles.individualContainer}>
+      <StatusBar style="light" />
 
+      <View style={styles.backgroundImageContainer}>
+        {request.image_url ? (
+          <Image
+            source={{ uri: request.image_url }}
+            style={styles.backgroundImage}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={styles.placeholderContainer}>
+            <GalleryExportIcon width={64} height={64} />
+          </View>
+        )}
+      </View>
+
+      <View style={styles.topBar}>
+        <View style={styles.topBarLeft}>
           <TouchableOpacity style={styles.closeButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="close" size={18} color="#101214" />
+            <View style={styles.closeButtonInner}>
+              <Text style={styles.closeButtonText}>✕</Text>
+            </View>
           </TouchableOpacity>
         </View>
+        <View style={styles.topBarRight} />
+      </View>
 
-        <ScrollView
-          style={styles.individualScroll}
-          contentContainerStyle={styles.individualContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <View style={styles.sheetCard}>
-            <View style={styles.sheetHeaderRow}>
-              <View style={styles.sheetAvatarWrap}>
-                <Text style={styles.sheetAvatarInitial}>
-                  {recipientUsername.slice(0, 1).toUpperCase()}
-                </Text>
-                <View style={styles.sheetLockBadge}>
-                  <Ionicons name="lock-closed" size={9} color="#090909" />
-                </View>
-              </View>
-
-              <View style={[styles.statusPillLight, { backgroundColor: status.bg }]}>
-                <Ionicons name={status.icon} size={10} color={status.text} />
-                <Text style={[styles.statusTextLight, { color: status.text }]}>{status.label}</Text>
-              </View>
-            </View>
-
-            <Text style={styles.sheetUsername}>{recipientUsername}</Text>
-            <Text style={styles.sheetFullName}>
-              {request.recipient_full_name || 'Transfa User'}
-            </Text>
-
-            <View style={styles.sheetDateRow}>
-              <Ionicons name="calendar-outline" size={12} color="#6E7076" />
-              <Text style={styles.sheetDateText}>
-                {new Date(request.created_at).toLocaleDateString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
-              </Text>
-            </View>
-
-            <View style={styles.titleAmountRow}>
-              <View style={styles.titleWrap}>
-                <Text style={styles.sheetSectionLabel}>Title</Text>
-                <Text style={styles.sheetTitleText}>{request.title}</Text>
-              </View>
-
-              <Text style={styles.sheetAmountText}>{formatCurrency(request.amount)}</Text>
-            </View>
-
-            {request.description ? (
-              <View style={styles.sheetDescriptionWrap}>
-                <Text style={styles.sheetSectionLabel}>Description</Text>
-                <Text style={styles.sheetDescriptionText}>{request.description}</Text>
-              </View>
-            ) : null}
-
-            <TouchableOpacity
-              style={[styles.deleteButtonLight, isDeleting && styles.deleteButtonDisabled]}
-              onPress={onDelete}
-              disabled={isDeleting}
-              activeOpacity={0.88}
-            >
-              <Text style={styles.deleteButtonLightText}>
-                {isDeleting ? 'Deleting...' : 'Delete request'}
-              </Text>
-            </TouchableOpacity>
+      <View style={styles.whiteCard}>
+        <View style={styles.avatarContainer}>
+          <AvatarComponent width={100} height={100} />
+          <View style={styles.verifiedBadgeContainer}>
+            <VerifiedBadge width={20} height={20} />
           </View>
-        </ScrollView>
-      </SafeAreaView>
-    </View>
+        </View>
+
+        <View style={styles.statusBadgeContainer}>
+          {status === 'declined' ? (
+            <View style={styles.statusBadgeDeclined}>
+              <CancelIcon width={10} height={10} />
+              <Text style={styles.statusTextDeclined}>Declined</Text>
+            </View>
+          ) : null}
+          {status === 'paid' ? (
+            <View style={styles.statusBadgePaid}>
+              <PaidIcon width={10} height={10} />
+              <Text style={styles.statusTextPaid}>Paid</Text>
+            </View>
+          ) : null}
+          {status === 'pending' ? (
+            <View style={styles.statusBadgePending}>
+              <PendingIcon width={10} height={10} />
+              <Text style={styles.statusTextPending}>Pending</Text>
+            </View>
+          ) : null}
+        </View>
+
+        <View style={styles.userInfoSection}>
+          <Text style={styles.username}>{recipientUsername}</Text>
+          <Text style={styles.name}>{recipientName}</Text>
+          <View style={styles.dateRow}>
+            <CalendarIcon width={14} height={14} />
+            <Text style={styles.dateText}>{formatRequestDate(request.created_at)}</Text>
+          </View>
+        </View>
+
+        <View style={styles.requestDetails}>
+          <Text style={styles.detailLabel}>Title</Text>
+          <View style={styles.detailRow}>
+            <Text style={styles.detailTitle}>{request.title}</Text>
+            <Text style={styles.amount}>{formatCurrency(request.amount)}</Text>
+          </View>
+
+          {request.description ? (
+            <View style={styles.descriptionSection}>
+              <Text style={styles.detailLabel}>Description</Text>
+              <Text style={styles.description}>{request.description}</Text>
+            </View>
+          ) : null}
+        </View>
+
+        <TouchableOpacity
+          style={[styles.deleteRequestButton, isDeleting && styles.deleteButtonDisabled]}
+          onPress={onDelete}
+          activeOpacity={0.7}
+          disabled={isDeleting}
+        >
+          <Text style={styles.deleteRequestButtonText}>
+            {isDeleting ? 'Deleting...' : 'Delete request'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
   );
 };
 
@@ -421,12 +507,14 @@ const styles = StyleSheet.create({
   loadingText: {
     color: '#C8C9CD',
     fontSize: 13,
+    fontFamily: 'Montserrat_400Regular',
   },
   errorSubText: {
     maxWidth: '80%',
     textAlign: 'center',
     color: '#94979F',
     fontSize: 12,
+    fontFamily: 'Montserrat_400Regular',
   },
   retryButton: {
     marginTop: 6,
@@ -439,333 +527,448 @@ const styles = StyleSheet.create({
   retryButtonText: {
     color: '#ECEDEF',
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: 'Montserrat_600SemiBold',
   },
 
-  rootDark: {
+  container: {
     flex: 1,
-    backgroundColor: '#050607',
+    backgroundColor: '#000000',
   },
-  safeAreaDark: {
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
+  },
+  scrollView: {
     flex: 1,
+    zIndex: 1,
   },
-  darkHeaderRow: {
+  scrollContent: {
     paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingTop: 20,
+    paddingBottom: 100,
+  },
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 32,
+    width: '100%',
   },
-  headerIconButton: {
-    width: 28,
-    paddingVertical: 4,
+  backButton: {
+    padding: 4,
+    width: 32,
+    alignItems: 'flex-start',
+  },
+  headerTitle: {
+    fontSize: 18,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_600SemiBold',
+    flex: 1,
+    textAlign: 'center',
+  },
+  settingsButton: {
+    padding: 4,
+    width: 32,
+    alignItems: 'flex-end',
+  },
+  qrSection: {
     alignItems: 'center',
-  },
-  darkHeaderTitle: {
-    color: '#EFEFF0',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  darkContent: {
-    paddingHorizontal: 20,
-    paddingTop: 14,
-    paddingBottom: 26,
-    gap: 10,
+    marginBottom: 32,
+    width: '100%',
   },
   qrCard: {
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    paddingVertical: 14,
-    paddingHorizontal: 12,
+    backgroundColor: '#333333',
+    borderRadius: 16,
+    padding: 24,
     alignItems: 'center',
+    width: '100%',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
-  qrWrap: {
+  qrCodeContainer: {
+    position: 'relative',
     backgroundColor: '#FFFFFF',
-    borderRadius: 6,
-    padding: 8,
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 16,
+    width: 232,
+    height: 232,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  qrCenterBadge: {
+  qrCenterIcon: {
     position: 'absolute',
-    top: '50%',
-    left: '50%',
-    marginTop: -18,
-    marginLeft: -18,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#2A2C31',
+    width: 48,
+    height: 48,
+    backgroundColor: '#333333',
     alignItems: 'center',
     justifyContent: 'center',
+    top: '45%',
+    left: '45%',
   },
-  qrHintText: {
-    marginTop: 8,
-    color: '#8C8F96',
-    fontSize: 13,
+  scanText: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontFamily: 'Montserrat_400Regular',
+    marginBottom: 16,
   },
-  secondaryActionButton: {
-    marginTop: 2,
-    minHeight: 42,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+  downloadButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#333333',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    width: '100%',
+    height: 48,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
     gap: 8,
+    marginTop: 16,
   },
-  secondaryActionText: {
-    color: '#E7E8EA',
+  downloadButtonText: {
     fontSize: 14,
-    fontWeight: '600',
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_600SemiBold',
   },
-  sectionLabel: {
-    marginTop: 6,
-    color: '#D5D6DA',
-    fontSize: 15,
-    fontWeight: '500',
+  linkSection: {
+    marginBottom: 32,
   },
-  linkCard: {
-    minHeight: 42,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    paddingHorizontal: 12,
+  sectionTitle: {
+    fontSize: 18,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_600SemiBold',
+    marginBottom: 16,
+  },
+  linkContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    backgroundColor: '#333333',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    gap: 12,
   },
   linkText: {
     flex: 1,
-    color: '#D2D3D8',
-    fontSize: 13,
-    textDecorationLine: 'underline',
+    fontSize: 14,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_400Regular',
   },
-  infoCardDark: {
-    marginTop: 2,
-    borderRadius: 8,
+  shareButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#333333',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
     gap: 8,
   },
-  infoRowDark: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 10,
+  shareButtonText: {
+    fontSize: 14,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_600SemiBold',
   },
-  infoLabelDark: {
-    color: '#8F939A',
-    fontSize: 12,
-  },
-  infoValueDark: {
-    color: '#F0F1F2',
-    fontSize: 13,
-    fontWeight: '500',
-    maxWidth: '62%',
-    textAlign: 'right',
-  },
-  descriptionBlockDark: {
-    marginTop: 2,
-    gap: 4,
-  },
-  descriptionTextDark: {
-    color: '#D0D2D7',
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  imageRowDark: {
-    marginTop: 2,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  thumbImageDark: {
-    width: 42,
-    height: 42,
-    borderRadius: 7,
-  },
-  deleteButtonDark: {
-    marginTop: 6,
-    minHeight: 44,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,0,0,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(0,0,0,0.3)',
-  },
-  deleteButtonDarkText: {
-    color: '#FF4D4D',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-
-  rootLight: {
-    flex: 1,
-    backgroundColor: '#EDEDEE',
-  },
-  safeAreaLight: {
-    flex: 1,
-  },
-  mediaArea: {
-    height: 300,
-    backgroundColor: '#DCDCDD',
-  },
-  mediaImage: {
-    width: '100%',
-    height: '100%',
-  },
-  mediaPlaceholder: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#DDDDDE',
-  },
-  closeButton: {
-    position: 'absolute',
-    top: 12,
-    left: 20,
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  individualScroll: {
-    flex: 1,
-    marginTop: -20,
-  },
-  individualContent: {
-    paddingBottom: 24,
-  },
-  sheetCard: {
-    backgroundColor: '#F7F7F8',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+  infoSection: {},
+  infoCard: {
+    backgroundColor: '#333333',
+    borderRadius: 16,
+    paddingVertical: 20,
     paddingHorizontal: 20,
-    paddingTop: 14,
-    paddingBottom: 18,
-    minHeight: 420,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
-  sheetHeaderRow: {
+  infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    marginBottom: 20,
   },
-  sheetAvatarWrap: {
-    width: 84,
-    height: 84,
-    borderRadius: 20,
-    backgroundColor: '#ABABFD',
+  infoLabel: {
+    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.3)',
+    fontFamily: 'Montserrat_400Regular',
+    maxWidth: '45%',
+  },
+  infoValue: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_400Regular',
+    textAlign: 'right',
+    maxWidth: '50%',
+  },
+  infoDescription: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_400Regular',
+    opacity: 0.7,
+    lineHeight: 20,
+    textAlign: 'right',
+    maxWidth: '60%',
+  },
+  imageContainer: {
+    marginLeft: 12,
+    alignItems: 'flex-start',
+    justifyContent: 'flex-start',
+  },
+  uploadedImageThumbnail: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#6C6B6B',
+    marginTop: 25,
+    marginBottom: 25,
+  },
+  deleteButton: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: -34,
+    borderColor: '#6C6B6B',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    gap: 8,
+    marginTop: 8,
   },
-  sheetAvatarInitial: {
-    color: '#111214',
-    fontSize: 30,
-    fontWeight: '700',
+  deleteButtonText: {
+    fontSize: 16,
+    color: '#FF3737',
+    fontFamily: 'Montserrat_700Bold',
   },
-  sheetLockBadge: {
+
+  individualContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  backgroundImageContainer: {
     position: 'absolute',
-    right: -6,
-    bottom: 10,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: BRAND_YELLOW,
+    top: 0,
+    left: 0,
+    right: 0,
+    width: SCREEN_WIDTH,
+    height: SCREEN_HEIGHT * 0.4,
+    overflow: 'hidden',
+  },
+  backgroundImage: {
+    width: '100%',
+    height: '100%',
+  },
+  placeholderContainer: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(108, 108, 108, 0.3)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  statusPillLight: {
-    marginTop: 6,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  statusTextLight: {
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  sheetUsername: {
-    marginTop: 10,
-    color: '#101114',
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  sheetFullName: {
-    marginTop: 2,
-    color: '#52545A',
-    fontSize: 13,
-  },
-  sheetDateRow: {
-    marginTop: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  sheetDateText: {
-    color: '#6E7076',
-    fontSize: 12,
-  },
-  titleAmountRow: {
-    marginTop: 20,
+  topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    gap: 10,
+    alignItems: 'flex-start',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    zIndex: 10,
   },
-  titleWrap: {
-    flex: 1,
-    gap: 4,
+  topBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
   },
-  sheetSectionLabel: {
-    color: '#54575D',
-    fontSize: 13,
-    fontWeight: '500',
+  closeButton: {
+    padding: 4,
   },
-  sheetTitleText: {
-    color: '#141518',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  sheetAmountText: {
-    color: '#111214',
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  sheetDescriptionWrap: {
-    marginTop: 24,
-    gap: 6,
-  },
-  sheetDescriptionText: {
-    color: '#70737A',
-    fontSize: 13,
-    lineHeight: 20,
-  },
-  deleteButtonLight: {
-    marginTop: 28,
-    minHeight: 50,
-    borderRadius: 8,
-    backgroundColor: '#08090B',
+  closeButtonInner: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  deleteButtonLightText: {
-    color: '#FFFFFF',
+  closeButtonText: {
+    fontSize: 18,
+    color: '#000000',
+    fontFamily: 'Montserrat_600SemiBold',
+  },
+  topBarRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  whiteCard: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    paddingTop: 32,
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+    minHeight: SCREEN_HEIGHT * 0.7,
+  },
+  avatarContainer: {
+    position: 'absolute',
+    top: -20,
+    left: 20,
+    width: 100,
+    height: 100,
+    borderRadius: 12,
+    overflow: 'visible',
+    zIndex: 20,
+  },
+  verifiedBadgeContainer: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+  },
+  statusBadgeContainer: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    zIndex: 21,
+  },
+  statusBadgeDeclined: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFE5E5',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  statusTextDeclined: {
+    fontSize: 12,
+    color: '#FF3737',
+    fontFamily: 'Montserrat_600SemiBold',
+  },
+  statusBadgePaid: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E5FFE5',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  statusTextPaid: {
+    fontSize: 12,
+    color: '#33DA00',
+    fontFamily: 'Montserrat_600SemiBold',
+  },
+  statusBadgePending: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF5CB',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  statusTextPending: {
+    fontSize: 12,
+    color: '#EBB351',
+    fontFamily: 'Montserrat_600SemiBold',
+  },
+  userInfoSection: {
+    marginTop: 64,
+    marginBottom: 24,
+  },
+  username: {
+    fontSize: 30,
+    color: '#000000',
+    fontFamily: 'Montserrat_600SemiBold',
+    marginBottom: 4,
+  },
+  name: {
     fontSize: 16,
-    fontWeight: '600',
+    color: '#000000',
+    fontFamily: 'Montserrat_400Regular',
+    marginBottom: 8,
+  },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dateText: {
+    fontSize: 14,
+    color: '#000000',
+    fontFamily: 'Montserrat_400Regular',
+  },
+  requestDetails: {
+    marginBottom: 32,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  detailLabel: {
+    fontSize: 16,
+    color: '#FFD300',
+    fontFamily: 'Montserrat_600SemiBold',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  detailTitle: {
+    fontSize: 18,
+    color: '#000000',
+    fontFamily: 'Montserrat_600SemiBold',
+    flex: 1,
+    marginRight: 16,
+  },
+  amount: {
+    fontSize: 24,
+    color: '#000000',
+    fontFamily: 'Montserrat_600SemiBold',
+  },
+  descriptionSection: {
+    marginTop: 24,
+  },
+  description: {
+    fontSize: 16,
+    color: '#000000',
+    fontFamily: 'Montserrat_400Regular',
+    opacity: 0.7,
+    lineHeight: 24,
+  },
+  deleteRequestButton: {
+    backgroundColor: 'rgba(0, 0, 0, 0.08)',
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 24,
+  },
+  deleteRequestButtonText: {
+    fontSize: 16,
+    color: '#000000',
+    fontFamily: 'Montserrat_700Bold',
   },
 
   deleteButtonDisabled: {

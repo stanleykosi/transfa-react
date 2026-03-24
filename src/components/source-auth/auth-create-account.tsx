@@ -175,6 +175,7 @@ export default function AuthCreateAccount({
                   value={email}
                   onChangeText={handleEmailChange}
                   keyboardType="email-address"
+                  keyboardAppearance="dark"
                   autoCapitalize="none"
                   autoComplete="email"
                   textContentType="emailAddress"
@@ -209,6 +210,7 @@ export default function AuthCreateAccount({
                     setPassword(val);
                     if (passwordError) setPasswordError('');
                   }}
+                  keyboardAppearance="dark"
                   secureTextEntry={!showPassword}
                   autoComplete="password-new"
                   textContentType="newPassword"
@@ -252,6 +254,7 @@ export default function AuthCreateAccount({
                     setConfirmPassword(val);
                     if (passwordError) setPasswordError('');
                   }}
+                  keyboardAppearance="dark"
                   secureTextEntry={!showConfirmPassword}
                   autoComplete="password-new"
                   textContentType="newPassword"

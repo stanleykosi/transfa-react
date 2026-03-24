@@ -123,6 +123,7 @@ export default function AuthCreateUsername({
                 placeholderTextColor="rgba(255, 255, 255, 0.32)"
                 value={username}
                 onChangeText={(val) => setUsername(val.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase())}
+                keyboardAppearance="dark"
                 autoCapitalize="none"
                 autoComplete="username"
                 textContentType="username"

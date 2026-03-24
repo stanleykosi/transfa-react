@@ -1,7 +1,19 @@
+import BackIcon from '@/assets/icons/back.svg';
+import SearchIcon from '@/assets/icons/search.svg';
+import VerifiedBadge from '@/assets/icons/verified.svg';
+import { useGetTransferList, useToggleTransferListMember } from '@/api/transactionApi';
+import { useUserSearch } from '@/api/userDiscoveryApi';
+import type { AppStackParamList } from '@/navigation/AppStack';
+import type { AppNavigationProp } from '@/types/navigation';
+import { normalizeUsername, usernameKey } from '@/utils/username';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { StatusBar } from 'expo-status-bar';
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,25 +21,45 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import Avatar from '@/assets/images/avatar.svg';
+import Avatar1 from '@/assets/images/avatar1.svg';
+import Avatar2 from '@/assets/images/avatar2.svg';
+import Avatar3 from '@/assets/images/avatar3.svg';
+import { SvgXml } from 'react-native-svg';
 
-import { useGetTransferList, useToggleTransferListMember } from '@/api/transactionApi';
-import { useUserSearch } from '@/api/userDiscoveryApi';
-import type { AppNavigationProp } from '@/types/navigation';
-import type { AppStackParamList } from '@/navigation/AppStack';
-import { normalizeUsername, usernameKey } from '@/utils/username';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const BRAND_YELLOW = '#FFD300';
-const BG_BOTTOM = '#050607';
+const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="375" height="812" fill="url(#paint0_linear_708_2445)"/>
+<defs>
+<linearGradient id="paint0_linear_708_2445" x1="187.5" y1="0" x2="187.5" y2="812" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2B2B2B"/>
+<stop offset="0.778846" stop-color="#0F0F0F"/>
+</linearGradient>
+</defs>
+</svg>`;
+
+const avatarComponents = [Avatar, Avatar1, Avatar2, Avatar3];
+
+const avatarIndexFromSeed = (seed: string) => {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash = (hash * 31 + seed.charCodeAt(i)) % 1000000007;
+  }
+  return Math.abs(hash) % avatarComponents.length;
+};
+
+const getAvatarComponent = (index: number) => avatarComponents[index] || Avatar;
 
 type ScreenRoute = RouteProp<AppStackParamList, 'TransferListDetail'>;
 
-type GroupedMember = {
-  letter: string;
-  users: Array<{ user_id: string; username: string; full_name?: string | null }>;
+type DisplayUser = {
+  id: string;
+  username: string;
+  fullName: string;
+  avatarIndex: number;
+  verified: boolean;
+  rawUsername: string;
 };
 
 const TransferListDetailScreen = () => {
@@ -48,39 +80,83 @@ const TransferListDetailScreen = () => {
     },
   });
 
+  const memberUsers = useMemo<DisplayUser[]>(
+    () =>
+      (list?.members ?? []).map((member) => ({
+        id: member.user_id,
+        username: normalizeUsername(member.username),
+        fullName: member.full_name || 'Transfa User',
+        avatarIndex: avatarIndexFromSeed(member.username),
+        verified: true,
+        rawUsername: member.username,
+      })),
+    [list?.members]
+  );
+
   const memberUsernameSet = useMemo(() => {
     const values = new Set<string>();
-    (list?.members ?? []).forEach((member) => values.add(usernameKey(member.username)));
+    memberUsers.forEach((member) => values.add(usernameKey(member.rawUsername)));
     return values;
-  }, [list?.members]);
+  }, [memberUsers]);
 
-  const groupedMembers = useMemo<GroupedMember[]>(() => {
-    const byLetter = new Map<string, GroupedMember['users']>();
-    (list?.members ?? []).forEach((member) => {
-      const displayUsername = normalizeUsername(member.username);
-      const letter = displayUsername.slice(0, 1).toUpperCase() || '#';
-      const group = byLetter.get(letter) ?? [];
-      group.push(member);
-      byLetter.set(letter, group);
+  const listMembers = useMemo(() => {
+    if (!normalizedQuery) {
+      return memberUsers;
+    }
+
+    const query = normalizedQuery.toLowerCase();
+    return memberUsers.filter(
+      (user) =>
+        user.username.toLowerCase().includes(query) || user.fullName.toLowerCase().includes(query)
+    );
+  }, [memberUsers, normalizedQuery]);
+
+  const groupedMembers = useMemo(() => {
+    const groups: Record<string, DisplayUser[]> = {};
+
+    listMembers.forEach((user) => {
+      const firstLetter = user.username.charAt(0).toUpperCase() || '#';
+      if (!groups[firstLetter]) {
+        groups[firstLetter] = [];
+      }
+      groups[firstLetter].push(user);
     });
 
-    return [...byLetter.entries()]
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([letter, users]) => ({
+    return Object.keys(groups)
+      .sort()
+      .map((letter) => ({
         letter,
-        users: users.sort((a, b) =>
-          normalizeUsername(a.username).localeCompare(normalizeUsername(b.username))
-        ),
+        users: groups[letter].sort((a, b) => a.username.localeCompare(b.username)),
       }));
-  }, [list?.members]);
+  }, [listMembers]);
 
-  const handleToggleUser = async (username: string) => {
-    const normalizedUsername = usernameKey(username);
-    setPendingUsername(normalizedUsername);
+  const suggestions = useMemo<DisplayUser[]>(() => {
+    if (!normalizedQuery) {
+      return [];
+    }
+
+    return (searchData?.users ?? [])
+      .filter((user) => !memberUsernameSet.has(usernameKey(user.username)))
+      .map((user) => ({
+        id: user.id,
+        username: normalizeUsername(user.username),
+        fullName: user.full_name || 'Transfa User',
+        avatarIndex: avatarIndexFromSeed(user.username),
+        verified: true,
+        rawUsername: user.username,
+      }))
+      .sort((a, b) => a.username.localeCompare(b.username))
+      .slice(0, 3);
+  }, [memberUsernameSet, normalizedQuery, searchData?.users]);
+
+  const toggleUserSelection = async (rawUsername: string) => {
+    const normalized = usernameKey(rawUsername);
+    setPendingUsername(normalized);
+
     try {
       await toggleMutation.mutateAsync({
         listId,
-        payload: { username: normalizeUsername(username) },
+        payload: { username: normalizeUsername(rawUsername) },
       });
       await refetch();
     } finally {
@@ -89,295 +165,384 @@ const TransferListDetailScreen = () => {
   };
 
   return (
-    <View style={styles.root}>
-      <LinearGradient
-        colors={['#1A1B1E', '#0C0D0F', BG_BOTTOM]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={StyleSheet.absoluteFillObject}
-      />
+    <SafeAreaView style={styles.container}>
+      <StatusBar style="light" />
+      <View style={styles.backgroundContainer}>
+        <SvgXml xml={backgroundSvg} width={SCREEN_WIDTH} height={SCREEN_HEIGHT} />
+      </View>
 
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={22} color="#ECECEC" />
-        </TouchableOpacity>
+      <View style={styles.topBar}>
+        <View style={styles.topBarLeft}>
+          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+            <BackIcon width={24} height={24} />
+          </TouchableOpacity>
+        </View>
+      </View>
 
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.title}>{list?.name || 'Transfer List'}</Text>
 
-        <View style={styles.searchWrap}>
-          <Ionicons name="search" size={16} color="#9FA1A7" />
+        <View style={styles.searchContainer}>
+          <View style={styles.searchIconContainer}>
+            <SearchIcon width={16} height={16} color="#FFFFFF" />
+          </View>
           <TextInput
             style={styles.searchInput}
+            placeholder="Search user"
+            placeholderTextColor="#6C6B6B"
             value={searchQuery}
             onChangeText={setSearchQuery}
-            placeholder="Search"
-            placeholderTextColor="#6F727A"
             autoCapitalize="none"
           />
         </View>
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>List members</Text>
-          <TouchableOpacity
-            style={styles.payButton}
-            disabled={!list || list.member_count === 0}
-            onPress={() => navigation.navigate('PayTransferList', { listId })}
-          >
-            <Text style={styles.payButtonText}>Pay</Text>
-          </TouchableOpacity>
-        </View>
+        {normalizedQuery.length > 0 && (
+          <View style={styles.suggestionsSection}>
+            <Text style={styles.suggestionsTitle}>Suggestions</Text>
 
-        {isLoading ? (
-          <View style={styles.loadingWrap}>
-            <ActivityIndicator size="small" color={BRAND_YELLOW} />
-          </View>
-        ) : (
-          <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-            {normalizedQuery.length > 0 ? (
-              <View style={styles.searchResultsSection}>
-                <Text style={styles.searchResultTitle}>Suggestions</Text>
-                {isSearching ? (
-                  <ActivityIndicator size="small" color={BRAND_YELLOW} />
-                ) : (
-                  (searchData?.users ?? []).map((user) => {
-                    const displayUsername = normalizeUsername(user.username);
-                    const normalizedUsername = usernameKey(user.username);
-                    const inList = memberUsernameSet.has(normalizedUsername);
-                    const pending = pendingUsername === normalizedUsername;
+            {isSearching ? (
+              <ActivityIndicator size="small" color="#FFD300" />
+            ) : suggestions.length > 0 ? (
+              suggestions.map((user) => {
+                const AvatarComponent = getAvatarComponent(user.avatarIndex);
+                const isPending = pendingUsername === usernameKey(user.rawUsername);
 
-                    return (
-                      <View key={user.id} style={styles.userCard}>
-                        <View style={styles.userInfo}>
-                          <View style={styles.userAvatar}>
-                            <Text style={styles.userAvatarInitial}>
-                              {displayUsername.slice(0, 1).toUpperCase()}
-                            </Text>
-                          </View>
-                          <View style={styles.userTextWrap}>
-                            <Text style={styles.username}>{displayUsername}</Text>
-                            <Text style={styles.fullName}>{user.full_name || 'Transfa User'}</Text>
-                          </View>
+                return (
+                  <TouchableOpacity
+                    key={user.id}
+                    style={styles.suggestionCard}
+                    onPress={() => {
+                      if (!isPending) {
+                        toggleUserSelection(user.rawUsername).catch(() => undefined);
+                      }
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.userAvatarContainer}>
+                      <AvatarComponent width={40} height={40} />
+                      {user.verified && (
+                        <View style={styles.verifiedBadgeContainer}>
+                          <VerifiedBadge width={12} height={12} />
                         </View>
+                      )}
+                    </View>
 
-                        <TouchableOpacity
-                          style={[styles.toggleCircle, inList && styles.toggleCircleActive]}
-                          onPress={() => handleToggleUser(user.username)}
-                          disabled={pending}
-                        >
-                          {pending ? (
-                            <ActivityIndicator
-                              size="small"
-                              color={inList ? '#0F1012' : '#B6B7BC'}
-                            />
-                          ) : null}
-                        </TouchableOpacity>
+                    <View style={styles.userInfo}>
+                      <View style={styles.usernameRow}>
+                        <Text style={styles.suggestionUsername}>{user.username}</Text>
+                        {user.verified && <VerifiedBadge width={12} height={12} />}
                       </View>
-                    );
-                  })
-                )}
-              </View>
-            ) : null}
+                      <Text style={styles.suggestionFullName}>{user.fullName}</Text>
+                    </View>
 
-            {groupedMembers.length === 0 ? (
-              <View style={styles.emptyWrap}>
-                <Text style={styles.emptyText}>No members in this list yet.</Text>
-              </View>
+                    <View style={styles.checkboxContainer}>
+                      {isPending ? (
+                        <ActivityIndicator size="small" color="#FFD300" />
+                      ) : (
+                        <View style={styles.checkboxUnchecked} />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                );
+              })
             ) : (
-              groupedMembers.map((group) => (
-                <View key={group.letter}>
-                  <Text style={styles.groupLetter}>{group.letter}</Text>
-                  {group.users.map((member) => {
-                    const displayUsername = normalizeUsername(member.username);
-                    const pending = pendingUsername === usernameKey(member.username);
-                    return (
-                      <View key={member.user_id} style={styles.userCard}>
-                        <View style={styles.userInfo}>
-                          <View style={styles.userAvatar}>
-                            <Text style={styles.userAvatarInitial}>
-                              {displayUsername.slice(0, 1).toUpperCase()}
-                            </Text>
-                          </View>
-                          <View style={styles.userTextWrap}>
-                            <Text style={styles.username}>{displayUsername}</Text>
-                            <Text style={styles.fullName}>
-                              {member.full_name || 'Transfa User'}
-                            </Text>
-                          </View>
-                        </View>
-
-                        <TouchableOpacity
-                          style={[styles.toggleCircle, styles.toggleCircleActive]}
-                          onPress={() => handleToggleUser(member.username)}
-                          disabled={pending}
-                        >
-                          {pending ? <ActivityIndicator size="small" color="#0F1012" /> : null}
-                        </TouchableOpacity>
-                      </View>
-                    );
-                  })}
-                </View>
-              ))
+              <Text style={styles.emptyText}>No users found</Text>
             )}
-          </ScrollView>
+          </View>
         )}
-      </SafeAreaView>
-    </View>
+
+        <View style={styles.usersSection}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Members ({memberUsers.length})</Text>
+            <TouchableOpacity
+              style={[styles.payButton, memberUsers.length === 0 && styles.payButtonDisabled]}
+              activeOpacity={0.7}
+              disabled={memberUsers.length === 0}
+              onPress={() => navigation.navigate('PayTransferList', { listId })}
+            >
+              <Text style={styles.payButtonText}>Pay</Text>
+            </TouchableOpacity>
+          </View>
+
+          {isLoading ? (
+            <View style={styles.loadingWrap}>
+              <ActivityIndicator size="small" color="#FFD300" />
+            </View>
+          ) : groupedMembers.length > 0 ? (
+            groupedMembers.map((group) => (
+              <View key={group.letter} style={styles.letterGroup}>
+                <Text style={styles.letterHeader}>{group.letter}</Text>
+                {group.users.map((user) => {
+                  const AvatarComponent = getAvatarComponent(user.avatarIndex);
+                  const isPending = pendingUsername === usernameKey(user.rawUsername);
+
+                  return (
+                    <TouchableOpacity
+                      key={`${group.letter}-${user.id}`}
+                      style={styles.userCard}
+                      onPress={() => {
+                        if (!isPending) {
+                          toggleUserSelection(user.rawUsername).catch(() => undefined);
+                        }
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.userAvatarContainer}>
+                        <AvatarComponent width={48} height={48} />
+                        {user.verified && (
+                          <View style={styles.verifiedBadgeContainer}>
+                            <VerifiedBadge width={15} height={15} />
+                          </View>
+                        )}
+                      </View>
+
+                      <View style={styles.userInfo}>
+                        <View style={styles.usernameRow}>
+                          <Text style={styles.username}>{user.username}</Text>
+                          {user.verified && <VerifiedBadge width={15} height={15} />}
+                        </View>
+                        <Text style={styles.fullName}>{user.fullName}</Text>
+                      </View>
+
+                      <View style={styles.checkboxContainer}>
+                        {isPending ? (
+                          <ActivityIndicator size="small" color="#111111" />
+                        ) : (
+                          <View style={[styles.checkbox, styles.checkboxChecked]} />
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))
+          ) : (
+            <Text style={styles.emptyText}>No members found</Text>
+          )}
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  root: {
+  container: {
     flex: 1,
-    backgroundColor: BG_BOTTOM,
+    backgroundColor: '#000000',
   },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: 16,
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
   },
-  backButton: {
-    width: 28,
-    marginTop: 4,
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 20,
+    zIndex: 1,
   },
-  title: {
-    marginTop: 8,
-    textAlign: 'center',
-    color: '#F0F0F2',
-    fontSize: 24,
-    fontWeight: '700',
-  },
-  searchWrap: {
-    marginTop: 14,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    height: 42,
-    paddingHorizontal: 12,
+  topBarLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 16,
+  },
+  backButton: {
+    padding: 4,
+  },
+  scrollView: {
+    flex: 1,
+    zIndex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 100,
+  },
+  title: {
+    fontSize: 24,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_700Bold',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#333333',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  searchIconContainer: {
+    marginRight: 12,
   },
   searchInput: {
     flex: 1,
-    color: '#ECEDEF',
     fontSize: 16,
-    paddingVertical: 0,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_400Regular',
+  },
+  suggestionsSection: {
+    marginBottom: 24,
+  },
+  suggestionsTitle: {
+    fontSize: 14,
+    color: '#6C6B6B',
+    fontFamily: 'Montserrat_400Regular',
+    marginBottom: 12,
+  },
+  suggestionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#333333',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  suggestionUsername: {
+    fontSize: 16,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_600SemiBold',
+  },
+  suggestionFullName: {
+    fontSize: 14,
+    color: '#6C6B6B',
+    fontFamily: 'Montserrat_400Regular',
+  },
+  usersSection: {
+    marginBottom: 24,
   },
   sectionHeader: {
-    marginTop: 12,
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   sectionTitle: {
-    color: '#D8DADF',
-    fontSize: 22,
-    fontWeight: '500',
+    fontSize: 18,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_400Regular',
   },
   payButton: {
-    minWidth: 74,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: BRAND_YELLOW,
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: '#FFD300',
+    borderRadius: 7,
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+  },
+  payButtonDisabled: {
+    opacity: 0.5,
   },
   payButtonText: {
-    color: '#0E0F11',
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 14,
+    color: '#000000',
+    fontFamily: 'Montserrat_700Bold',
   },
   loadingWrap: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scroll: {
-    marginTop: 8,
-    flex: 1,
-  },
-  content: {
-    paddingBottom: 40,
-  },
-  searchResultsSection: {
-    marginBottom: 10,
-  },
-  searchResultTitle: {
-    marginVertical: 8,
-    color: '#95979C',
-    fontSize: 17,
-  },
-  groupLetter: {
-    marginTop: 8,
-    marginBottom: 6,
-    color: '#D4B315',
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  userCard: {
-    minHeight: 72,
-    borderRadius: 11,
-    backgroundColor: '#F4F4F4',
-    marginBottom: 10,
-    paddingHorizontal: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  userInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-    marginRight: 10,
-  },
-  userAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 13,
-    backgroundColor: '#ABABFD',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  userAvatarInitial: {
-    color: '#131313',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  userTextWrap: {
-    marginLeft: 10,
-    flex: 1,
-  },
-  username: {
-    color: '#18191B',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  fullName: {
-    marginTop: 1,
-    color: '#5A5C61',
-    fontSize: 14,
-  },
-  toggleCircle: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: '#CACBD0',
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  toggleCircleActive: {
-    borderColor: '#E6C111',
-    backgroundColor: '#E6C111',
-  },
-  emptyWrap: {
-    paddingTop: 24,
+    paddingVertical: 20,
     alignItems: 'center',
   },
   emptyText: {
-    color: '#9EA0A6',
-    fontSize: 15,
+    fontSize: 14,
+    color: '#6C6B6B',
+    fontFamily: 'Montserrat_400Regular',
+    textAlign: 'center',
+    marginTop: 20,
+  },
+  letterGroup: {
+    marginBottom: 24,
+  },
+  letterHeader: {
+    fontSize: 18,
+    color: '#FFD300',
+    fontFamily: 'Montserrat_400Regular',
+    marginBottom: 12,
+  },
+  userCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  userAvatarContainer: {
+    marginRight: 12,
+    position: 'relative',
+    width: 48,
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  verifiedBadgeContainer: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 15,
+    height: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userInfo: {
+    flex: 1,
+  },
+  usernameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  username: {
+    fontSize: 16,
+    color: '#000000',
+    fontFamily: 'Montserrat_600SemiBold',
+  },
+  fullName: {
+    fontSize: 14,
+    color: '#000000',
+    fontFamily: 'Montserrat_400Regular',
+  },
+  checkboxContainer: {
+    marginLeft: 12,
+    minWidth: 24,
+    minHeight: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkbox: {
+    width: 15,
+    height: 15,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#DADADA',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  checkboxChecked: {
+    backgroundColor: '#FFD300',
+    borderColor: '#DADADA',
+  },
+  checkboxUnchecked: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#DADADA',
   },
 });
 

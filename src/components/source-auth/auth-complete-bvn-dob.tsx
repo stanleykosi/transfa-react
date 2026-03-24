@@ -31,6 +31,8 @@ const genderOptions = ['Male', 'Female', 'Other'];
 interface AuthCompleteBvnDobProps {
   onNext: (data: { bvn: string; dateOfBirth: string; gender: string }) => void;
   onBack?: () => void;
+  serverError?: string | null;
+  onFormChange?: () => void;
   initialValues?: {
     bvn?: string;
     dateOfBirth?: string;
@@ -41,6 +43,8 @@ interface AuthCompleteBvnDobProps {
 export default function AuthCompleteBvnDob({
   onNext,
   onBack,
+  serverError,
+  onFormChange,
   initialValues,
 }: AuthCompleteBvnDobProps) {
   const insets = useSafeAreaInsets();
@@ -94,11 +98,12 @@ export default function AuthCompleteBvnDob({
   const handleBVNChange = useCallback(
     (val: string) => {
       const numeric = val.replace(/[^0-9]/g, '').slice(0, 11);
+      onFormChange?.();
       setBvn(numeric);
       if (errors.bvn) setErrors((prev) => ({ ...prev, bvn: undefined }));
       if (numeric.length === 11) dobRef.current?.focus();
     },
-    [errors.bvn]
+    [errors.bvn, onFormChange]
   );
 
   const handleDOBChange = useCallback(
@@ -109,14 +114,16 @@ export default function AuthCompleteBvnDob({
       if (numeric.length > 4)
         formatted = `${numeric.slice(0, 2)}/${numeric.slice(2, 4)}/${numeric.slice(4, 8)}`;
 
+      onFormChange?.();
       setDateOfBirth(formatted);
       if (errors.dateOfBirth) setErrors((prev) => ({ ...prev, dateOfBirth: undefined }));
     },
-    [errors.dateOfBirth]
+    [errors.dateOfBirth, onFormChange]
   );
 
   const handleSelectGender = (val: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    onFormChange?.();
     setGender(val);
     setShowGenderModal(false);
     if (errors.gender) setErrors((prev) => ({ ...prev, gender: undefined }));
@@ -196,6 +203,7 @@ export default function AuthCompleteBvnDob({
                   value={bvn}
                   onChangeText={handleBVNChange}
                   keyboardType="number-pad"
+                  keyboardAppearance="dark"
                   textContentType="none"
                   onFocus={() => setFocusedInput('bvn')}
                   onBlur={() => setFocusedInput(null)}
@@ -204,6 +212,7 @@ export default function AuthCompleteBvnDob({
                 />
               </Pressable>
               {errors.bvn && <Text style={styles.errorText}>{errors.bvn}</Text>}
+              {!errors.bvn && !!serverError && <Text style={styles.errorText}>{serverError}</Text>}
             </View>
 
             {/* DOB and Gender */}
@@ -228,6 +237,7 @@ export default function AuthCompleteBvnDob({
                     value={dateOfBirth}
                     onChangeText={handleDOBChange}
                     keyboardType="number-pad"
+                    keyboardAppearance="dark"
                     onFocus={() => setFocusedInput('dob')}
                     onBlur={() => setFocusedInput(null)}
                     maxLength={10}

@@ -23,6 +23,45 @@ import { theme } from '@/constants/theme';
 import apiClient from '@/api/apiClient';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 
+const extractBvnFailureMessage = (error: unknown): string | null => {
+  const responseData = (error as any)?.response?.data;
+  const message =
+    responseData?.message || responseData?.detail || (error as any)?.message || 'BVN failed.';
+  const normalizedMessage = String(message).toLowerCase();
+
+  if (
+    normalizedMessage.includes('bvn') &&
+    (normalizedMessage.includes('already') ||
+      normalizedMessage.includes('exists') ||
+      normalizedMessage.includes('in use') ||
+      normalizedMessage.includes('linked'))
+  ) {
+    return 'This BVN is already linked to another account. Sign in with that account or use a different BVN.';
+  }
+
+  let serializedResponse = '';
+  try {
+    serializedResponse = JSON.stringify(responseData || {}).toLowerCase();
+  } catch {
+    serializedResponse = '';
+  }
+
+  if (!normalizedMessage.includes('bvn') && !serializedResponse.includes('bvn')) {
+    return null;
+  }
+
+  if (
+    normalizedMessage.includes('mismatch') ||
+    normalizedMessage.includes('dob') ||
+    normalizedMessage.includes('date of birth') ||
+    normalizedMessage.includes('gender')
+  ) {
+    return 'BVN verification failed. Ensure your BVN, date of birth, and gender match your bank records.';
+  }
+
+  return String(message);
+};
+
 const CreateAccountScreen = () => {
   const { getToken, signOut } = useAuth();
   const { user } = useUser();
@@ -40,6 +79,8 @@ const CreateAccountScreen = () => {
   const [dob, setDob] = useState(''); // YYYY-MM-DD
   const [gender, setGender] = useState('');
   const [bvn, setBvn] = useState('');
+  const [bvnError, setBvnError] = useState<string | undefined>();
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const headers = useMemo(
@@ -128,7 +169,7 @@ const CreateAccountScreen = () => {
           console.log('⚠️ Unknown status, defaulting to pending:', data?.status);
           setStatus('tier1_pending');
         }
-      } catch (e) {
+      } catch {
         if (!mounted) {
           return;
         }
@@ -168,10 +209,17 @@ const CreateAccountScreen = () => {
       Alert.alert('Validation Error', 'Please provide BVN, date of birth, and gender.');
       return;
     }
+    const cleanedBvn = bvn.replace(/\D/g, '');
+    if (cleanedBvn.length !== 11) {
+      setBvnError('BVN must be exactly 11 digits.');
+      return;
+    }
     if (normalizedGender !== 'male' && normalizedGender !== 'female') {
       Alert.alert('Validation Error', "Gender must be 'male' or 'female'.");
       return;
     }
+    setBvnError(undefined);
+    setSubmitError(null);
     setSubmitting(true);
     try {
       const token = await getToken().catch(() => undefined);
@@ -180,7 +228,7 @@ const CreateAccountScreen = () => {
       // Submit Tier 2 details to backend
       await apiClient.post(
         '/onboarding/tier2',
-        { dob, gender: normalizedGender, bvn },
+        { dob, gender: normalizedGender, bvn: cleanedBvn },
         { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers } }
       );
 
@@ -208,6 +256,12 @@ const CreateAccountScreen = () => {
       navigation.navigate('AppTabs' as never);
     } catch (e) {
       console.error('Error submitting Tier 1:', e);
+      const bvnFailure = extractBvnFailureMessage(e);
+      if (bvnFailure) {
+        setBvnError(bvnFailure);
+        return;
+      }
+      setSubmitError('Failed to submit verification. Please try again.');
       Alert.alert('Error', 'Failed to submit verification. Please try again.');
     } finally {
       setSubmitting(false);
@@ -248,22 +302,34 @@ const CreateAccountScreen = () => {
             <FormInput
               label="BVN"
               value={bvn}
-              onChangeText={setBvn}
+              onChangeText={(value) => {
+                setBvn(value.replace(/\D/g, '').slice(0, 11));
+                if (bvnError) {
+                  setBvnError(undefined);
+                }
+                if (submitError) {
+                  setSubmitError(null);
+                }
+              }}
               placeholder="Enter your 11-digit BVN"
               keyboardType="number-pad"
+              keyboardAppearance="dark"
               maxLength={11}
+              error={bvnError}
             />
             <FormInput
               label="Date of Birth"
               value={dob}
               onChangeText={setDob}
               placeholder="YYYY-MM-DD"
+              keyboardAppearance="dark"
             />
             <FormInput
               label="Gender"
               value={gender}
               onChangeText={(t) => setGender(t)}
               placeholder="male or female"
+              keyboardAppearance="dark"
             />
 
             <PrimaryButton
@@ -271,6 +337,7 @@ const CreateAccountScreen = () => {
               onPress={handleSubmitTier2}
               isLoading={submitting}
             />
+            {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
             <PrimaryButton
               title="Sign Out (Test Different Account)"
               onPress={handleSignOut}
@@ -306,6 +373,12 @@ const styles = StyleSheet.create({
     color: theme.colors.textSecondary,
     textAlign: 'center',
     marginBottom: theme.spacing.s24,
+  },
+  errorText: {
+    color: theme.colors.error,
+    fontSize: theme.fontSizes.sm,
+    textAlign: 'center',
+    marginTop: -theme.spacing.s8,
   },
   signOutButton: {
     backgroundColor: 'transparent',

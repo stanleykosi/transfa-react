@@ -20,7 +20,7 @@ import {
   type ParamListBase,
 } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { Linking } from 'react-native';
+import { Keyboard, Linking, TouchableWithoutFeedback, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as Font from 'expo-font';
 import {
@@ -178,13 +178,17 @@ function AppRoot(): React.JSX.Element {
     <QueryClientProvider client={queryClient}>
       <SafeAreaProvider>
         <GestureHandlerRootView style={{ flex: 1 }}>
-          <NavigationContainer
-            ref={navigationRef}
-            onReady={flushPendingDropLink}
-            onStateChange={flushPendingDropLink}
-          >
-            <RootNavigator />
-          </NavigationContainer>
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+            <View style={{ flex: 1 }}>
+              <NavigationContainer
+                ref={navigationRef}
+                onReady={flushPendingDropLink}
+                onStateChange={flushPendingDropLink}
+              >
+                <RootNavigator />
+              </NavigationContainer>
+            </View>
+          </TouchableWithoutFeedback>
         </GestureHandlerRootView>
       </SafeAreaProvider>
     </QueryClientProvider>

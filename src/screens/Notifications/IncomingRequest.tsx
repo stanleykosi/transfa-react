@@ -1,25 +1,15 @@
 import BackIcon from '@/assets/icons/back.svg';
 import CalendarIcon from '@/assets/icons/calendar1.svg';
 import CancelIcon from '@/assets/icons/cancel.svg';
-import PendingIcon from '@/assets/icons/pending.svg';
-import PaidIcon from '@/assets/icons/paid.svg';
-import RequestIcon from '@/assets/icons/request.svg';
 import SearchIcon from '@/assets/icons/search.svg';
 import SettingsIcon from '@/assets/icons/settings.svg';
 import VerifiedBadge from '@/assets/icons/verified.svg';
 import Avatar1 from '@/assets/images/avatar1.svg';
 import Avatar2 from '@/assets/images/avatar2.svg';
 import Avatar3 from '@/assets/images/avatar3.svg';
-import { useListPaymentRequests } from '@/api/transactionApi';
-import DashedBorder from '@/components/DashedBorder';
-import { AppStackParamList } from '@/navigation/AppStack';
-import type { PaymentRequest } from '@/types/api';
-import { formatCurrency } from '@/utils/formatCurrency';
-import { normalizeUsername } from '@/utils/username';
 import { useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Dimensions,
@@ -34,6 +24,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { SvgXml } from 'react-native-svg';
 
+import { useListIncomingPaymentRequests } from '@/api/transactionApi';
+import type { AppNavigationProp } from '@/types/navigation';
+import { formatCurrency } from '@/utils/formatCurrency';
+import { formatShortDate, stripUsernamePrefix } from './helpers';
+
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -46,9 +41,7 @@ const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill=
 </defs>
 </svg>`;
 
-type NavigationProp = NativeStackNavigationProp<AppStackParamList>;
 type AvatarComponent = React.ComponentType<{ width?: number; height?: number }>;
-type NormalizedRequestStatus = 'declined' | 'paid' | 'pending';
 
 const avatarPool: AvatarComponent[] = [Avatar1, Avatar2, Avatar3];
 
@@ -61,118 +54,28 @@ const pickAvatarComponent = (seed: string): AvatarComponent => {
   return avatarPool[Math.abs(hash) % avatarPool.length] || Avatar1;
 };
 
-const normalizeRequestStatus = (
-  status?: PaymentRequest['display_status']
-): NormalizedRequestStatus => {
-  if (status === 'declined') {
-    return 'declined';
-  }
-  if (status === 'paid') {
-    return 'paid';
-  }
-  return 'pending';
-};
-
-const formatRequestDate = (isoDate: string) =>
-  new Date(isoDate).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
-
-const buildRequestName = (request: PaymentRequest) =>
-  request.request_type === 'general'
-    ? 'General Request'
-    : normalizeUsername(request.recipient_username || 'Transfa User');
-
-const RequestHistoryCard = ({
-  request,
-  onPress,
-}: {
-  request: PaymentRequest;
-  onPress: () => void;
-}) => {
-  const status = normalizeRequestStatus(request.display_status);
-  const name = buildRequestName(request);
-  const isGeneral = request.request_type === 'general';
-  const AvatarComponent = pickAvatarComponent(name || request.id);
-
-  return (
-    <TouchableOpacity style={styles.requestCard} onPress={onPress} activeOpacity={0.7}>
-      <View style={styles.requestLeft}>
-        {isGeneral ? (
-          <View style={styles.generalRequestIcon}>
-            <DashedBorder size={48} borderWidth={2} color="#000000" dashCount={18} gapRatio={0.7} />
-            <RequestIcon width={24} height={24} color="#000000" />
-          </View>
-        ) : (
-          <View style={styles.requestAvatarContainer}>
-            <AvatarComponent width={48} height={48} />
-          </View>
-        )}
-        <View style={styles.requestInfo}>
-          <View style={styles.requestNameRow}>
-            <Text style={styles.requestName} numberOfLines={1}>
-              {name}
-            </Text>
-            {!isGeneral ? <VerifiedBadge width={16} height={16} /> : null}
-          </View>
-          <Text style={styles.requestAmount}>{formatCurrency(request.amount)}</Text>
-          <View style={styles.requestDateRow}>
-            <CalendarIcon width={14} height={14} />
-            <Text style={styles.requestDate}>{formatRequestDate(request.created_at)}</Text>
-          </View>
-        </View>
-      </View>
-      <View style={styles.requestStatus}>
-        {status === 'declined' ? (
-          <View style={styles.declinedBadge}>
-            <CancelIcon width={10} height={10} />
-            <Text style={styles.declinedText}>Declined</Text>
-          </View>
-        ) : null}
-        {status === 'paid' ? (
-          <View style={styles.paidBadge}>
-            <PaidIcon width={10} height={10} color="#FFFFFF" />
-            <Text style={styles.paidText}>Paid</Text>
-          </View>
-        ) : null}
-        {status === 'pending' ? (
-          <View style={styles.pendingBadge}>
-            <PendingIcon width={10} height={10} />
-            <Text style={styles.pendingText}>Pending</Text>
-          </View>
-        ) : null}
-      </View>
-    </TouchableOpacity>
-  );
-};
-
-const PaymentRequestHistoryScreen = () => {
-  const navigation = useNavigation<NavigationProp>();
+const IncomingRequestsScreen = () => {
+  const navigation = useNavigation<AppNavigationProp>();
   const [searchQuery, setSearchQuery] = useState('');
   const query = searchQuery.trim();
 
-  const { data, isLoading, isError, error, refetch, isRefetching } = useListPaymentRequests({
-    limit: 100,
-    offset: 0,
-    q: query || undefined,
-  });
-
-  const requests = useMemo(() => data ?? [], [data]);
-
-  const filteredRequests = useMemo(() => {
-    if (!query) {
-      return requests;
+  const { data, isLoading, isError, error, refetch, isRefetching } = useListIncomingPaymentRequests(
+    {
+      limit: 100,
+      offset: 0,
+      q: query || undefined,
     }
+  );
 
-    const lowered = query.toLowerCase();
-    return requests.filter((request) => {
-      const name = buildRequestName(request).toLowerCase();
-      const title = (request.title || '').toLowerCase();
-      return name.includes(lowered) || title.includes(lowered);
-    });
-  }, [query, requests]);
+  const requests = data ?? [];
+
+  const filteredRequests = query
+    ? requests.filter((request) => {
+        const username = stripUsernamePrefix(request.creator_username || '').toLowerCase();
+        const fullName = (request.creator_full_name || '').toLowerCase();
+        return username.includes(query.toLowerCase()) || fullName.includes(query.toLowerCase());
+      })
+    : requests;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
@@ -188,7 +91,6 @@ const PaymentRequestHistoryScreen = () => {
           </TouchableOpacity>
         </View>
         <View style={styles.topBarRight}>
-          <View style={styles.statusIcons} />
           <TouchableOpacity style={styles.settingsButton} activeOpacity={0.8}>
             <SettingsIcon width={24} height={24} color="#FFFFFF" />
           </TouchableOpacity>
@@ -208,7 +110,7 @@ const PaymentRequestHistoryScreen = () => {
           />
         }
       >
-        <Text style={styles.title}>Outgoing Request</Text>
+        <Text style={styles.title}>Incoming Requests</Text>
 
         <View style={styles.searchContainer}>
           <View style={styles.searchIconContainer}>
@@ -233,23 +135,78 @@ const PaymentRequestHistoryScreen = () => {
           ) : isError && requests.length === 0 ? (
             <View style={styles.emptyCard}>
               <Text style={styles.emptyText}>
-                {error?.message || 'Unable to load request history.'}
+                {error?.message || 'Unable to load incoming requests.'}
               </Text>
+              <TouchableOpacity style={styles.retryButton} onPress={() => refetch()}>
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
             </View>
           ) : filteredRequests.length === 0 ? (
             <View style={styles.emptyCard}>
-              <Text style={styles.emptyText}>No request history found.</Text>
+              <Text style={styles.emptyText}>No incoming requests found.</Text>
             </View>
           ) : (
-            filteredRequests.map((request) => (
-              <RequestHistoryCard
-                key={request.id}
-                request={request}
-                onPress={() =>
-                  navigation.navigate('PaymentRequestSuccess', { requestId: request.id })
-                }
-              />
-            ))
+            filteredRequests.map((request) => {
+              const username = stripUsernamePrefix(request.creator_username || 'Transfa User');
+              const AvatarComponent = pickAvatarComponent(username || request.id);
+              const status = request.display_status;
+              const isDeclined = status === 'declined';
+              const formattedAmount = formatCurrency(request.amount);
+
+              return (
+                <TouchableOpacity
+                  key={request.id}
+                  style={styles.requestCard}
+                  onPress={() =>
+                    navigation.navigate('IncomingRequestDetail', {
+                      requestId: request.id,
+                    })
+                  }
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.requestLeft}>
+                    <View style={styles.requestAvatarContainer}>
+                      <AvatarComponent width={48} height={48} />
+                    </View>
+                    <View style={styles.requestInfo}>
+                      <View style={styles.requestNameRow}>
+                        <Text style={styles.requestName} numberOfLines={1}>
+                          {username}
+                        </Text>
+                        <VerifiedBadge width={16} height={16} />
+                      </View>
+
+                      {isDeclined ? (
+                        <Text style={styles.requestAmount}>{formattedAmount}</Text>
+                      ) : null}
+
+                      <View style={styles.requestDateRow}>
+                        <CalendarIcon width={14} height={14} />
+                        <Text style={styles.requestDate}>
+                          {formatShortDate(request.created_at)}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.requestStatus}>
+                    {!isDeclined ? (
+                      <View style={styles.amountContainer}>
+                        <Text style={styles.requestedAmountLabel}>Requested Amount:</Text>
+                        <Text style={styles.requestedAmountValue}>{formattedAmount}</Text>
+                      </View>
+                    ) : null}
+
+                    {isDeclined ? (
+                      <View style={styles.declinedBadge}>
+                        <CancelIcon width={10} height={10} />
+                        <Text style={styles.declinedText}>Declined</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                </TouchableOpacity>
+              );
+            })
           )}
         </View>
       </ScrollView>
@@ -291,11 +248,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-  },
-  statusIcons: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
   },
   settingsButton: {
     padding: 4,
@@ -350,6 +302,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 12,
     alignItems: 'center',
+    gap: 10,
   },
   emptyText: {
     fontSize: 13,
@@ -357,10 +310,23 @@ const styles = StyleSheet.create({
     fontFamily: 'Montserrat_400Regular',
     textAlign: 'center',
   },
+  retryButton: {
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 14,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retryButtonText: {
+    fontSize: 13,
+    color: '#000000',
+    fontFamily: 'Montserrat_600SemiBold',
+  },
   requestCard: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 16,
     justifyContent: 'space-between',
     alignItems: 'flex-start',
@@ -375,14 +341,6 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
   },
-  generalRequestIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
   requestInfo: {
     flex: 1,
   },
@@ -394,15 +352,15 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   requestName: {
-    fontSize: 18,
+    fontSize: 16,
     color: '#000000',
-    fontFamily: 'Montserrat_700Bold',
+    fontFamily: 'Montserrat_600SemiBold',
     maxWidth: 140,
   },
   requestAmount: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#000000',
-    fontFamily: 'Montserrat_500Medium',
+    fontFamily: 'Montserrat_400Regular',
     marginBottom: 6,
   },
   requestDateRow: {
@@ -411,13 +369,30 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   requestDate: {
-    fontSize: 14,
+    fontSize: 12,
     color: '#000000',
     fontFamily: 'Montserrat_400Regular',
   },
   requestStatus: {
     alignItems: 'flex-end',
     marginLeft: 10,
+  },
+  amountContainer: {
+    alignItems: 'flex-end',
+    maxWidth: 120,
+  },
+  requestedAmountLabel: {
+    fontSize: 12,
+    color: '#000000',
+    fontFamily: 'Montserrat_400Regular',
+    marginBottom: 4,
+    textAlign: 'right',
+  },
+  requestedAmountValue: {
+    fontSize: 16,
+    color: '#000000',
+    fontFamily: 'Montserrat_600SemiBold',
+    textAlign: 'right',
   },
   declinedBadge: {
     backgroundColor: '#FFCDCD',
@@ -433,34 +408,6 @@ const styles = StyleSheet.create({
     color: '#FF3737',
     fontFamily: 'Montserrat_600SemiBold',
   },
-  paidBadge: {
-    backgroundColor: '#CBF9BD',
-    borderRadius: 21,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  paidText: {
-    fontSize: 12,
-    color: '#33DA00',
-    fontFamily: 'Montserrat_600SemiBold',
-  },
-  pendingBadge: {
-    backgroundColor: '#FEF5CB',
-    borderRadius: 21,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  pendingText: {
-    fontSize: 12,
-    color: '#EBB351',
-    fontFamily: 'Montserrat_600SemiBold',
-  },
 });
 
-export default PaymentRequestHistoryScreen;
+export default IncomingRequestsScreen;

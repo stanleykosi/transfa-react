@@ -1,57 +1,156 @@
-import React, { useMemo, useState } from 'react';
+import BackIcon from '@/assets/icons/back.svg';
+import SearchIcon from '@/assets/icons/search-normal.svg';
+import VerifiedBadge from '@/assets/icons/verified.svg';
+import Avatar1 from '@/assets/images/avatar1.svg';
+import Avatar2 from '@/assets/images/avatar2.svg';
+import Avatar3 from '@/assets/images/avatar3.svg';
+import * as Haptics from 'expo-haptics';
+import { StatusBar } from 'expo-status-bar';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
+  Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { SvgXml } from 'react-native-svg';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useUserSearch } from '@/api/userDiscoveryApi';
 import type { UserDiscoveryResult } from '@/types/api';
 import type { AppNavigationProp } from '@/types/navigation';
 import { normalizeUsername } from '@/utils/username';
+import { moderateScale, scale, verticalScale } from '@/utils/responsive';
 
 const cleanUsername = (value: string) => normalizeUsername(value);
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="375" height="812" fill="white"/>
+<rect width="375" height="812" fill="url(#paint0_linear_708_2445)"/>
+<rect width="375" height="812" fill="black" fill-opacity="0.2"/>
+<defs>
+<linearGradient id="paint0_linear_708_2445" x1="187.5" y1="0" x2="187.5" y2="812" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2B2B2B"/>
+<stop offset="0.778846" stop-color="#0F0F0F"/>
+</linearGradient>
+</defs>
+</svg>`;
+
+const avatarOptions = [Avatar1, Avatar2, Avatar3] as const;
+
+const resolveAvatar = (seed: string) => {
+  if (!seed) {
+    return avatarOptions[0];
+  }
+
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash += seed.charCodeAt(index) * (index + 1);
+  }
+
+  return avatarOptions[hash % avatarOptions.length];
+};
+
+const SearchUserItem = memo(
+  ({
+    user,
+    onSelect,
+  }: {
+    user: UserDiscoveryResult;
+    onSelect: (user: UserDiscoveryResult) => void;
+  }) => {
+    const AvatarComponent = resolveAvatar(user.id || user.username);
+
+    const handlePress = useCallback(() => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      onSelect(user);
+    }, [onSelect, user]);
+
+    return (
+      <Pressable
+        style={({ pressed }) => [
+          styles.userCard,
+          pressed && { opacity: 0.82, transform: [{ scale: 0.98 }] },
+        ]}
+        onPress={handlePress}
+      >
+        <AvatarComponent width={scale(50)} height={scale(50)} />
+
+        <View style={styles.userInfo}>
+          <View style={styles.usernameRow}>
+            <Text style={styles.username}>{cleanUsername(user.username)}</Text>
+            <VerifiedBadge width={scale(16)} height={scale(16)} />
+          </View>
+          <Text style={styles.fullName} numberOfLines={1}>
+            {user.full_name || 'Transfa User'}
+          </Text>
+        </View>
+      </Pressable>
+    );
+  }
+);
 
 const UserSearchScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
+  const insets = useSafeAreaInsets();
   const [searchQuery, setSearchQuery] = useState('');
-
   const normalizedQuery = useMemo(() => searchQuery.trim(), [searchQuery]);
-
   const { data, isLoading } = useUserSearch(normalizedQuery, 20);
   const results = data?.users ?? [];
 
-  return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-      <View style={styles.container}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <Ionicons name="arrow-back" size={22} color="#EDEDED" />
-        </TouchableOpacity>
+  const handleBack = useCallback(() => {
+    Haptics.selectionAsync();
+    navigation.goBack();
+  }, [navigation]);
 
-        <View style={styles.searchWrap}>
-          <Ionicons name="search" size={17} color="#EDEDED" />
+  const handleUserSelect = useCallback(
+    (user: UserDiscoveryResult) => {
+      navigation.navigate('UserProfileView', { user });
+    },
+    [navigation]
+  );
+
+  return (
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <StatusBar style="light" />
+
+      <View style={styles.backgroundContainer}>
+        <SvgXml xml={backgroundSvg} width={SCREEN_WIDTH} height={SCREEN_HEIGHT} />
+      </View>
+
+      <View style={styles.header}>
+        <Pressable onPress={handleBack} style={styles.backButton}>
+          <BackIcon width={scale(24)} height={scale(24)} color="#FFFFFF" />
+        </Pressable>
+      </View>
+
+      <View style={styles.searchBarContainer}>
+        <View style={styles.searchBar}>
+          <SearchIcon width={scale(20)} height={scale(20)} color="#FFFFFF" />
           <TextInput
-            style={styles.searchInput}
+            style={styles.input}
+            placeholder="Search"
+            placeholderTextColor="#999999"
             value={searchQuery}
             onChangeText={setSearchQuery}
-            placeholder="Search users"
-            placeholderTextColor="#BDBDBE"
             autoCapitalize="none"
             autoCorrect={false}
+            autoFocus
           />
         </View>
+      </View>
 
+      <ScrollView
+        style={styles.resultsContainer}
+        contentContainerStyle={styles.resultsContent}
+        showsVerticalScrollIndicator={false}
+      >
         {normalizedQuery.length === 0 ? (
           <Text style={styles.helperText}>Type a username to find users.</Text>
         ) : isLoading ? (
@@ -63,132 +162,109 @@ const UserSearchScreen = () => {
         ) : (
           <View style={styles.resultsList}>
             {results.map((user) => (
-              <UserResultCard
-                key={user.id}
-                user={user}
-                onPress={() => navigation.navigate('UserProfileView', { user })}
-              />
+              <SearchUserItem key={user.id} user={user} onSelect={handleUserSelect} />
             ))}
           </View>
         )}
-      </View>
-    </SafeAreaView>
-  );
-};
-
-const UserResultCard = ({ user, onPress }: { user: UserDiscoveryResult; onPress: () => void }) => {
-  const initials =
-    user.full_name?.slice(0, 1)?.toUpperCase() ||
-    cleanUsername(user.username).slice(0, 1).toUpperCase();
-
-  return (
-    <TouchableOpacity activeOpacity={0.8} style={styles.resultCard} onPress={onPress}>
-      <View style={styles.resultAvatar}>
-        <Text style={styles.resultAvatarInitial}>{initials}</Text>
-      </View>
-
-      <View style={styles.resultTextWrap}>
-        <Text style={styles.resultUsername}>{cleanUsername(user.username)}</Text>
-        <Text style={styles.resultFullName} numberOfLines={1}>
-          {user.full_name || 'Transfa User'}
-        </Text>
-      </View>
-
-      <View style={styles.badgeWrap}>
-        <Ionicons name="lock-closed" size={10} color="#0A0A0A" />
-      </View>
-    </TouchableOpacity>
+      </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#050607',
-  },
   container: {
     flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 8,
+    backgroundColor: '#000000',
+  },
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
+  },
+  header: {
+    height: verticalScale(60),
+    justifyContent: 'center',
+    paddingHorizontal: scale(20),
   },
   backButton: {
-    paddingVertical: 6,
-    width: 30,
-    marginBottom: 14,
+    width: scale(40),
+    height: scale(40),
+    justifyContent: 'center',
   },
-  searchWrap: {
-    height: 38,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    paddingHorizontal: 12,
+  searchBarContainer: {
+    paddingHorizontal: scale(20),
+    marginBottom: verticalScale(20),
+  },
+  searchBar: {
+    height: verticalScale(35),
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderWidth: scale(1),
+    borderRadius: scale(10),
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    paddingHorizontal: scale(12),
+    gap: scale(10),
+    borderCurve: 'continuous',
   },
-  searchInput: {
+  input: {
     flex: 1,
-    color: '#ECECEC',
-    fontSize: 14,
-    paddingVertical: 0,
+    color: '#FFFFFF',
+    fontSize: moderateScale(18),
+    fontFamily: 'Montserrat_400Regular',
   },
   helperText: {
-    marginTop: 20,
+    marginTop: verticalScale(8),
     color: '#9C9EA1',
-    fontSize: 14,
+    fontSize: moderateScale(14),
+    fontFamily: 'Montserrat_400Regular',
   },
   centerState: {
-    marginTop: 28,
+    marginTop: verticalScale(24),
     alignItems: 'center',
   },
-  resultsList: {
-    marginTop: 14,
-    gap: 12,
-  },
-  resultCard: {
-    minHeight: 64,
-    backgroundColor: '#F6F6F7',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  resultAvatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 8,
-    backgroundColor: '#F3ABA7',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  resultAvatarInitial: {
-    color: '#141516',
-    fontWeight: '700',
-    fontSize: 15,
-  },
-  resultTextWrap: {
-    marginLeft: 12,
+  resultsContainer: {
     flex: 1,
   },
-  resultUsername: {
-    color: '#141516',
-    fontWeight: '700',
-    fontSize: 20,
+  resultsContent: {
+    paddingHorizontal: scale(20),
+    paddingBottom: verticalScale(24),
   },
-  resultFullName: {
-    marginTop: 2,
-    color: '#535456',
-    fontSize: 13,
+  resultsList: {
+    gap: verticalScale(16),
   },
-  badgeWrap: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: '#FFD300',
+  userCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: scale(10),
+    padding: scale(12),
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: scale(12),
+    borderCurve: 'continuous',
+  },
+  userInfo: {
+    flex: 1,
     justifyContent: 'center',
+    gap: verticalScale(3),
+  },
+  usernameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: scale(6),
+    marginBottom: verticalScale(2),
+  },
+  username: {
+    fontSize: moderateScale(18),
+    color: '#000000',
+    fontFamily: 'Montserrat_700Bold',
+  },
+  fullName: {
+    fontSize: moderateScale(16),
+    color: '#000000',
+    fontFamily: 'Montserrat_400Regular',
   },
 });
 

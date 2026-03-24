@@ -42,6 +42,7 @@ const OtpCodeField: React.FC<OtpCodeFieldProps> = ({
         value={value}
         onChangeText={onCodeChange}
         keyboardType="number-pad"
+        keyboardAppearance="dark"
         textContentType="oneTimeCode"
         autoComplete="one-time-code"
         autoFocus={autoFocus}
