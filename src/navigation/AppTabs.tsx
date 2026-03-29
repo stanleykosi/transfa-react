@@ -61,17 +61,33 @@ const AppTabs = () => {
         component={HomeScreen}
         options={{
           tabBarStyle: { display: 'none' },
+          unmountOnBlur: true,
         }}
       />
-      <Tab.Screen name="Settings" component={ProfileStack} />
+      <Tab.Screen
+        name="Settings"
+        component={ProfileStack}
+        options={{
+          tabBarStyle: { display: 'none' },
+          unmountOnBlur: true,
+        }}
+      />
       <Tab.Screen
         name="MoneyDrop"
         component={MoneyDropTabScreen}
         options={{
           tabBarStyle: { display: 'none' },
+          unmountOnBlur: true,
         }}
       />
-      <Tab.Screen name="Support" component={SupportScreen} />
+      <Tab.Screen
+        name="Support"
+        component={SupportScreen}
+        options={{
+          tabBarStyle: { display: 'none' },
+          unmountOnBlur: true,
+        }}
+      />
     </Tab.Navigator>
   );
 };
