@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Dimensions,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -14,8 +15,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useUser } from '@clerk/clerk-expo';
+import { SvgXml } from 'react-native-svg';
 
 import type { AppStackParamList } from '@/navigation/AppStack';
 import type { AppNavigationProp } from '@/types/navigation';
@@ -27,6 +28,17 @@ const BRAND_YELLOW = '#FFD300';
 const BG_BOTTOM = '#050607';
 const CARD_BG = 'rgba(255,255,255,0.08)';
 const CARD_BORDER = 'rgba(255,255,255,0.10)';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="375" height="812" fill="url(#paint0_linear_708_2445)"/>
+<defs>
+<linearGradient id="paint0_linear_708_2445" x1="187.5" y1="0" x2="187.5" y2="812" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2B2B2B"/>
+<stop offset="0.778846" stop-color="#0F0F0F"/>
+</linearGradient>
+</defs>
+</svg>`;
 
 type ClaimDropScreenRouteProp = RouteProp<AppStackParamList, 'ClaimDrop'>;
 type ClaimStep = 'preview' | 'claim';
@@ -139,12 +151,9 @@ const ClaimDropScreen = () => {
 
   return (
     <View style={styles.root}>
-      <LinearGradient
-        colors={['#1A1B1E', '#0C0D0F', BG_BOTTOM]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={styles.backgroundGradient}
-      />
+      <View style={styles.backgroundContainer}>
+        <SvgXml xml={backgroundSvg} width={SCREEN_WIDTH} height={SCREEN_HEIGHT} />
+      </View>
 
       <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         <KeyboardAvoidingView
@@ -335,8 +344,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: BG_BOTTOM,
   },
-  backgroundGradient: {
-    ...StyleSheet.absoluteFillObject,
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
   },
   safeArea: {
     flex: 1,

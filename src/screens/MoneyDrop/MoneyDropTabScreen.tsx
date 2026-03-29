@@ -1,6 +1,16 @@
+import AddIcon from '@/assets/icons/add.svg';
+import MoneyDropIcon from '@/assets/icons/money-drop.svg';
+import AnimatedPageWrapper from '@/components/AnimatedPageWrapper';
+import BottomNavbar from '@/components/bottom-navbar';
+import { useMoneyDropDashboard } from '@/api/transactionApi';
+import type { MoneyDropDashboardItem } from '@/types/api';
+import type { AppNavigationProp } from '@/types/navigation';
+import { formatCurrency } from '@/utils/formatCurrency';
+import { useNavigation } from '@react-navigation/native';
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -9,48 +19,57 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { SvgXml } from 'react-native-svg';
 
-import { useMoneyDropDashboard } from '@/api/transactionApi';
-import { formatCurrency } from '@/utils/formatCurrency';
-import type { MoneyDropDashboardItem } from '@/types/api';
-import type { AppNavigationProp } from '@/types/navigation';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const BRAND_YELLOW = '#FFD300';
-const BG_BOTTOM = '#050607';
-const CARD_BG = 'rgba(255,255,255,0.08)';
-const CARD_BORDER = 'rgba(255,255,255,0.07)';
+const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="375" height="812" fill="url(#paint0_linear_708_2445)"/>
+<defs>
+<linearGradient id="paint0_linear_708_2445" x1="187.5" y1="0" x2="187.5" y2="812" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2B2B2B"/>
+<stop offset="0.778846" stop-color="#0F0F0F"/>
+</linearGradient>
+</defs>
+</svg>`;
 
 type DropCardProps = {
   item: MoneyDropDashboardItem;
+  isActive: boolean;
   onPress: () => void;
 };
 
-const DropCard = ({ item, onPress }: DropCardProps) => {
-  const isActive = item.status === 'active' && !item.ended;
+const DropCard = ({ item, isActive, onPress }: DropCardProps) => {
+  const secondaryLeft = isActive
+    ? `Time left: ${item.time_left_label || '--'}`
+    : item.ended_display_status || 'Ended';
+
+  const secondaryRight = isActive
+    ? `Users Claimed: ${item.users_claimed_label || '--'}`
+    : item.created_date_label || '--';
 
   return (
-    <TouchableOpacity activeOpacity={0.86} style={styles.dropCard} onPress={onPress}>
-      <View style={[styles.iconWrap, isActive ? styles.iconWrapActive : styles.iconWrapEnded]}>
-        <Ionicons name="gift-outline" size={20} color={isActive ? BRAND_YELLOW : '#7E8188'} />
+    <TouchableOpacity style={styles.dropCard} activeOpacity={0.8} onPress={onPress}>
+      <View style={isActive ? styles.giftIconContainerActive : styles.giftIconContainerEnded}>
+        <MoneyDropIcon width={24} height={24} color={isActive ? '#FFD300' : '#6C6B6B'} />
       </View>
 
-      <View style={styles.dropCardMiddle}>
-        <Text style={styles.dropTitle} numberOfLines={1}>
-          {item.title}
-        </Text>
-        <Text style={styles.dropSubtitle} numberOfLines={1}>
-          {isActive ? `Time left: ${item.time_left_label}` : item.ended_display_status || 'Ended'}
-        </Text>
-      </View>
+      <View style={styles.dropInfo}>
+        <View style={styles.dropRow}>
+          <Text style={styles.dropTitle} numberOfLines={1}>
+            {item.title}
+          </Text>
+          <Text style={styles.dropAmount}>{formatCurrency(item.total_amount)}</Text>
+        </View>
 
-      <View style={styles.dropCardRight}>
-        <Text style={styles.dropAmount}>{formatCurrency(item.total_amount)}</Text>
-        <Text style={styles.dropRightSub}>
-          {isActive ? `Users Claimed: ${item.users_claimed_label}` : item.created_date_label}
-        </Text>
+        <View style={styles.dropRow}>
+          <Text style={styles.dropSubtext} numberOfLines={1}>
+            {secondaryLeft}
+          </Text>
+          <Text style={styles.dropSubtext} numberOfLines={1}>
+            {secondaryRight}
+          </Text>
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -59,11 +78,16 @@ const DropCard = ({ item, onPress }: DropCardProps) => {
 const MoneyDropTabScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
   const [refreshing, setRefreshing] = useState(false);
+
   const { data: dashboard, isLoading, isFetching, error, refetch } = useMoneyDropDashboard();
 
   const activeDrops = dashboard?.active_drops ?? [];
-  const historyDrops = dashboard?.drop_history ?? [];
-  const currentBalance = dashboard?.current_balance ?? 0;
+  const dropHistory = dashboard?.drop_history ?? [];
+
+  const currentBalance = useMemo(
+    () => dashboard?.current_balance ?? 0,
+    [dashboard?.current_balance]
+  );
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -74,312 +98,316 @@ const MoneyDropTabScreen = () => {
     }
   };
 
-  const isEmpty = useMemo(
-    () => activeDrops.length === 0 && historyDrops.length === 0,
-    [activeDrops.length, historyDrops.length]
-  );
+  const handleTabPress = (tab: 'home' | 'settings' | 'gifts' | 'support') => {
+    if (tab === 'home') {
+      navigation.navigate('AppTabs', { screen: 'Home' });
+      return;
+    }
+
+    if (tab === 'settings') {
+      navigation.navigate('AppTabs', { screen: 'Settings', params: { screen: 'ProfileHome' } });
+      return;
+    }
+
+    if (tab === 'gifts') {
+      navigation.navigate('AppTabs', { screen: 'MoneyDrop' });
+      return;
+    }
+
+    navigation.navigate('AppTabs', { screen: 'Support' });
+  };
 
   return (
-    <View style={styles.root}>
-      <LinearGradient
-        colors={['#1A1B1E', '#0C0D0F', BG_BOTTOM]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={styles.backgroundGradient}
-      />
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.backgroundContainer}>
+        <SvgXml xml={backgroundSvg} width={SCREEN_WIDTH} height={SCREEN_HEIGHT} />
+      </View>
+
+      <View style={styles.topBar} />
+
+      <AnimatedPageWrapper>
         <ScrollView
+          style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={refreshing || (isFetching && !isLoading)}
               onRefresh={onRefresh}
-              tintColor={BRAND_YELLOW}
+              tintColor="#FFD300"
             />
           }
-          showsVerticalScrollIndicator={false}
         >
-          <View style={styles.topRow}>
-            <TouchableOpacity
-              activeOpacity={0.8}
-              onPress={() => navigation.navigate('AppTabs', { screen: 'Home' })}
-              style={styles.backButton}
-            >
-              <Ionicons name="arrow-back" size={24} color="#F4F4F5" />
-            </TouchableOpacity>
+          <Text style={styles.headerTitle}>MONEYDROP</Text>
+
+          <View style={styles.balanceContainer}>
+            <Text style={styles.balanceAmount}>{formatCurrency(currentBalance)}</Text>
+            <Text style={styles.balanceLabel}>Current Balance</Text>
           </View>
 
-          <Text style={styles.screenTitle}>MONEYDROP</Text>
-          <Text style={styles.balanceAmount}>{formatCurrency(currentBalance)}</Text>
-          <Text style={styles.balanceLabel}>Current Balance</Text>
-
           <TouchableOpacity
-            activeOpacity={0.9}
             style={styles.createButton}
+            activeOpacity={0.8}
             onPress={() => navigation.navigate('CreateDropWizard')}
           >
-            <Ionicons name="add" size={24} color="#74777D" />
+            <AddIcon width={24} height={24} color="#6C6B6B" />
             <Text style={styles.createButtonText}>Create MoneyDrop</Text>
           </TouchableOpacity>
 
           {isLoading ? (
-            <View style={styles.loadingWrap}>
-              <ActivityIndicator size="small" color={BRAND_YELLOW} />
-              <Text style={styles.loadingText}>Loading money drops...</Text>
+            <View style={styles.stateWrap}>
+              <ActivityIndicator size="small" color="#FFD300" />
+              <Text style={styles.stateText}>Loading money drops...</Text>
             </View>
           ) : error ? (
-            <View style={styles.errorCard}>
-              <Text style={styles.errorText}>
-                {error.message || 'Failed to load MoneyDrop dashboard. Pull to refresh.'}
+            <View style={styles.stateWrap}>
+              <Text style={styles.stateText}>
+                {error.message || 'Failed to load MoneyDrop dashboard.'}
               </Text>
             </View>
           ) : (
             <>
-              {activeDrops.length > 0 && (
-                <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Active Drop</Text>
-                  <View style={styles.cardsColumn}>
-                    {activeDrops.map((item) => (
+              <View style={styles.section}>
+                <Text style={styles.sectionHeader}>Active Drop</Text>
+                <View style={styles.dropList}>
+                  {activeDrops.length > 0 ? (
+                    activeDrops.map((drop) => (
                       <DropCard
-                        key={item.id}
-                        item={item}
-                        onPress={() => navigation.navigate('MoneyDropDetails', { dropId: item.id })}
+                        key={drop.id}
+                        item={drop}
+                        isActive
+                        onPress={() => navigation.navigate('MoneyDropDetails', { dropId: drop.id })}
                       />
-                    ))}
-                  </View>
+                    ))
+                  ) : (
+                    <Text style={styles.emptyText}>No active drops yet.</Text>
+                  )}
                 </View>
-              )}
+              </View>
 
               <View style={styles.divider} />
 
-              <View style={styles.historyHeader}>
-                <Text style={styles.sectionTitle}>Drop History</Text>
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  style={styles.claimedButton}
-                  onPress={() => navigation.navigate('MoneyDropClaimedHistory')}
-                >
-                  <Text style={styles.claimedButtonText}>Claimed Drop</Text>
-                </TouchableOpacity>
-              </View>
+              <View style={styles.section}>
+                <View style={styles.historyHeader}>
+                  <Text style={styles.sectionHeader}>Drop History</Text>
+                  <TouchableOpacity
+                    style={styles.claimedButton}
+                    onPress={() => navigation.navigate('MoneyDropClaimedHistory')}
+                  >
+                    <Text style={styles.claimedButtonText}>Claimed Drop</Text>
+                  </TouchableOpacity>
+                </View>
 
-              {historyDrops.length > 0 ? (
-                <View style={styles.cardsColumn}>
-                  {historyDrops.map((item) => (
-                    <DropCard
-                      key={item.id}
-                      item={item}
-                      onPress={() => navigation.navigate('MoneyDropDetails', { dropId: item.id })}
-                    />
-                  ))}
+                <View style={styles.dropList}>
+                  {dropHistory.length > 0 ? (
+                    dropHistory.map((drop) => (
+                      <DropCard
+                        key={drop.id}
+                        item={drop}
+                        isActive={false}
+                        onPress={() => navigation.navigate('MoneyDropDetails', { dropId: drop.id })}
+                      />
+                    ))
+                  ) : (
+                    <Text style={styles.emptyText}>No ended drops yet.</Text>
+                  )}
                 </View>
-              ) : (
-                <View style={styles.emptyHistoryCard}>
-                  <Text style={styles.emptyHistoryText}>
-                    {isEmpty
-                      ? 'No MoneyDrop yet. Create your first drop to get started.'
-                      : 'No ended drops yet.'}
-                  </Text>
-                </View>
-              )}
+              </View>
             </>
           )}
         </ScrollView>
-      </SafeAreaView>
-    </View>
+      </AnimatedPageWrapper>
+
+      <BottomNavbar activeTab="gifts" onTabPress={handleTabPress} visible />
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  root: {
+  container: {
     flex: 1,
-    backgroundColor: BG_BOTTOM,
+    backgroundColor: '#000000',
   },
-  backgroundGradient: {
-    ...StyleSheet.absoluteFillObject,
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
   },
-  safeArea: {
+  topBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 20,
+    zIndex: 1,
+  },
+  headerTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
+    letterSpacing: 1.2,
+    textAlign: 'center',
+    marginTop: 10,
+    marginBottom: 20,
+  },
+  scrollView: {
     flex: 1,
+    zIndex: 1,
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingBottom: 124,
+    paddingBottom: 120,
   },
-  topRow: {
-    marginTop: 2,
-    marginBottom: 8,
-  },
-  backButton: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-  },
-  screenTitle: {
-    color: '#F0F1F3',
-    fontWeight: '700',
-    fontSize: 30,
-    letterSpacing: 0.5,
-    textAlign: 'center',
-    marginTop: 14,
+  balanceContainer: {
+    alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 32,
   },
   balanceAmount: {
-    color: '#F5F5F7',
-    fontSize: 46,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginTop: 18,
+    fontSize: 40,
+    color: '#FFFFFF',
+    fontFamily: 'ArtificTrial-Semibold',
+    marginBottom: 4,
   },
   balanceLabel: {
-    color: '#63666D',
-    fontSize: 16,
-    textDecorationLine: 'underline',
-    textAlign: 'center',
-    marginTop: 4,
-    marginBottom: 24,
+    fontSize: 14,
+    color: '#6C6B6B',
+    fontFamily: 'Montserrat_400Regular',
   },
   createButton: {
-    height: 56,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#61646C',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    flexDirection: 'row',
-    marginBottom: 20,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#6C6B6B',
+    borderRadius: 12,
+    paddingVertical: 14,
+    gap: 10,
+    marginBottom: 40,
   },
   createButtonText: {
-    color: '#74777D',
+    color: '#6C6B6B',
     fontSize: 18,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  loadingWrap: {
-    marginTop: 48,
-    alignItems: 'center',
-  },
-  loadingText: {
-    color: '#9EA1A8',
-    marginTop: 10,
-    fontSize: 14,
+    fontFamily: 'Montserrat_600SemiBold',
   },
   section: {
-    marginTop: 6,
+    marginBottom: 24,
   },
-  sectionTitle: {
-    color: '#ECEDEF',
-    fontSize: 22,
-    fontWeight: '500',
-    marginBottom: 12,
-  },
-  cardsColumn: {
-    gap: 12,
-  },
-  dropCard: {
-    backgroundColor: CARD_BG,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  iconWrap: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  iconWrapActive: {
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: BRAND_YELLOW,
-  },
-  iconWrapEnded: {
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderColor: '#70737A',
-  },
-  dropCardMiddle: {
-    flex: 1,
-    marginRight: 10,
-  },
-  dropCardRight: {
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    minHeight: 52,
-  },
-  dropTitle: {
-    color: '#F1F2F4',
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  dropSubtitle: {
-    color: '#7E8188',
-    fontSize: 13,
-    marginTop: 4,
-  },
-  dropAmount: {
-    color: '#F0F1F3',
+  sectionHeader: {
     fontSize: 18,
-    fontWeight: '500',
-  },
-  dropRightSub: {
-    color: '#6D7077',
-    fontSize: 12,
-    marginTop: 4,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#4F525A',
-    marginVertical: 24,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_400Regular',
+    marginBottom: 16,
   },
   historyHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 14,
+    alignItems: 'center',
+    marginBottom: 16,
   },
   claimedButton: {
-    height: 40,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
-    backgroundColor: CARD_BG,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    paddingVertical: 8,
     paddingHorizontal: 16,
-    justifyContent: 'center',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
   },
   claimedButtonText: {
-    color: '#D8DADF',
-    fontSize: 15,
-    fontWeight: '500',
-  },
-  errorCard: {
-    marginTop: 24,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.45)',
-    backgroundColor: 'rgba(239,68,68,0.12)',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  errorText: {
-    color: '#FFD3D3',
+    color: '#FFFFFF',
     fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
   },
-  emptyHistoryCard: {
-    borderRadius: 14,
+  dropList: {
+    gap: 12,
+  },
+  dropCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 12,
+    padding: 16,
+    gap: 12,
     borderWidth: 1,
-    borderColor: CARD_BORDER,
-    backgroundColor: CARD_BG,
-    paddingHorizontal: 16,
-    paddingVertical: 18,
+    borderColor: 'rgba(255, 255, 255, 0.03)',
   },
-  emptyHistoryText: {
-    color: '#8E9197',
+  giftIconContainerActive: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 211, 0, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#FFD300',
+    borderStyle: 'dashed',
+  },
+  giftIconContainerEnded: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(108, 107, 107, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#6C6B6B',
+    borderStyle: 'dashed',
+  },
+  dropInfo: {
+    flex: 1,
+    gap: 4,
+  },
+  dropRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dropTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontFamily: 'Montserrat_600SemiBold',
+    flex: 1,
+  },
+  dropAmount: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
+  },
+  dropSubtext: {
+    color: '#6C6B6B',
+    fontSize: 12,
+    fontFamily: 'Montserrat_400Regular',
+    flex: 1,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#6C6B6B',
+    marginVertical: 12,
+    marginBottom: 24,
+    width: '100%',
+  },
+  stateWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+  },
+  stateText: {
+    color: '#9FA1A6',
     fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  emptyText: {
+    color: '#6C6B6B',
+    fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
   },
 });
 

@@ -46,6 +46,7 @@ const AppTabs = () => {
         tabBarInactiveTintColor: '#A0A1A4',
         tabBarStyle: styles.tabBar,
         tabBarIconStyle: styles.tabBarIcon,
+        // eslint-disable-next-line react/no-unstable-nested-components
         tabBarIcon: ({ focused, color, size }) => (
           <Ionicons
             name={resolveIconName(route.name as keyof AppTabsParamList, focused)}
@@ -60,11 +61,33 @@ const AppTabs = () => {
         component={HomeScreen}
         options={{
           tabBarStyle: { display: 'none' },
+          unmountOnBlur: true,
         }}
       />
-      <Tab.Screen name="Settings" component={ProfileStack} />
-      <Tab.Screen name="MoneyDrop" component={MoneyDropTabScreen} />
-      <Tab.Screen name="Support" component={SupportScreen} />
+      <Tab.Screen
+        name="Settings"
+        component={ProfileStack}
+        options={{
+          tabBarStyle: { display: 'none' },
+          unmountOnBlur: true,
+        }}
+      />
+      <Tab.Screen
+        name="MoneyDrop"
+        component={MoneyDropTabScreen}
+        options={{
+          tabBarStyle: { display: 'none' },
+          unmountOnBlur: true,
+        }}
+      />
+      <Tab.Screen
+        name="Support"
+        component={SupportScreen}
+        options={{
+          tabBarStyle: { display: 'none' },
+          unmountOnBlur: true,
+        }}
+      />
     </Tab.Navigator>
   );
 };

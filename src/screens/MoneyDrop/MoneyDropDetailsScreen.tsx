@@ -1,25 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-  Share,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import * as Clipboard from 'expo-clipboard';
-import * as FileSystem from 'expo-file-system/legacy';
-import * as MediaLibrary from 'expo-media-library';
-import QRCode from 'react-native-qrcode-svg';
-
-import type { AppStackParamList } from '@/navigation/AppStack';
-import type { AppNavigationProp } from '@/types/navigation';
+import AlarmIcon from '@/assets/icons/alarm.svg';
+import BackIcon from '@/assets/icons/back.svg';
+import CalendarIcon from '@/assets/icons/calendar.svg';
+import CopyIcon from '@/assets/icons/document-copy.svg';
+import DownloadIcon from '@/assets/icons/download.svg';
+import MoneyDropIcon from '@/assets/icons/money-drop.svg';
+import ShareIcon from '@/assets/icons/share.svg';
 import {
   useEndMoneyDrop,
   useMoneyDropDashboard,
@@ -27,22 +12,89 @@ import {
   useRevealMoneyDropPassword,
 } from '@/api/transactionApi';
 import PinInputModal from '@/components/PinInputModal';
-import { useSecureAction } from '@/hooks/useSecureAction';
+import type { AppStackParamList } from '@/navigation/AppStack';
+import type { AppNavigationProp } from '@/types/navigation';
 import { formatCurrency } from '@/utils/formatCurrency';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
+import * as Clipboard from 'expo-clipboard';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Haptics from 'expo-haptics';
+import * as MediaLibrary from 'expo-media-library';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Dimensions,
+  SafeAreaView,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
+import { SvgXml } from 'react-native-svg';
 
-const BRAND_YELLOW = '#FFD300';
-const BG_BOTTOM = '#050607';
-const CARD_BG = 'rgba(255,255,255,0.08)';
-const CARD_BORDER = 'rgba(255,255,255,0.07)';
-const CLAIMER_BG = '#E7E8EA';
+import { useSecureAction } from '@/hooks/useSecureAction';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="375" height="812" fill="url(#paint0_linear_708_2445)"/>
+<defs>
+<linearGradient id="paint0_linear_708_2445" x1="187.5" y1="0" x2="187.5" y2="812" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2B2B2B"/>
+<stop offset="0.778846" stop-color="#0F0F0F"/>
+</linearGradient>
+</defs>
+</svg>`;
 
 type MoneyDropDetailsRouteProp = RouteProp<AppStackParamList, 'MoneyDropDetails'>;
+type DetailRowProps = {
+  label: string;
+  value: string;
+  isPin?: boolean;
+  showPassword?: boolean;
+  isRevealingPassword?: boolean;
+  onTogglePasswordVisibility?: () => void;
+};
+
+const DetailRow = ({
+  label,
+  value,
+  isPin = false,
+  showPassword = false,
+  isRevealingPassword = false,
+  onTogglePasswordVisibility,
+}: DetailRowProps) => (
+  <View style={styles.detailRow}>
+    <Text style={[styles.detailLabel, isPin && { marginTop: 3 }]}>{label}</Text>
+    <View style={styles.detailValueContainer}>
+      {isPin ? (
+        <View style={styles.pinContainer}>
+          <View style={styles.pinValueBox}>
+            <Text style={styles.detailValue}>{showPassword ? value : '****'}</Text>
+          </View>
+          <TouchableOpacity onPress={onTogglePasswordVisibility} disabled={isRevealingPassword}>
+            <Text style={styles.hidePinText}>
+              {showPassword ? 'Hide Pin' : isRevealingPassword ? 'Verifying...' : 'Show Pin'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <Text style={styles.detailValue}>{value}</Text>
+      )}
+    </View>
+  </View>
+);
 
 const formatDateTime = (value: string) => {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
     return value;
   }
+
   return parsed.toLocaleString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -57,6 +109,7 @@ const formatDateOnly = (value: string) => {
   if (Number.isNaN(parsed.getTime())) {
     return value;
   }
+
   return parsed.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -72,7 +125,9 @@ const MoneyDropDetailsScreen = () => {
   const [revealedPassword, setRevealedPassword] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [copyDone, setCopyDone] = useState(false);
+
   const qrRef = useRef<any>(null);
+
   const {
     isModalVisible,
     error: pinError,
@@ -86,9 +141,16 @@ const MoneyDropDetailsScreen = () => {
   const { data, isLoading, error, refetch } = useMoneyDropOwnerDetails(dropId, {
     claimersLimit: 20,
   });
+
   const currentBalance = dashboard?.current_balance ?? 0;
   const previewClaimers = useMemo(() => data?.claimers?.slice(0, 3) ?? [], [data?.claimers]);
-  const isActive = !!data?.can_end_drop;
+  const isLive = !!data?.can_end_drop;
+
+  useEffect(() => {
+    setRevealedPassword(null);
+    setShowPassword(false);
+  }, [dropId]);
+
   const { mutate: revealDropPassword, isPending: isRevealingPassword } = useRevealMoneyDropPassword(
     {
       onSuccess: (payload) => {
@@ -101,17 +163,13 @@ const MoneyDropDetailsScreen = () => {
     }
   );
 
-  useEffect(() => {
-    setRevealedPassword(null);
-    setShowPassword(false);
-  }, [dropId]);
-
   const { mutate: endDrop, isPending: isEnding } = useEndMoneyDrop({
     onSuccess: (result) => {
       const message =
         result.refunded_amount > 0
           ? `Drop ended. ${formatCurrency(result.refunded_amount)} refunded to your main wallet.`
           : 'Drop ended successfully.';
+
       Alert.alert('MoneyDrop Ended', message);
       refetch();
     },
@@ -124,7 +182,9 @@ const MoneyDropDetailsScreen = () => {
     if (!data) {
       return;
     }
+
     await Clipboard.setStringAsync(data.shareable_link);
+    await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setCopyDone(true);
     setTimeout(() => setCopyDone(false), 1600);
   };
@@ -133,11 +193,15 @@ const MoneyDropDetailsScreen = () => {
     if (!data) {
       return;
     }
-    await Share.share({
-      title: data.title,
-      message: `Claim this money drop: ${data.shareable_link}`,
-      url: data.shareable_link,
-    });
+
+    try {
+      await Share.share({
+        message: `Check out this MoneyDrop: ${data.shareable_link}`,
+        url: data.shareable_link,
+      });
+    } catch (shareError) {
+      console.warn('Error sharing:', shareError);
+    }
   };
 
   const getQRBase64 = () =>
@@ -146,11 +210,13 @@ const MoneyDropDetailsScreen = () => {
         reject(new Error('QR code is unavailable.'));
         return;
       }
+
       qrRef.current.toDataURL((raw: string) => {
         if (!raw) {
           reject(new Error('Could not generate QR image.'));
           return;
         }
+
         resolve(raw);
       });
     });
@@ -161,6 +227,8 @@ const MoneyDropDetailsScreen = () => {
     }
 
     try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
       const permission = await MediaLibrary.requestPermissionsAsync();
       if (!permission.granted) {
         Alert.alert('Permission Required', 'Allow Photos access to download your QR code.');
@@ -197,9 +265,10 @@ const MoneyDropDetailsScreen = () => {
     if (!data) {
       return;
     }
+
     Alert.alert(
-      'End MoneyDrop?',
-      'This will stop claims immediately and refund remaining balance.',
+      'End MoneyDrop',
+      'Are you sure you want to end this MoneyDrop? This action cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -215,10 +284,12 @@ const MoneyDropDetailsScreen = () => {
     if (!data?.lock_enabled) {
       return;
     }
+
     if (showPassword) {
       setShowPassword(false);
       return;
     }
+
     if (revealedPassword) {
       setShowPassword(true);
       return;
@@ -233,225 +304,205 @@ const MoneyDropDetailsScreen = () => {
   };
 
   return (
-    <View style={styles.root}>
-      <LinearGradient
-        colors={['#1A1B1E', '#0C0D0F', BG_BOTTOM]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={styles.backgroundGradient}
-      />
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          <TouchableOpacity
-            activeOpacity={0.8}
-            style={styles.backButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back" size={24} color="#F4F4F5" />
-          </TouchableOpacity>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.backgroundContainer} pointerEvents="none">
+        <SvgXml
+          xml={backgroundSvg}
+          width={SCREEN_WIDTH}
+          height={SCREEN_HEIGHT}
+          pointerEvents="none"
+        />
+      </View>
 
-          {isLoading ? (
-            <View style={styles.centerState}>
-              <ActivityIndicator size="small" color={BRAND_YELLOW} />
-              <Text style={styles.centerText}>Loading drop details...</Text>
-            </View>
-          ) : error || !data ? (
-            <View style={styles.centerState}>
-              <Ionicons name="warning-outline" size={32} color="#F59E0B" />
-              <Text style={styles.centerTitle}>Unable to load drop</Text>
-              <Text style={styles.centerText}>{error?.message || 'Money drop not found.'}</Text>
-            </View>
-          ) : (
-            <>
-              <Text style={styles.screenTitle}>MONEYDROP</Text>
+      <View style={styles.topBar} pointerEvents="box-none">
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <BackIcon width={24} height={24} />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        contentInsetAdjustmentBehavior="automatic"
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
+      >
+        {isLoading ? (
+          <View style={styles.stateContainer}>
+            <ActivityIndicator size="small" color="#FFD300" />
+            <Text style={styles.stateText}>Loading drop details...</Text>
+          </View>
+        ) : error || !data ? (
+          <View style={styles.stateContainer}>
+            <Text style={styles.stateText}>{error?.message || 'Money drop not found.'}</Text>
+          </View>
+        ) : (
+          <>
+            <Text style={styles.headerTitle}>MONEYDROP</Text>
+
+            <View style={styles.balanceContainer}>
               <Text style={styles.balanceAmount}>{formatCurrency(currentBalance)}</Text>
               <Text style={styles.balanceLabel}>Current Balance</Text>
+            </View>
 
-              <View style={styles.statusHeader}>
-                <Text style={styles.dropName}>{data.title}</Text>
-                <Text
-                  style={[styles.statusText, isActive ? styles.statusLive : styles.statusEnded]}
-                >
-                  {data.status_label || (isActive ? 'Live' : 'Ended')}
-                </Text>
-              </View>
+            <View style={styles.dropHeader}>
+              <Text style={styles.dropTitleText} numberOfLines={1}>
+                {data.title}
+              </Text>
+              <Text style={[styles.statusText, isLive ? styles.liveStatus : styles.endedStatus]}>
+                {data.status_label || (isLive ? 'Live' : 'Ended')}
+              </Text>
+            </View>
 
-              <View style={styles.detailsCard}>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Title</Text>
-                  <Text style={styles.detailValue}>{data.title}</Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Total Amount</Text>
-                  <Text style={styles.detailValue}>{formatCurrency(data.total_amount)}</Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Amount per Person</Text>
-                  <Text style={styles.detailValue}>{formatCurrency(data.amount_per_person)}</Text>
-                </View>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Number of people</Text>
-                  <Text style={styles.detailValue}>{data.number_of_people}</Text>
-                </View>
-                {data.lock_enabled ? (
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Drop Password</Text>
-                    <View style={styles.passwordValueWrap}>
-                      <Text style={styles.detailValue}>
-                        {showPassword && revealedPassword
-                          ? revealedPassword
-                          : data.lock_password_masked || '**********'}
-                      </Text>
-                      <TouchableOpacity
-                        activeOpacity={0.85}
-                        onPress={onTogglePasswordVisibility}
-                        disabled={isRevealingPassword}
-                      >
-                        <Text style={styles.togglePasswordText}>
-                          {showPassword
-                            ? 'Hide Password'
-                            : isRevealingPassword
-                              ? 'Verifying...'
-                              : 'View Password'}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ) : null}
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Expires</Text>
-                  <Text style={styles.detailValue}>{formatDateTime(data.expiry_timestamp)}</Text>
-                </View>
-              </View>
+            <View style={styles.summaryCard}>
+              <DetailRow label="Title" value={data.title} />
+              <DetailRow label="Total Amount" value={formatCurrency(data.total_amount)} />
+              <DetailRow label="Amount per Person" value={formatCurrency(data.amount_per_person)} />
+              <DetailRow label="Number of people" value={String(data.number_of_people)} />
+              {data.lock_enabled ? (
+                <DetailRow
+                  label="Drop Pin"
+                  value={revealedPassword || '****'}
+                  isPin
+                  showPassword={showPassword}
+                  isRevealingPassword={isRevealingPassword}
+                  onTogglePasswordVisibility={onTogglePasswordVisibility}
+                />
+              ) : null}
+              <DetailRow label="Expires" value={formatDateTime(data.expiry_timestamp)} />
+            </View>
 
-              {isActive ? (
-                <>
-                  <View style={styles.qrCard}>
-                    <View style={styles.qrCodeFrame}>
+            <View style={styles.mainDivider} />
+
+            {isLive ? (
+              <>
+                <View style={styles.qrSection}>
+                  <View style={styles.qrContainer}>
+                    <View style={styles.qrCodeWrapper}>
                       <QRCode
                         getRef={(ref) => {
                           qrRef.current = ref;
                         }}
                         value={data.qr_code_content}
-                        size={220}
-                        color="#FFFFFF"
-                        backgroundColor="#1E2024"
+                        size={SCREEN_WIDTH * 0.6}
+                        color="white"
+                        backgroundColor="transparent"
                       />
-                      <View style={styles.qrBadge}>
-                        <Ionicons name="gift-outline" size={30} color={BRAND_YELLOW} />
+                      <View style={styles.qrLogoCenter}>
+                        <MoneyDropIcon width={45} height={45} color="#FFD300" />
                       </View>
                     </View>
-                    <Text style={styles.qrHint}>Scan QR to claim</Text>
+                    <Text style={styles.qrSubtitle}>Scan QR to claim</Text>
                   </View>
 
-                  <TouchableOpacity
-                    activeOpacity={0.86}
-                    style={styles.secondaryButton}
-                    onPress={onDownloadQR}
-                  >
-                    <Ionicons name="download-outline" size={18} color="#F4F5F7" />
-                    <Text style={styles.secondaryButtonText}>Download</Text>
+                  <TouchableOpacity style={styles.downloadButton} onPress={onDownloadQR}>
+                    <DownloadIcon width={20} height={20} color="#FFFFFF" />
+                    <Text style={styles.downloadButtonText}>Download</Text>
                   </TouchableOpacity>
+                </View>
 
-                  <Text style={styles.shareLabel}>Sharable Link</Text>
-                  <View style={styles.linkField}>
+                <View style={styles.sharableLinkSection}>
+                  <Text style={styles.sectionLabel}>Sharable Link</Text>
+                  <View style={styles.linkInputContainer}>
                     <Text style={styles.linkText} numberOfLines={1}>
                       {data.shareable_link}
                     </Text>
-                    <TouchableOpacity activeOpacity={0.8} onPress={onCopyLink}>
-                      <Ionicons
-                        name={copyDone ? 'checkmark-circle' : 'copy-outline'}
-                        size={20}
-                        color={copyDone ? BRAND_YELLOW : '#E6E8ED'}
-                      />
+                    <TouchableOpacity style={styles.copyButton} onPress={onCopyLink}>
+                      <CopyIcon width={20} height={20} color="#FFFFFF" />
                     </TouchableOpacity>
                   </View>
 
-                  <TouchableOpacity
-                    activeOpacity={0.86}
-                    style={styles.shareButton}
-                    onPress={onShareLink}
-                  >
-                    <Ionicons name="share-social-outline" size={18} color="#A7ABB2" />
-                    <Text style={styles.shareButtonText}>Share Link</Text>
+                  {copyDone ? <Text style={styles.copyDoneText}>Link copied.</Text> : null}
+
+                  <TouchableOpacity style={styles.shareLinkButton} onPress={onShareLink}>
+                    <ShareIcon width={20} height={20} color="#FFFFFF" />
+                    <Text style={styles.shareLinkButtonText}>Share Link</Text>
                   </TouchableOpacity>
-                </>
-              ) : null}
+                </View>
+              </>
+            ) : null}
 
-              <View style={styles.claimersHeader}>
-                <Text style={styles.claimersTitle}>MoneyDrop Claimers</Text>
-                <TouchableOpacity
-                  activeOpacity={0.86}
-                  style={styles.viewAllButton}
-                  onPress={() =>
-                    navigation.navigate('MoneyDropClaimers', { dropId: data.id, title: data.title })
-                  }
-                >
+            <View style={styles.claimersHeader}>
+              <Text style={styles.sectionLabel}>MoneyDrop Claimers</Text>
+              <TouchableOpacity
+                onPress={() =>
+                  navigation.navigate('MoneyDropClaimers', { dropId: data.id, title: data.title })
+                }
+              >
+                <View style={styles.viewAllBtn}>
                   <Text style={styles.viewAllText}>View all</Text>
-                </TouchableOpacity>
-              </View>
+                </View>
+              </TouchableOpacity>
+            </View>
 
+            <View style={styles.claimersList}>
               {previewClaimers.length > 0 ? (
-                <View style={styles.claimersList}>
-                  {previewClaimers.map((claimer) => (
+                previewClaimers.map((claimer) => {
+                  const initials = claimer.username.slice(0, 1).toUpperCase();
+
+                  return (
                     <View
-                      style={styles.claimerCard}
                       key={`${claimer.user_id}-${claimer.claimed_at}`}
+                      style={styles.claimerCard}
                     >
-                      <View style={styles.claimerAvatar}>
-                        <Text style={styles.claimerAvatarText}>
-                          {claimer.username.slice(0, 1).toUpperCase()}
-                        </Text>
+                      <View style={styles.avatarContainer}>
+                        <Text style={styles.avatarText}>{initials}</Text>
                       </View>
-                      <View style={styles.claimerMiddle}>
-                        <Text style={styles.claimerUsername}>{claimer.username}</Text>
+
+                      <View style={styles.claimerInfo}>
+                        <View style={styles.claimerNameRow}>
+                          <Text style={styles.claimerUsername}>{claimer.username}</Text>
+                        </View>
+
                         {claimer.full_name ? (
                           <Text style={styles.claimerFullName}>{claimer.full_name}</Text>
                         ) : null}
-                        <View style={styles.claimedDateWrap}>
-                          <Ionicons name="calendar-outline" size={14} color="#303236" />
-                          <Text style={styles.claimedDateText}>
+
+                        <View style={styles.claimerDateRow}>
+                          <CalendarIcon width={12} height={12} color="#6C6B6B" />
+                          <Text style={styles.claimerDate}>
                             {formatDateOnly(claimer.claimed_at)}
                           </Text>
                         </View>
                       </View>
+
                       <Text
                         style={styles.claimerAmount}
-                      >{`+ ${formatCurrency(claimer.amount_claimed)}`}</Text>
+                      >{`- ${formatCurrency(claimer.amount_claimed)}`}</Text>
                     </View>
-                  ))}
-                </View>
+                  );
+                })
               ) : (
-                <View style={styles.emptyClaimersCard}>
-                  <Text style={styles.emptyClaimersText}>No claims yet.</Text>
-                </View>
+                <Text style={styles.emptyClaimersText}>No claims yet.</Text>
               )}
+            </View>
 
-              <View style={styles.noteCard}>
-                <Ionicons name="shield-checkmark" size={18} color={BRAND_YELLOW} />
-                <Text style={styles.noteText}>
-                  Funds are stored in a dedicated account. Unclaimed funds will be automatically
-                  refunded after expiry.
-                </Text>
+            <View style={styles.infoDivider} />
+
+            <View style={styles.infoBanner}>
+              <View style={styles.infoIconContainer}>
+                <AlarmIcon width={22} height={25} />
               </View>
+              <Text style={styles.infoText}>
+                Funds are stored in a dedicated account. Unclaimed funds will be automatically
+                refunded after expiry.
+              </Text>
+            </View>
 
-              {data.can_end_drop ? (
-                <TouchableOpacity
-                  activeOpacity={0.86}
-                  style={[styles.endDropButton, isEnding && styles.endDropButtonDisabled]}
-                  onPress={confirmEndDrop}
-                  disabled={isEnding}
-                >
-                  <Text style={styles.endDropText}>{isEnding ? 'Ending Drop...' : 'End Drop'}</Text>
-                </TouchableOpacity>
-              ) : null}
-            </>
-          )}
-        </ScrollView>
-      </SafeAreaView>
+            {data.can_end_drop ? (
+              <TouchableOpacity
+                style={[styles.endDropButton, isEnding && styles.endDropButtonDisabled]}
+                onPress={confirmEndDrop}
+                disabled={isEnding}
+              >
+                <Text style={styles.endDropText}>{isEnding ? 'Ending Drop...' : 'End Drop'}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </>
+        )}
+      </ScrollView>
+
       <PinInputModal
         visible={isModalVisible}
         onClose={closeModal}
@@ -459,347 +510,380 @@ const MoneyDropDetailsScreen = () => {
         error={pinError}
         clearError={clearPinError}
       />
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  root: {
+  container: {
     flex: 1,
-    backgroundColor: BG_BOTTOM,
+    backgroundColor: '#000000',
   },
-  backgroundGradient: {
-    ...StyleSheet.absoluteFillObject,
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
-  safeArea: {
+  topBar: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 10,
+  },
+  backButton: {
+    padding: 4,
+  },
+  scrollView: {
     flex: 1,
   },
   scrollContent: {
     paddingHorizontal: 20,
     paddingBottom: 40,
   },
-  backButton: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-    marginBottom: 6,
-  },
-  centerState: {
-    marginTop: 120,
+  stateContainer: {
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 80,
   },
-  centerTitle: {
-    color: '#F4F5F7',
-    fontSize: 24,
-    fontWeight: '700',
-    marginTop: 10,
-  },
-  centerText: {
-    color: '#8A8E95',
-    fontSize: 15,
-    marginTop: 6,
-    textAlign: 'center',
-  },
-  screenTitle: {
-    color: '#F0F1F3',
-    fontWeight: '700',
-    fontSize: 30,
-    letterSpacing: 0.4,
+  stateText: {
+    color: '#9FA1A6',
+    fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
     textAlign: 'center',
     marginTop: 8,
   },
-  balanceAmount: {
-    color: '#F5F5F7',
-    fontSize: 46,
-    fontWeight: '700',
+  headerTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
+    letterSpacing: 2,
     textAlign: 'center',
-    marginTop: 20,
+    marginBottom: 20,
+    opacity: 0.8,
+  },
+  balanceContainer: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  balanceAmount: {
+    fontSize: 40,
+    color: '#FFFFFF',
+    fontFamily: 'ArtificTrial-Semibold',
+    marginBottom: 4,
   },
   balanceLabel: {
-    color: '#63666D',
-    fontSize: 16,
-    textDecorationLine: 'underline',
-    textAlign: 'center',
-    marginTop: 4,
-    marginBottom: 20,
+    fontSize: 14,
+    color: '#6C6B6B',
+    fontFamily: 'Montserrat_400Regular',
   },
-  statusHeader: {
+  dropHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 10,
   },
-  dropName: {
-    color: '#F5F6F8',
-    fontSize: 24,
-    fontWeight: '700',
+  dropTitleText: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontFamily: 'Montserrat_600SemiBold',
     flex: 1,
-    marginRight: 10,
   },
   statusText: {
     fontSize: 16,
-    fontWeight: '700',
+    fontFamily: 'Montserrat_600SemiBold',
   },
-  statusLive: {
-    color: BRAND_YELLOW,
+  liveStatus: {
+    color: '#FFD300',
   },
-  statusEnded: {
-    color: '#8A8E95',
+  endedStatus: {
+    color: '#6C6B6B',
   },
-  detailsCard: {
-    borderRadius: 12,
+  summaryCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1,
-    borderColor: CARD_BORDER,
-    backgroundColor: CARD_BG,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginBottom: 14,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 16,
+    padding: 16,
+    gap: 24,
   },
   detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 10,
-    gap: 12,
   },
   detailLabel: {
-    color: '#7C8088',
-    fontSize: 16,
-    flex: 1,
+    color: '#6C6B6B',
+    fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
   },
   detailValue: {
-    color: '#F3F4F6',
-    fontSize: 16,
-    fontWeight: '500',
-    textAlign: 'right',
-    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
   },
-  passwordValueWrap: {
+  detailValueContainer: {
     flex: 1,
     alignItems: 'flex-end',
   },
-  togglePasswordText: {
-    color: BRAND_YELLOW,
-    fontSize: 12,
-    marginTop: 4,
-    textDecorationLine: 'underline',
+  pinContainer: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: 4,
   },
-  qrCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
-    backgroundColor: CARD_BG,
-    padding: 14,
+  pinValueBox: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+  },
+  hidePinText: {
+    color: '#6C6B6B',
+    fontSize: 10,
+    fontFamily: 'Montserrat_400Regular',
+    textDecorationLine: 'underline',
+    marginTop: 2,
+  },
+  mainDivider: {
+    height: 1,
+    backgroundColor: '#6C6B6B',
+    marginVertical: 24,
+  },
+  qrSection: {
     alignItems: 'center',
+    marginBottom: 32,
+  },
+  qrContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    padding: 24,
+    borderRadius: 24,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    width: '100%',
+    alignItems: 'center',
+  },
+  qrCodeWrapper: {
+    position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  qrLogoCenter: {
+    position: 'absolute',
+    backgroundColor: '#202020',
+    width: 60,
+    height: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  qrSubtitle: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
+    marginTop: 32,
+  },
+  downloadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    gap: 8,
+    width: '100%',
+    justifyContent: 'center',
+  },
+  downloadButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Montserrat_600SemiBold',
+  },
+  sharableLinkSection: {
+    marginBottom: 32,
+  },
+  sectionLabel: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
     marginBottom: 12,
   },
-  qrCodeFrame: {
-    width: 260,
-    height: 260,
+  linkInputContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 10,
-    backgroundColor: '#1E2024',
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  qrBadge: {
-    position: 'absolute',
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#1E2024',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,211,0,0.34)',
-  },
-  qrHint: {
-    color: '#6E7279',
-    fontSize: 16,
-  },
-  secondaryButton: {
-    height: 52,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
-    backgroundColor: CARD_BG,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    marginBottom: 14,
-  },
-  secondaryButtonText: {
-    color: '#F4F5F7',
-    fontSize: 17,
-    fontWeight: '700',
-    marginLeft: 8,
-  },
-  shareLabel: {
-    color: '#E8EAED',
-    fontSize: 16,
-    marginBottom: 8,
-  },
-  linkField: {
-    height: 54,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
-    backgroundColor: CARD_BG,
+    height: 50,
+    marginBottom: 12,
+    gap: 8,
     paddingHorizontal: 12,
-    alignItems: 'center',
-    flexDirection: 'row',
-    marginBottom: 10,
   },
   linkText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
     flex: 1,
-    color: '#E6E8ED',
-    fontSize: 16,
-    marginRight: 8,
-    textDecorationLine: 'underline',
   },
-  shareButton: {
-    height: 52,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#5B5F67',
-    alignItems: 'center',
-    justifyContent: 'center',
+  copyButton: {
+    padding: 8,
+  },
+  copyDoneText: {
+    color: '#FFD300',
+    fontSize: 12,
+    fontFamily: 'Montserrat_400Regular',
+    marginTop: -4,
+    marginBottom: 8,
+    textAlign: 'right',
+  },
+  shareLinkButton: {
     flexDirection: 'row',
-    marginBottom: 16,
+    alignItems: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    gap: 8,
+    width: '100%',
+    justifyContent: 'center',
   },
-  shareButtonText: {
-    color: '#A7ABB2',
+  shareLinkButtonText: {
+    color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '700',
-    marginLeft: 8,
+    fontFamily: 'Montserrat_400Regular',
   },
   claimersHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 16,
   },
-  claimersTitle: {
-    color: '#ECEDEF',
-    fontSize: 20,
-    fontWeight: '600',
-  },
-  viewAllButton: {
-    height: 40,
-    borderRadius: 12,
+  viewAllBtn: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: CARD_BORDER,
-    backgroundColor: CARD_BG,
-    paddingHorizontal: 14,
-    justifyContent: 'center',
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 8,
   },
   viewAllText: {
-    color: '#D8DADF',
-    fontSize: 15,
-    fontWeight: '500',
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
   },
   claimersList: {
-    gap: 10,
-    marginBottom: 14,
+    gap: 12,
   },
   claimerCard: {
-    backgroundColor: CLAIMER_BG,
-    borderRadius: 14,
-    padding: 10,
     flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 12,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
     alignItems: 'center',
   },
-  claimerAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 14,
-    backgroundColor: '#ABABFD',
+  avatarContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#EAEAEA',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
   },
-  claimerAvatarText: {
-    color: '#101215',
+  avatarText: {
+    color: '#000000',
     fontSize: 18,
-    fontWeight: '700',
+    fontFamily: 'Montserrat_600SemiBold',
   },
-  claimerMiddle: {
+  claimerInfo: {
     flex: 1,
-    marginRight: 6,
+  },
+  claimerNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginBottom: 4,
   },
   claimerUsername: {
-    color: '#08090A',
+    color: '#000000',
     fontSize: 16,
-    fontWeight: '700',
-  },
-  claimerFullName: {
-    color: '#303236',
-    fontSize: 15,
-    marginTop: 1,
-  },
-  claimedDateWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 3,
-  },
-  claimedDateText: {
-    color: '#303236',
-    fontSize: 14,
-    marginLeft: 5,
+    fontFamily: 'Montserrat_600SemiBold',
   },
   claimerAmount: {
-    color: '#08090A',
-    fontSize: 16,
-    fontWeight: '600',
+    color: '#000000',
+    fontSize: 14,
+    fontFamily: 'Montserrat_600SemiBold',
   },
-  emptyClaimersCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
-    backgroundColor: CARD_BG,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 14,
+  claimerFullName: {
+    color: '#6C6B6B',
+    fontSize: 12,
+    fontFamily: 'Montserrat_400Regular',
+    marginBottom: 4,
   },
-  emptyClaimersText: {
-    color: '#8A8E95',
-    fontSize: 15,
-  },
-  noteCard: {
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    borderStyle: 'dashed',
-    padding: 12,
+  claimerDateRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 18,
+    gap: 4,
   },
-  noteText: {
-    color: '#8A8E95',
-    fontSize: 15,
-    lineHeight: 20,
-    marginLeft: 8,
+  claimerDate: {
+    color: '#6C6B6B',
+    fontSize: 12,
+    fontFamily: 'Montserrat_400Regular',
+  },
+  emptyClaimersText: {
+    color: '#6C6B6B',
+    fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
+  },
+  infoDivider: {
+    height: 1,
+    backgroundColor: '#6C6B6B',
+    marginVertical: 24,
+  },
+  infoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 20,
+    backgroundColor: 'transparent',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderStyle: 'dashed',
+    gap: 12,
+    marginBottom: 32,
+  },
+  infoIconContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  infoText: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
+    lineHeight: 18,
     flex: 1,
   },
   endDropButton: {
-    height: 54,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#61646C',
+    paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#6C6B6B',
+    borderRadius: 12,
+    marginBottom: 12,
   },
   endDropButtonDisabled: {
     opacity: 0.65,
   },
   endDropText: {
-    color: '#FF4B4B',
-    fontSize: 22,
-    fontWeight: '700',
+    color: '#FF3737',
+    fontSize: 16,
+    fontFamily: 'Montserrat_700Bold',
   },
 });
 

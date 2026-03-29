@@ -1,410 +1,372 @@
-import React, { useMemo, useState } from 'react';
-import { Alert, StyleSheet, Switch, Text, TouchableOpacity, View, ScrollView } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import AnimatedPageWrapper from '@/components/AnimatedPageWrapper';
+import BottomNavbar from '@/components/bottom-navbar';
+import { fetchKycStatus } from '@/api/authApi';
+import { useAuth } from '@/hooks/useAuth';
+import type { AppStackParamList } from '@/navigation/AppStack';
+import type { ProfileStackParamList } from '@/navigation/ProfileStack';
+import { useSecurityStore } from '@/store/useSecurityStore';
+import { useNavigation, CompositeNavigationProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@tanstack/react-query';
+import Constants from 'expo-constants';
+import { StatusBar } from 'expo-status-bar';
+import React from 'react';
+import {
+  Alert,
+  Dimensions,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { SvgXml } from 'react-native-svg';
 
-import { useAuth } from '@/hooks/useAuth';
-import { ProfileStackParamList } from '@/navigation/ProfileStack';
-import { useUserProfile, useReceivingPreference } from '@/api/transactionApi';
-import { useListBeneficiaries } from '@/api/accountApi';
-import { fetchKycStatus } from '@/api/authApi';
-import { useSecurityStore } from '@/store/useSecurityStore';
-import theme from '@/constants/theme';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-type NavigationProp = NativeStackNavigationProp<ProfileStackParamList, 'ProfileHome'>;
+const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="375" height="812" fill="url(#paint0_linear_708_2445)"/>
+<defs>
+<linearGradient id="paint0_linear_708_2445" x1="187.5" y1="0" x2="187.5" y2="812" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2B2B2B"/>
+<stop offset="0.778846" stop-color="#0F0F0F"/>
+</linearGradient>
+</defs>
+</svg>`;
 
-type TabType = 'profile' | 'account';
+type SettingsNav = CompositeNavigationProp<
+  NativeStackNavigationProp<ProfileStackParamList, 'ProfileHome'>,
+  NativeStackNavigationProp<AppStackParamList>
+>;
 
-const BRAND_YELLOW = '#FFD400';
-const BG_BOTTOM = '#060708';
-const { fontSizes, fontWeights, spacing } = theme;
+type NavTab = 'home' | 'settings' | 'gifts' | 'support';
 
-const rowIcon = (name: React.ComponentProps<typeof Ionicons>['name']) => (
-  <Ionicons name={name} size={20} color="#EDEDED" />
-);
+type SettingsItem = {
+  id: string;
+  label: string;
+  value?: string;
+  hasArrow?: boolean;
+  onPress?: () => void;
+  rightElement?: React.ReactNode;
+};
+
+type SettingsSection = {
+  title: string;
+  items: SettingsItem[];
+};
+
+const SettingsRow = ({ item, isLast }: { item: SettingsItem; isLast: boolean }) => {
+  const content = (
+    <View style={[styles.settingsItem, !isLast && styles.itemBorder]}>
+      <Text style={styles.itemLabel}>{item.label}</Text>
+      <View style={styles.itemRight}>
+        {item.value ? <Text style={styles.itemValue}>{item.value}</Text> : null}
+        {item.rightElement}
+        {item.hasArrow ? <Text style={styles.itemArrow}>›</Text> : null}
+      </View>
+    </View>
+  );
+
+  if (item.onPress) {
+    return (
+      <TouchableOpacity activeOpacity={0.75} onPress={item.onPress}>
+        {content}
+      </TouchableOpacity>
+    );
+  }
+
+  return content;
+};
 
 const ProfileScreen = () => {
-  const navigation = useNavigation<NavigationProp>();
+  const navigation = useNavigation<SettingsNav>();
   const { signOut } = useAuth();
-  const { data: userProfile } = useUserProfile();
-  const { data: receivingPreference } = useReceivingPreference();
-  const { data: beneficiaries } = useListBeneficiaries();
   const { biometricsEnabled, setBiometricsEnabled } = useSecurityStore();
 
-  const { data: kycStatus, isLoading: isKycLoading } = useQuery({
+  const { data: kycStatus } = useQuery({
     queryKey: ['kyc-status'],
     queryFn: fetchKycStatus,
   });
 
-  const [activeTab, setActiveTab] = useState<TabType>('profile');
+  const appVersion = Constants.expoConfig?.version ?? '1.0.0';
 
-  const displayName = useMemo(() => {
-    if (userProfile?.username && userProfile.username.trim() !== '') {
-      return userProfile.username;
-    }
-    if (userProfile?.full_name && userProfile.full_name.trim() !== '') {
-      return userProfile.full_name;
-    }
-    return 'Transfa User';
-  }, [userProfile?.full_name, userProfile?.username]);
+  const verificationLabel = (kycStatus?.current_tier ?? 1) >= 2 ? 'Verified' : 'Unverified';
 
-  const receivingLabel = useMemo(() => {
-    if (!receivingPreference?.use_external_account) {
-      return 'In-App Wallet';
-    }
+  const openPlaceholder = (title: string) => {
+    Alert.alert(title, 'This option will be enabled in a follow-up update.');
+  };
 
-    const selectedExternalBeneficiary =
-      beneficiaries?.find((item) => item.id === receivingPreference.default_beneficiary_id) ||
-      beneficiaries?.find((item) => item.is_default) ||
-      beneficiaries?.[0];
-
-    if (selectedExternalBeneficiary?.account_name) {
-      return `${selectedExternalBeneficiary.account_name} (${selectedExternalBeneficiary.bank_name})`;
-    }
-    return 'External Account';
-  }, [
-    beneficiaries,
-    receivingPreference?.default_beneficiary_id,
-    receivingPreference?.use_external_account,
-  ]);
-
-  const accountRows = [
+  const settingsData: SettingsSection[] = [
     {
-      key: 'kyc',
-      title: 'KYC level',
-      icon: rowIcon('id-card-outline'),
-      value: isKycLoading ? '...' : `Tier ${kycStatus?.current_tier ?? 1}`,
-      onPress: () => navigation.navigate('KycLevel'),
+      title: 'Account',
+      items: [
+        {
+          id: '1',
+          label: 'Edit Profile',
+          hasArrow: true,
+          onPress: () => openPlaceholder('Edit Profile'),
+        },
+        {
+          id: '2',
+          label: 'Change PIN',
+          hasArrow: true,
+          onPress: () => navigation.navigate('PinSettings'),
+        },
+        {
+          id: '3',
+          label: 'Verification',
+          value: verificationLabel,
+          hasArrow: true,
+          onPress: () => navigation.navigate('KycLevel'),
+        },
+      ],
     },
     {
-      key: 'linked',
-      title: 'Linked Account',
-      icon: rowIcon('wallet-outline'),
-      value: '',
-      onPress: () => navigation.navigate('Beneficiaries'),
+      title: 'Preferences',
+      items: [
+        {
+          id: '4',
+          label: 'Notifications',
+          hasArrow: true,
+          onPress: () => navigation.navigate('NotificationCenter'),
+        },
+        {
+          id: '5',
+          label: 'Currency',
+          value: 'NGN (₦)',
+          hasArrow: true,
+          onPress: () => openPlaceholder('Currency'),
+        },
+        {
+          id: '6',
+          label: 'Language',
+          value: 'English',
+          hasArrow: true,
+          onPress: () => openPlaceholder('Language'),
+        },
+      ],
     },
     {
-      key: 'destination',
-      title: 'Receiving Destination',
-      icon: rowIcon('card-outline'),
-      value: receivingLabel,
-      onPress: () => navigation.navigate('ReceivingPreferences'),
+      title: 'Security',
+      items: [
+        {
+          id: '7',
+          label: 'Biometric Login',
+          hasArrow: false,
+          rightElement: (
+            <Switch
+              value={biometricsEnabled}
+              onValueChange={setBiometricsEnabled}
+              trackColor={{ false: '#4A4A4A', true: '#FFD300' }}
+              thumbColor={biometricsEnabled ? '#111111' : '#F2F2F2'}
+            />
+          ),
+        },
+        {
+          id: '8',
+          label: 'Two-Factor Auth',
+          hasArrow: true,
+          onPress: () => openPlaceholder('Two-Factor Auth'),
+        },
+        {
+          id: '9',
+          label: 'Active Sessions',
+          hasArrow: true,
+          onPress: () => openPlaceholder('Active Sessions'),
+        },
+      ],
     },
     {
-      key: 'pin',
-      title: 'PIN',
-      icon: rowIcon('lock-closed-outline'),
-      value: '',
-      onPress: () => navigation.navigate('PinSettings'),
+      title: 'About',
+      items: [
+        {
+          id: '10',
+          label: 'Terms of Service',
+          hasArrow: true,
+          onPress: () => openPlaceholder('Terms of Service'),
+        },
+        {
+          id: '11',
+          label: 'Privacy Policy',
+          hasArrow: true,
+          onPress: () => openPlaceholder('Privacy Policy'),
+        },
+        {
+          id: '12',
+          label: 'App Version',
+          value: appVersion,
+          hasArrow: false,
+        },
+      ],
     },
   ];
 
+  const handleTabPress = (tab: NavTab) => {
+    if (tab === 'home') {
+      navigation.navigate('AppTabs', { screen: 'Home' });
+      return;
+    }
+
+    if (tab === 'settings') {
+      navigation.navigate('AppTabs', { screen: 'Settings', params: { screen: 'ProfileHome' } });
+      return;
+    }
+
+    if (tab === 'gifts') {
+      navigation.navigate('AppTabs', { screen: 'MoneyDrop' });
+      return;
+    }
+
+    navigation.navigate('AppTabs', { screen: 'Support' });
+  };
+
   return (
-    <View style={styles.root}>
-      <LinearGradient
-        colors={['#1B1C1E', '#111214', BG_BOTTOM]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={StyleSheet.absoluteFillObject}
-      />
+    <SafeAreaView style={styles.container}>
+      <StatusBar style="light" />
 
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="arrow-back" size={24} color="#ECECEC" />
-          </TouchableOpacity>
+      <View style={styles.backgroundContainer} pointerEvents="none">
+        <SvgXml
+          xml={backgroundSvg}
+          width={SCREEN_WIDTH}
+          height={SCREEN_HEIGHT}
+          pointerEvents="none"
+        />
+      </View>
 
-          <View style={styles.avatarWrap}>
-            <View style={styles.avatarCircle}>
-              <Ionicons name="person" size={60} color="#0D0E10" />
-            </View>
-            <View style={styles.avatarCameraBadge}>
-              <Ionicons name="camera" size={14} color="#FFF" />
-            </View>
-          </View>
+      <AnimatedPageWrapper>
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          contentInsetAdjustmentBehavior="automatic"
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="handled"
+        >
+          <Text style={styles.headerTitle}>SETTINGS</Text>
 
-          <Text style={styles.username}>{displayName}</Text>
-          <Text style={styles.fullName}>{userProfile?.full_name || 'Complete your profile'}</Text>
-
-          <View style={styles.tabPill}>
-            <TouchableOpacity
-              style={[styles.tabButton, activeTab === 'profile' && styles.tabButtonActive]}
-              onPress={() => setActiveTab('profile')}
-            >
-              <Text style={[styles.tabText, activeTab === 'profile' && styles.tabTextActive]}>
-                User Profile
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tabButton, activeTab === 'account' && styles.tabButtonActive]}
-              onPress={() => setActiveTab('account')}
-            >
-              <Text style={[styles.tabText, activeTab === 'account' && styles.tabTextActive]}>
-                Account Settings
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {activeTab === 'profile' ? (
-            <View style={styles.group}>
-              <InfoRow
-                icon={rowIcon('mail-outline')}
-                label="Email"
-                value={userProfile?.email || 'Not set'}
-              />
-              <InfoRow
-                icon={rowIcon('call-outline')}
-                label="Phone number"
-                value={userProfile?.phone_number || 'Not set'}
-              />
-              <InfoRow
-                icon={rowIcon('shield-checkmark-outline')}
-                label="Privacy and Permissions"
-                value=""
-                onPress={() =>
-                  Alert.alert(
-                    'Privacy & Permissions',
-                    'This page will be enabled in a follow-up update.'
-                  )
-                }
-              />
-            </View>
-          ) : (
-            <View style={styles.group}>
-              {accountRows.map((row) => (
-                <InfoRow
-                  key={row.key}
-                  icon={row.icon}
-                  label={row.title}
-                  value={row.value}
-                  onPress={row.onPress}
-                />
-              ))}
-
-              <View style={styles.switchRow}>
-                <View style={styles.switchLeft}>
-                  {rowIcon('scan-circle-outline')}
-                  <Text style={styles.switchLabel}>Enable Biometrics</Text>
-                </View>
-                <Switch
-                  value={biometricsEnabled}
-                  onValueChange={setBiometricsEnabled}
-                  trackColor={{ false: '#5C5E62', true: '#FFD400' }}
-                  thumbColor={biometricsEnabled ? '#111214' : '#EEEEEE'}
-                />
+          {settingsData.map((section) => (
+            <View key={section.title} style={styles.section}>
+              <Text style={styles.sectionTitle}>{section.title}</Text>
+              <View style={styles.sectionCard}>
+                {section.items.map((item, idx) => (
+                  <SettingsRow
+                    key={item.id}
+                    item={item}
+                    isLast={idx === section.items.length - 1}
+                  />
+                ))}
               </View>
             </View>
-          )}
+          ))}
 
-          <TouchableOpacity style={styles.logoutButton} onPress={() => signOut()}>
-            <Ionicons name="log-out-outline" size={20} color="#FF2F2F" />
+          <TouchableOpacity
+            style={styles.logoutButton}
+            activeOpacity={0.75}
+            onPress={() => signOut()}
+          >
             <Text style={styles.logoutText}>Log Out</Text>
           </TouchableOpacity>
         </ScrollView>
-      </SafeAreaView>
-    </View>
-  );
-};
+      </AnimatedPageWrapper>
 
-const InfoRow = ({
-  icon,
-  label,
-  value,
-  onPress,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value?: string;
-  onPress?: () => void;
-}) => {
-  const content = (
-    <View style={styles.row}>
-      <View style={styles.rowLeft}>
-        {icon}
-        <Text style={styles.rowLabel}>{label}</Text>
-      </View>
-      <View style={styles.rowRight}>
-        {value ? <Text style={styles.rowValue}>{value}</Text> : null}
-        {onPress ? <Ionicons name="chevron-forward" size={18} color="#B5B6B8" /> : null}
-      </View>
-    </View>
-  );
-
-  if (!onPress) {
-    return content;
-  }
-
-  return (
-    <TouchableOpacity activeOpacity={0.8} onPress={onPress}>
-      {content}
-    </TouchableOpacity>
+      <BottomNavbar activeTab="settings" onTabPress={handleTabPress} visible />
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  root: {
+  container: {
     flex: 1,
-    backgroundColor: '#090A0B',
+    backgroundColor: '#000000',
   },
-  safeArea: {
-    flex: 1,
-  },
-  content: {
-    paddingHorizontal: spacing.s20,
-    paddingBottom: spacing.s32,
-  },
-  backButton: {
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 4,
-  },
-  avatarWrap: {
-    marginTop: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#F5D7A2',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarCameraBadge: {
+  backgroundContainer: {
     position: 'absolute',
-    right: -2,
-    bottom: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#BDBDBD',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#FFF',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
-  username: {
-    marginTop: 12,
-    textAlign: 'center',
-    color: BRAND_YELLOW,
-    fontSize: fontSizes['4xl'],
-    fontWeight: fontWeights.bold,
-    letterSpacing: -0.8,
-  },
-  fullName: {
-    marginTop: 2,
-    textAlign: 'center',
-    color: '#73767D',
-    fontSize: fontSizes.base,
-    fontWeight: fontWeights.medium,
-  },
-  tabPill: {
-    marginTop: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    borderRadius: 999,
-    padding: 4,
-    flexDirection: 'row',
-    backgroundColor: 'rgba(0,0,0,0.18)',
-  },
-  tabButton: {
+  scrollView: {
     flex: 1,
-    borderRadius: 999,
-    paddingVertical: 10,
-    alignItems: 'center',
   },
-  tabButtonActive: {
-    backgroundColor: 'rgba(255,255,255,0.12)',
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 120,
   },
-  tabText: {
-    color: '#8A8D92',
-    fontSize: fontSizes.sm,
-    fontWeight: fontWeights.semibold,
-  },
-  tabTextActive: {
+  headerTitle: {
     color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
+    letterSpacing: 1.2,
+    textAlign: 'center',
+    marginTop: 10,
+    marginBottom: 32,
   },
-  group: {
-    marginTop: 18,
-    gap: 10,
+  section: {
+    marginBottom: 24,
   },
-  row: {
-    minHeight: 62,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+  sectionTitle: {
+    color: '#6C6B6B',
+    fontSize: 12,
+    fontFamily: 'Montserrat_600SemiBold',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+  sectionCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    paddingHorizontal: 14,
+    borderColor: 'rgba(255, 255, 255, 0.03)',
+    overflow: 'hidden',
+  },
+  settingsItem: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
   },
-  rowLeft: {
+  itemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  itemLabel: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
+  },
+  itemRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    flex: 1,
+    gap: 8,
   },
-  rowRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    maxWidth: '58%',
+  itemValue: {
+    color: '#6C6B6B',
+    fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
   },
-  rowLabel: {
-    color: '#ECECEC',
-    fontSize: fontSizes.base,
-    fontWeight: fontWeights.medium,
-  },
-  rowValue: {
-    color: '#8E9095',
-    fontSize: fontSizes.sm,
-    fontWeight: fontWeights.medium,
-  },
-  switchRow: {
-    minHeight: 62,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    paddingHorizontal: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  switchLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  switchLabel: {
-    color: '#ECECEC',
-    fontSize: fontSizes.base,
-    fontWeight: fontWeights.medium,
+  itemArrow: {
+    color: '#6C6B6B',
+    fontSize: 22,
+    fontFamily: 'Montserrat_400Regular',
   },
   logoutButton: {
-    marginTop: 34,
-    minHeight: 62,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
-    paddingHorizontal: 14,
-    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 59, 48, 0.12)',
+    borderRadius: 16,
+    paddingVertical: 16,
     alignItems: 'center',
-    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 59, 48, 0.2)',
+    marginTop: 8,
   },
   logoutText: {
-    color: '#FF2F2F',
-    fontSize: fontSizes.lg,
-    fontWeight: fontWeights.semibold,
+    color: '#FF3B30',
+    fontSize: 16,
+    fontFamily: 'Montserrat_600SemiBold',
   },
 });
 

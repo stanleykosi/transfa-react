@@ -1,213 +1,253 @@
+import BackIcon from '@/assets/icons/back.svg';
+import MoneyDropIcon from '@/assets/icons/money-drop.svg';
+import { useClaimedMoneyDrops } from '@/api/transactionApi';
+import BottomNavbar from '@/components/bottom-navbar';
+import type { AppNavigationProp } from '@/types/navigation';
+import { formatCurrency } from '@/utils/formatCurrency';
+import { normalizeUsername } from '@/utils/username';
+import { useNavigation } from '@react-navigation/native';
 import React, { useMemo } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { SvgXml } from 'react-native-svg';
 
-import type { AppNavigationProp } from '@/types/navigation';
-import { useClaimedMoneyDrops } from '@/api/transactionApi';
-import { formatCurrency } from '@/utils/formatCurrency';
-import { normalizeUsername } from '@/utils/username';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const BG_BOTTOM = '#050607';
-const CARD_BG = 'rgba(255,255,255,0.08)';
-const CARD_BORDER = 'rgba(255,255,255,0.07)';
+const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="375" height="812" fill="url(#paint0_linear_708_2445)"/>
+<defs>
+<linearGradient id="paint0_linear_708_2445" x1="187.5" y1="0" x2="187.5" y2="812" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2B2B2B"/>
+<stop offset="0.778846" stop-color="#0F0F0F"/>
+</linearGradient>
+</defs>
+</svg>`;
 
-const formatDateOnly = (value: string) => {
+const formatDate = (value: string) => {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
     return value;
   }
-  return parsed.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
+
+  return parsed.toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
   });
 };
 
 const MoneyDropClaimedHistoryScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
   const { data, isLoading, error } = useClaimedMoneyDrops();
+
   const items = useMemo(() => data?.items ?? [], [data?.items]);
 
+  const handleTabPress = (tab: 'home' | 'settings' | 'gifts' | 'support') => {
+    if (tab === 'home') {
+      navigation.navigate('AppTabs', { screen: 'Home' });
+      return;
+    }
+
+    if (tab === 'settings') {
+      navigation.navigate('AppTabs', { screen: 'Settings', params: { screen: 'ProfileHome' } });
+      return;
+    }
+
+    if (tab === 'gifts') {
+      navigation.navigate('AppTabs', { screen: 'MoneyDrop' });
+      return;
+    }
+
+    navigation.navigate('AppTabs', { screen: 'Support' });
+  };
+
   return (
-    <View style={styles.root}>
-      <LinearGradient
-        colors={['#1A1B1E', '#0C0D0F', BG_BOTTOM]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={styles.backgroundGradient}
-      />
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <View style={styles.content}>
-          <View style={styles.headerRow}>
-            <TouchableOpacity
-              activeOpacity={0.8}
-              style={styles.backButton}
-              onPress={() => navigation.goBack()}
-            >
-              <Ionicons name="arrow-back" size={24} color="#F4F4F5" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>Claimed Drops</Text>
-            <View style={styles.backButton} />
+    <SafeAreaView style={styles.container}>
+      <View style={styles.backgroundContainer}>
+        <SvgXml xml={backgroundSvg} width={SCREEN_WIDTH} height={SCREEN_HEIGHT} />
+      </View>
+
+      <View style={styles.topBar}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <BackIcon width={24} height={24} color="#FFFFFF" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>CLAIMED DROPS</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      {isLoading ? (
+        <View style={styles.stateContainer}>
+          <ActivityIndicator size="small" color="#FFD300" />
+          <Text style={styles.stateText}>Loading claimed drops...</Text>
+        </View>
+      ) : error ? (
+        <View style={styles.stateContainer}>
+          <Text style={styles.stateText}>{error.message || 'Failed to load claimed drops.'}</Text>
+        </View>
+      ) : (
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.listContainer}>
+            {items.map((drop) => (
+              <View key={`${drop.drop_id}-${drop.claimed_at}`} style={styles.dropCard}>
+                <View style={styles.iconContainer}>
+                  <MoneyDropIcon width={24} height={24} color="#FFD300" />
+                </View>
+
+                <View style={styles.dropInfo}>
+                  <View style={styles.row}>
+                    <Text style={styles.dropTitle} numberOfLines={1}>
+                      {drop.title}
+                    </Text>
+                    <Text style={styles.dropAmount}>{formatCurrency(drop.amount_claimed)}</Text>
+                  </View>
+
+                  <View style={styles.row}>
+                    <Text
+                      style={styles.dropSubtext}
+                    >{`From: ${normalizeUsername(drop.creator_username)}`}</Text>
+                    <Text style={styles.dropSubtext}>{formatDate(drop.claimed_at)}</Text>
+                  </View>
+                </View>
+              </View>
+            ))}
           </View>
 
-          {isLoading ? (
-            <View style={styles.centerState}>
-              <ActivityIndicator size="small" color="#FFD300" />
-              <Text style={styles.centerText}>Loading claimed drops...</Text>
+          {items.length === 0 ? (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>You haven&apos;t claimed any drops yet.</Text>
             </View>
-          ) : error ? (
-            <View style={styles.centerState}>
-              <Text style={styles.centerText}>
-                {error.message || 'Failed to load claimed drops.'}
-              </Text>
-            </View>
-          ) : (
-            <ScrollView
-              contentContainerStyle={styles.listContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {items.length > 0 ? (
-                items.map((item) => (
-                  <View style={styles.itemCard} key={`${item.drop_id}-${item.claimed_at}`}>
-                    <View style={styles.itemTopRow}>
-                      <Text style={styles.itemTitle} numberOfLines={1}>
-                        {item.title}
-                      </Text>
-                      <Text
-                        style={styles.itemAmount}
-                      >{`+ ${formatCurrency(item.amount_claimed)}`}</Text>
-                    </View>
-                    <Text style={styles.itemCreator}>
-                      From {normalizeUsername(item.creator_username)}
-                    </Text>
-                    <View style={styles.itemDateWrap}>
-                      <Ionicons name="calendar-outline" size={14} color="#A0A4AC" />
-                      <Text style={styles.itemDate}>{formatDateOnly(item.claimed_at)}</Text>
-                    </View>
-                  </View>
-                ))
-              ) : (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyText}>You have not claimed any drop yet.</Text>
-                </View>
-              )}
-            </ScrollView>
-          )}
-        </View>
-      </SafeAreaView>
-    </View>
+          ) : null}
+        </ScrollView>
+      )}
+
+      <BottomNavbar activeTab="gifts" onTabPress={handleTabPress} visible />
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  root: {
+  container: {
     flex: 1,
-    backgroundColor: BG_BOTTOM,
+    backgroundColor: '#000000',
   },
-  backgroundGradient: {
-    ...StyleSheet.absoluteFillObject,
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
   },
-  safeArea: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  headerRow: {
+  topBar: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 14,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 20,
+    zIndex: 1,
   },
   backButton: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
+    padding: 4,
   },
   headerTitle: {
-    color: '#F4F5F7',
-    fontSize: 22,
-    fontWeight: '700',
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
+    letterSpacing: 1.2,
   },
-  centerState: {
+  scrollView: {
     flex: 1,
+    zIndex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 120,
+  },
+  listContainer: {
+    gap: 16,
+  },
+  dropCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 12,
+    padding: 16,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  iconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 211, 0, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  centerText: {
-    color: '#8A8E95',
-    fontSize: 15,
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  listContent: {
-    paddingBottom: 40,
-    gap: 12,
-  },
-  itemCard: {
-    borderRadius: 14,
     borderWidth: 1,
-    borderColor: CARD_BORDER,
-    backgroundColor: CARD_BG,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderColor: 'rgba(255, 211, 0, 0.3)',
   },
-  itemTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  itemTitle: {
+  dropInfo: {
     flex: 1,
-    color: '#F2F3F5',
-    fontSize: 17,
-    fontWeight: '700',
+    gap: 4,
   },
-  itemAmount: {
-    color: '#F2F3F5',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  itemCreator: {
-    color: '#A0A4AC',
-    fontSize: 15,
-    marginTop: 5,
-  },
-  itemDateWrap: {
+  row: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 6,
+    gap: 8,
   },
-  itemDate: {
-    color: '#A0A4AC',
-    fontSize: 14,
-    marginLeft: 5,
+  dropTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Montserrat_600SemiBold',
+    flex: 1,
   },
-  emptyState: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
-    backgroundColor: CARD_BG,
-    paddingVertical: 18,
+  dropAmount: {
+    color: '#FFD300',
+    fontSize: 16,
+    fontFamily: 'Montserrat_600SemiBold',
+  },
+  dropSubtext: {
+    color: '#6C6B6B',
+    fontSize: 12,
+    fontFamily: 'Montserrat_400Regular',
+    flex: 1,
+  },
+  emptyContainer: {
     alignItems: 'center',
-    marginTop: 10,
+    justifyContent: 'center',
+    marginTop: 100,
   },
   emptyText: {
-    color: '#8A8E95',
-    fontSize: 15,
+    color: '#6C6B6B',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
+  },
+  stateContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+  },
+  stateText: {
+    color: '#9FA1A6',
+    fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
+    textAlign: 'center',
+    marginTop: 8,
   },
 });
 
