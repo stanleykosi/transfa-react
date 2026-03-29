@@ -1,6 +1,16 @@
+import BackIcon from '@/assets/icons/back.svg';
+import CalendarIcon from '@/assets/icons/calendar.svg';
+import SearchIcon from '@/assets/icons/search.svg';
+import SettingsIcon from '@/assets/icons/settings.svg';
+import { useMoneyDropClaimers } from '@/api/transactionApi';
+import type { AppStackParamList } from '@/navigation/AppStack';
+import { formatCurrency } from '@/utils/formatCurrency';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Dimensions,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -8,26 +18,28 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { SvgXml } from 'react-native-svg';
 
-import type { AppStackParamList } from '@/navigation/AppStack';
-import type { AppNavigationProp } from '@/types/navigation';
-import { useMoneyDropClaimers } from '@/api/transactionApi';
-import { formatCurrency } from '@/utils/formatCurrency';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const BG_BOTTOM = '#050607';
-const CARD_BG = '#E7E8EA';
+const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="375" height="812" fill="url(#paint0_linear_708_2445)"/>
+<defs>
+<linearGradient id="paint0_linear_708_2445" x1="187.5" y1="0" x2="187.5" y2="812" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2B2B2B"/>
+<stop offset="0.778846" stop-color="#0F0F0F"/>
+</linearGradient>
+</defs>
+</svg>`;
 
 type MoneyDropClaimersRouteProp = RouteProp<AppStackParamList, 'MoneyDropClaimers'>;
 
-const formatDateOnly = (value: string) => {
+const formatDate = (value: string) => {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
     return value;
   }
+
   return parsed.toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -36,13 +48,13 @@ const formatDateOnly = (value: string) => {
 };
 
 const MoneyDropClaimersScreen = () => {
-  const navigation = useNavigation<AppNavigationProp>();
+  const navigation = useNavigation();
   const route = useRoute<MoneyDropClaimersRouteProp>();
   const { dropId } = route.params;
-  const [search, setSearch] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
 
   const { data, isLoading, error } = useMoneyDropClaimers(dropId, {
-    search,
+    search: searchQuery,
     limit: 100,
     offset: 0,
   });
@@ -50,218 +62,229 @@ const MoneyDropClaimersScreen = () => {
   const claimers = useMemo(() => data?.claimers ?? [], [data?.claimers]);
 
   return (
-    <View style={styles.root}>
-      <LinearGradient
-        colors={['#1A1B1E', '#0C0D0F', BG_BOTTOM]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={styles.backgroundGradient}
-      />
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <View style={styles.content}>
-          <View style={styles.headerRow}>
-            <TouchableOpacity
-              activeOpacity={0.8}
-              style={styles.iconButton}
-              onPress={() => navigation.goBack()}
-            >
-              <Ionicons name="arrow-back" size={24} color="#F4F4F5" />
-            </TouchableOpacity>
-            <Text style={styles.headerTitle}>MoneyDrop Claimers</Text>
-            <TouchableOpacity activeOpacity={0.8} style={styles.iconButton}>
-              <Ionicons name="settings-outline" size={22} color="#F4F4F5" />
-            </TouchableOpacity>
-          </View>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.backgroundContainer}>
+        <SvgXml xml={backgroundSvg} width={SCREEN_WIDTH} height={SCREEN_HEIGHT} />
+      </View>
 
-          <View style={styles.searchBox}>
-            <Ionicons name="search" size={22} color="#D7D9DD" />
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search user"
-              placeholderTextColor="#72767D"
-              style={styles.searchInput}
-            />
-          </View>
+      <View style={styles.topBar}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <BackIcon width={24} height={24} color="#FFFFFF" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>MoneyDrop Claimers</Text>
+        <TouchableOpacity style={styles.settingsButton}>
+          <SettingsIcon width={24} height={24} color="#FFFFFF" />
+        </TouchableOpacity>
+      </View>
 
-          {isLoading ? (
-            <View style={styles.centerState}>
-              <ActivityIndicator size="small" color="#FFD300" />
-              <Text style={styles.centerText}>Loading claimers...</Text>
-            </View>
-          ) : error ? (
-            <View style={styles.centerState}>
-              <Text style={styles.centerText}>{error.message || 'Failed to load claimers.'}</Text>
-            </View>
-          ) : (
-            <ScrollView
-              contentContainerStyle={styles.listContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {claimers.length > 0 ? (
-                claimers.map((claimer) => (
-                  <View style={styles.claimerCard} key={`${claimer.user_id}-${claimer.claimed_at}`}>
-                    <View style={styles.avatarWrap}>
-                      <Text style={styles.avatarText}>
-                        {claimer.username.slice(0, 1).toUpperCase()}
-                      </Text>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.searchContainer}>
+          <View style={styles.searchIconContainer}>
+            <SearchIcon width={18} height={18} color="#FFFFFF" />
+          </View>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search user"
+            placeholderTextColor="#6C6B6B"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+        </View>
+
+        {isLoading ? (
+          <View style={styles.stateContainer}>
+            <ActivityIndicator size="small" color="#FFD300" />
+            <Text style={styles.stateText}>Loading claimers...</Text>
+          </View>
+        ) : error ? (
+          <View style={styles.stateContainer}>
+            <Text style={styles.stateText}>{error.message || 'Failed to load claimers.'}</Text>
+          </View>
+        ) : (
+          <View style={styles.claimersList}>
+            {claimers.length > 0 ? (
+              claimers.map((claimer) => {
+                const initials = claimer.username.slice(0, 1).toUpperCase();
+
+                return (
+                  <View key={`${claimer.user_id}-${claimer.claimed_at}`} style={styles.claimerCard}>
+                    <View style={styles.avatarContainer}>
+                      <Text style={styles.avatarText}>{initials}</Text>
                     </View>
 
-                    <View style={styles.claimerMiddle}>
-                      <Text style={styles.claimerUsername}>{claimer.username}</Text>
+                    <View style={styles.claimerInfo}>
+                      <View style={styles.claimerNameRow}>
+                        <Text style={styles.claimerUsername}>{claimer.username}</Text>
+                      </View>
+
                       {claimer.full_name ? (
                         <Text style={styles.claimerFullName}>{claimer.full_name}</Text>
                       ) : null}
-                      <View style={styles.dateWrap}>
-                        <Ionicons name="calendar-outline" size={14} color="#303236" />
-                        <Text style={styles.dateText}>{formatDateOnly(claimer.claimed_at)}</Text>
+
+                      <View style={styles.claimerDateRow}>
+                        <CalendarIcon width={12} height={12} color="#6C6B6B" />
+                        <Text style={styles.claimerDate}>{formatDate(claimer.claimed_at)}</Text>
                       </View>
                     </View>
 
                     <Text
                       style={styles.claimerAmount}
-                    >{`+ ${formatCurrency(claimer.amount_claimed)}`}</Text>
+                    >{`- ${formatCurrency(claimer.amount_claimed)}`}</Text>
                   </View>
-                ))
-              ) : (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyText}>No claimers found.</Text>
-                </View>
-              )}
-            </ScrollView>
-          )}
-        </View>
-      </SafeAreaView>
-    </View>
+                );
+              })
+            ) : (
+              <Text style={styles.emptyText}>No claimers found.</Text>
+            )}
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  root: {
+  container: {
     flex: 1,
-    backgroundColor: BG_BOTTOM,
+    backgroundColor: '#000000',
   },
-  backgroundGradient: {
-    ...StyleSheet.absoluteFillObject,
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
   },
-  safeArea: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-    paddingHorizontal: 20,
-  },
-  headerRow: {
+  topBar: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 14,
-  },
-  iconButton: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 20,
+    zIndex: 1,
+  },
+  backButton: {
+    padding: 4,
   },
   headerTitle: {
-    color: '#F4F5F7',
-    fontSize: 22,
-    fontWeight: '700',
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontFamily: 'Montserrat_400Regular',
   },
-  searchBox: {
-    height: 54,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    paddingHorizontal: 12,
-    alignItems: 'center',
+  settingsButton: {
+    padding: 4,
+  },
+  scrollView: {
+    flex: 1,
+    zIndex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+  },
+  searchContainer: {
     flexDirection: 'row',
-    marginBottom: 14,
+    alignItems: 'center',
+    backgroundColor: '#1A1A1A',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  searchIconContainer: {
+    marginRight: 12,
+    opacity: 0.6,
   },
   searchInput: {
     flex: 1,
-    color: '#E8EAED',
     fontSize: 16,
-    marginLeft: 8,
+    color: '#FFFFFF',
+    fontFamily: 'Montserrat_400Regular',
   },
-  centerState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  centerText: {
-    color: '#8A8E95',
-    fontSize: 15,
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  listContent: {
-    paddingBottom: 40,
-    gap: 12,
+  claimersList: {
+    gap: 16,
   },
   claimerCard: {
-    backgroundColor: CARD_BG,
-    borderRadius: 14,
-    padding: 10,
     flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    gap: 12,
     alignItems: 'center',
   },
-  avatarWrap: {
-    width: 50,
-    height: 50,
-    borderRadius: 14,
-    backgroundColor: '#ABABFD',
+  avatarContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#EAEAEA',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
   },
   avatarText: {
-    color: '#090A0B',
+    color: '#000000',
     fontSize: 18,
-    fontWeight: '700',
+    fontFamily: 'Montserrat_600SemiBold',
   },
-  claimerMiddle: {
+  claimerInfo: {
     flex: 1,
-    marginRight: 8,
   },
-  claimerUsername: {
-    color: '#070809',
-    fontSize: 17,
-    fontWeight: '700',
-  },
-  claimerFullName: {
-    color: '#2E3135',
-    fontSize: 15,
-    marginTop: 1,
-  },
-  dateWrap: {
+  claimerNameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 3,
+    gap: 4,
+    marginBottom: 4,
   },
-  dateText: {
-    color: '#2E3135',
-    fontSize: 14,
-    marginLeft: 5,
+  claimerUsername: {
+    color: '#000000',
+    fontSize: 16,
+    fontFamily: 'Montserrat_600SemiBold',
   },
   claimerAmount: {
-    color: '#070809',
+    color: '#000000',
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'Montserrat_600SemiBold',
   },
-  emptyState: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    paddingVertical: 18,
+  claimerFullName: {
+    color: '#6C6B6B',
+    fontSize: 12,
+    fontFamily: 'Montserrat_400Regular',
+    marginBottom: 4,
+  },
+  claimerDateRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 10,
+    gap: 4,
+  },
+  claimerDate: {
+    color: '#6C6B6B',
+    fontSize: 12,
+    fontFamily: 'Montserrat_400Regular',
+  },
+  stateContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  stateText: {
+    color: '#9FA1A6',
+    fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
+    textAlign: 'center',
+    marginTop: 8,
   },
   emptyText: {
-    color: '#8A8E95',
-    fontSize: 15,
+    color: '#6C6B6B',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
+    textAlign: 'center',
   },
 });
 

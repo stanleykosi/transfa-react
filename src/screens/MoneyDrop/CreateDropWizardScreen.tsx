@@ -1,8 +1,24 @@
+import BackIcon from '@/assets/icons/back.svg';
+import CheckmarkIcon from '@/assets/icons/checkmark.svg';
+import ClockIcon from '@/assets/icons/clock.svg';
+import LinkIcon from '@/assets/icons/link.svg';
+import NairaIcon from '@/assets/icons/naira.svg';
+import PasswordIcon from '@/assets/icons/password.svg';
+import { useAccountBalance, useCreateMoneyDrop, useTransactionFees } from '@/api/transactionApi';
+import DashedRectBorder from '@/components/DashedRectBorder';
+import PinInputModal from '@/components/PinInputModal';
+import { useSecureAction } from '@/hooks/useSecureAction';
+import type { AppNavigationProp } from '@/types/navigation';
+import { formatCurrency, nairaToKobo } from '@/utils/formatCurrency';
+import { useNavigation } from '@react-navigation/native';
 import React, { useMemo, useState } from 'react';
 import {
   Alert,
+  Dimensions,
   KeyboardAvoidingView,
+  LayoutChangeEvent,
   Platform,
+  SafeAreaView,
   ScrollView,
   StyleSheet,
   Switch,
@@ -11,21 +27,19 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { SvgXml } from 'react-native-svg';
 
-import { useAccountBalance, useCreateMoneyDrop, useTransactionFees } from '@/api/transactionApi';
-import PinInputModal from '@/components/PinInputModal';
-import { useSecureAction } from '@/hooks/useSecureAction';
-import { formatCurrency, nairaToKobo } from '@/utils/formatCurrency';
-import type { AppNavigationProp } from '@/types/navigation';
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const BRAND_YELLOW = '#FFD300';
-const BG_BOTTOM = '#050607';
-const CARD_BG = 'rgba(255,255,255,0.08)';
-const CARD_BORDER = 'rgba(255,255,255,0.07)';
+const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="375" height="812" fill="url(#paint0_linear_708_2445)"/>
+<defs>
+<linearGradient id="paint0_linear_708_2445" x1="187.5" y1="0" x2="187.5" y2="812" gradientUnits="userSpaceOnUse">
+<stop stop-color="#2B2B2B"/>
+<stop offset="0.778846" stop-color="#0F0F0F"/>
+</linearGradient>
+</defs>
+</svg>`;
 
 const MIN_TITLE_LENGTH = 3;
 const MAX_TITLE_LENGTH = 80;
@@ -53,6 +67,7 @@ const formatPercent = (value: number): string => {
 
 const CreateDropWizardScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
+
   const [title, setTitle] = useState('');
   const [totalAmountInput, setTotalAmountInput] = useState('');
   const [numberOfPeopleInput, setNumberOfPeopleInput] = useState('');
@@ -63,9 +78,11 @@ const CreateDropWizardScreen = () => {
   const [savedPassword, setSavedPassword] = useState('');
   const [showSavedPassword, setShowSavedPassword] = useState(false);
   const [isEditingPassword, setIsEditingPassword] = useState(false);
+  const [bannerSize, setBannerSize] = useState({ width: 0, height: 0 });
 
   const { data: balanceData } = useAccountBalance();
   const { data: feeData } = useTransactionFees();
+
   const {
     isModalVisible,
     error: pinError,
@@ -127,6 +144,7 @@ const CreateDropWizardScreen = () => {
     }
     return fallbackFlatFee;
   }, [fallbackFlatFee, moneyDropFeePercent, totalAmountKobo]);
+
   const displayFeePercent = useMemo(() => {
     if (moneyDropFeePercent > 0) {
       return moneyDropFeePercent;
@@ -136,13 +154,19 @@ const CreateDropWizardScreen = () => {
     }
     return 0;
   }, [moneyDropFeeKobo, moneyDropFeePercent, totalAmountKobo]);
-  const totalRequiredKobo = totalAmountKobo + moneyDropFeeKobo;
 
+  const totalRequiredKobo = totalAmountKobo + moneyDropFeeKobo;
   const lockPasswordToSubmit = lockDrop ? savedPassword : '';
+
   const canSavePassword = useMemo(() => {
     const trimmed = passwordDraft.trim();
     return trimmed.length >= MIN_PASSWORD_LENGTH && trimmed.length <= MAX_PASSWORD_LENGTH;
   }, [passwordDraft]);
+
+  const onBannerLayout = (event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout;
+    setBannerSize({ width, height });
+  };
 
   const validateForm = (): string | null => {
     if (parsedTitle.length < MIN_TITLE_LENGTH || parsedTitle.length > MAX_TITLE_LENGTH) {
@@ -231,211 +255,242 @@ const CreateDropWizardScreen = () => {
   };
 
   return (
-    <View style={styles.root}>
-      <LinearGradient
-        colors={['#1A1B1E', '#0C0D0F', BG_BOTTOM]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        style={styles.backgroundGradient}
-      />
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.flex}
-        >
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.scrollContent}
-          >
-            <View style={styles.topRow}>
-              <TouchableOpacity
-                activeOpacity={0.8}
-                style={styles.backButton}
-                onPress={() => navigation.goBack()}
-              >
-                <Ionicons name="arrow-back" size={24} color="#F4F4F5" />
-              </TouchableOpacity>
-            </View>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.backgroundContainer}>
+        <SvgXml xml={backgroundSvg} width={SCREEN_WIDTH} height={SCREEN_HEIGHT} />
+      </View>
 
-            <View style={styles.infoCard}>
-              <View style={styles.infoHeader}>
-                <Ionicons name="shield-checkmark" size={20} color={BRAND_YELLOW} />
-                <Text style={styles.infoTitle}>Secure MoneyDrop</Text>
+      <View style={styles.topBar}>
+        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+          <BackIcon width={24} height={24} />
+        </TouchableOpacity>
+      </View>
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.flex}
+      >
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.bannerWrapper} onLayout={onBannerLayout}>
+            {bannerSize.width > 0 ? (
+              <DashedRectBorder
+                width={bannerSize.width}
+                height={bannerSize.height}
+                borderRadius={16}
+                color="rgba(255, 255, 255, 0.2)"
+                borderWidth={1}
+                dashCount={30}
+              />
+            ) : null}
+
+            <View style={styles.bannerContent}>
+              <View style={styles.bannerHeader}>
+                <View style={styles.shieldIconContainer}>
+                  <CheckmarkIcon width={12} height={12} color="#000" />
+                </View>
+                <Text style={styles.bannerTitle}>Secure MoneyDrop</Text>
               </View>
 
-              <View style={styles.infoRow}>
-                <Ionicons name="lock-closed-outline" size={17} color="#8A8E95" />
-                <Text style={styles.infoText}>
+              <View style={styles.bannerRow}>
+                <PasswordIcon width={16} height={16} color="#6C6B6B" />
+                <Text style={styles.bannerText}>
                   Funds are stored in a dedicated secure account separate from your main wallet
                 </Text>
               </View>
-              <View style={styles.infoRow}>
-                <Ionicons name="share-social-outline" size={17} color="#8A8E95" />
-                <Text style={styles.infoText}>
+
+              <View style={styles.bannerRow}>
+                <LinkIcon width={16} height={16} color="#6C6B6B" />
+                <Text style={styles.bannerText}>
                   Share via QR code or link and claimers receive instantly to their account
                 </Text>
               </View>
-              <View style={styles.infoRow}>
-                <Ionicons name="time-outline" size={17} color="#8A8E95" />
-                <Text style={styles.infoText}>
+
+              <View style={styles.bannerRow}>
+                <ClockIcon width={16} height={16} color="#6C6B6B" />
+                <Text style={styles.bannerText}>
                   Auto-refund on expiry. Unclaimed funds return to your wallet automatically
                 </Text>
               </View>
             </View>
+          </View>
 
-            <View style={styles.separator} />
+          <View style={styles.divider} />
 
-            <Text style={styles.fieldLabel}>Title</Text>
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Title</Text>
             <TextInput
-              style={styles.fieldInput}
-              placeholder="e.g December Giveaway"
-              placeholderTextColor="#686C73"
+              style={styles.input}
+              placeholder="Enter Title"
+              placeholderTextColor="#6C6B6B"
               value={title}
               onChangeText={setTitle}
               maxLength={MAX_TITLE_LENGTH}
             />
+          </View>
 
-            <Text style={styles.fieldLabel}>Total MoneyDrop Amount (₦)</Text>
-            <TextInput
-              style={styles.fieldInput}
-              placeholder="Enter total amount"
-              placeholderTextColor="#686C73"
-              value={totalAmountInput}
-              onChangeText={setTotalAmountInput}
-              keyboardType="decimal-pad"
-            />
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Total MoneyDrop Amount</Text>
+            <View style={styles.amountInputContainer}>
+              <View style={styles.nairaIconBox}>
+                <NairaIcon width={14} height={14} color="#FFFFFF" />
+              </View>
+              <TextInput
+                style={styles.amountInput}
+                placeholder="Enter Amount"
+                placeholderTextColor="#6C6B6B"
+                keyboardType="decimal-pad"
+                value={totalAmountInput}
+                onChangeText={setTotalAmountInput}
+              />
+            </View>
+          </View>
 
-            <Text style={styles.fieldLabel}>Number of people</Text>
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Number of people</Text>
             <TextInput
-              style={styles.fieldInput}
+              style={styles.input}
               placeholder="e.g 15"
-              placeholderTextColor="#686C73"
+              placeholderTextColor="#6C6B6B"
+              keyboardType="number-pad"
               value={numberOfPeopleInput}
               onChangeText={setNumberOfPeopleInput}
-              keyboardType="number-pad"
             />
-            <Text style={styles.helperText}>
-              Amount per Person{' '}
-              <Text style={styles.helperHighlight}>
+            <Text style={styles.inputHint}>
+              Amount per Person:{' '}
+              <Text style={styles.inputHintValue}>
                 {amountPerPersonKobo > 0 ? formatCurrency(amountPerPersonKobo) : '—'}
               </Text>
             </Text>
+          </View>
 
-            <Text style={styles.fieldLabel}>Expiry Time (Minutes)</Text>
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Expiry Time (Minutes)</Text>
             <TextInput
-              style={styles.fieldInput}
+              style={styles.input}
               placeholder="e.g 60"
-              placeholderTextColor="#686C73"
+              placeholderTextColor="#6C6B6B"
+              keyboardType="number-pad"
               value={expiryMinutesInput}
               onChangeText={setExpiryMinutesInput}
-              keyboardType="number-pad"
             />
+          </View>
 
-            <View style={styles.lockHeader}>
-              <Text style={styles.fieldLabel}>Lock Drop</Text>
-              <Switch
-                value={lockDrop}
-                onValueChange={onToggleLockDrop}
-                thumbColor={lockDrop ? '#111315' : '#E8EAEE'}
-                trackColor={{ false: '#C9CBD1', true: BRAND_YELLOW }}
-              />
-            </View>
+          <View style={styles.lockRow}>
+            <Text style={styles.lockLabel}>Lock Drop</Text>
+            <Switch
+              value={lockDrop}
+              onValueChange={onToggleLockDrop}
+              trackColor={{ false: '#1A1A1A', true: '#FFD300' }}
+              thumbColor="#000000"
+              style={styles.switchSmall}
+            />
+          </View>
 
-            {lockDrop && (
-              <View style={styles.lockBlock}>
-                <View style={styles.lockOptionRow}>
-                  <Text style={styles.lockOptionLabel}>Lock Option</Text>
-                  <Text style={styles.lockOptionValue}>Password</Text>
-                </View>
+          {lockDrop ? (
+            <View style={styles.lockOptionsContainer}>
+              <View style={styles.selectedLockBox}>
+                <Text style={styles.selectedLockText}>Lock Option: Password</Text>
+              </View>
 
+              <View style={styles.pinSection}>
                 {savedPassword && !isEditingPassword ? (
-                  <View style={styles.savedPasswordWrap}>
-                    <Text style={styles.savedPasswordValue}>
-                      {showSavedPassword
-                        ? savedPassword
-                        : '*'.repeat(Math.max(savedPassword.length, 8))}
-                    </Text>
+                  <>
+                    <Text style={styles.enterPinLabel}>Saved Password</Text>
+                    <View style={styles.savedPasswordBox}>
+                      <Text style={styles.savedPasswordValue}>
+                        {showSavedPassword
+                          ? savedPassword
+                          : '*'.repeat(Math.max(savedPassword.length, 8))}
+                      </Text>
+                    </View>
+
                     <TouchableOpacity
-                      activeOpacity={0.85}
-                      style={styles.smallButton}
+                      style={[styles.savePinButton, styles.editPinButton]}
                       onPress={() => setShowSavedPassword((prev) => !prev)}
                     >
-                      <Text style={styles.smallButtonText}>
+                      <Text style={[styles.savePinButtonText, styles.editPinButtonText]}>
                         {showSavedPassword ? 'Hide Password' : 'View Password'}
                       </Text>
                     </TouchableOpacity>
+
                     <TouchableOpacity
-                      activeOpacity={0.85}
-                      style={styles.smallButton}
+                      style={[styles.savePinButton, styles.editPinButton]}
                       onPress={() => {
                         setIsEditingPassword(true);
                         setPasswordDraft(savedPassword);
                       }}
                     >
-                      <Text style={styles.smallButtonText}>Edit Drop Password</Text>
+                      <Text style={[styles.savePinButtonText, styles.editPinButtonText]}>
+                        Edit Drop Password
+                      </Text>
                     </TouchableOpacity>
-                  </View>
+                  </>
                 ) : (
                   <>
+                    <Text style={styles.enterPinLabel}>Enter Password</Text>
                     <TextInput
-                      style={styles.fieldInput}
+                      style={styles.input}
                       placeholder="Enter password"
-                      placeholderTextColor="#686C73"
+                      placeholderTextColor="#6C6B6B"
                       secureTextEntry
                       value={passwordDraft}
                       onChangeText={setPasswordDraft}
                       maxLength={MAX_PASSWORD_LENGTH}
                     />
+
                     <TouchableOpacity
-                      activeOpacity={0.9}
                       style={[
-                        styles.passwordSaveButton,
-                        !canSavePassword && styles.passwordSaveButtonDisabled,
+                        styles.savePinButton,
+                        !canSavePassword && styles.savePinButtonDisabled,
                       ]}
-                      disabled={!canSavePassword}
                       onPress={saveDropPassword}
+                      disabled={!canSavePassword}
                     >
-                      <Text style={styles.passwordSaveButtonText}>Save Drop Password</Text>
+                      <Text style={styles.savePinButtonText}>Save Drop Password</Text>
                     </TouchableOpacity>
                   </>
                 )}
               </View>
-            )}
-
-            <View style={styles.separator} />
-
-            <Text style={styles.summaryTitle}>Summary</Text>
-            <View style={styles.summaryCard}>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Amount per Person</Text>
-                <Text style={styles.summaryValue}>
-                  {amountPerPersonKobo > 0 ? formatCurrency(amountPerPersonKobo) : '—'}
-                </Text>
-              </View>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Fees</Text>
-                <Text style={styles.summaryValue}>{formatPercent(displayFeePercent)}</Text>
-              </View>
-              <View style={styles.summaryDivider} />
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryTotalLabel}>Total Required</Text>
-                <Text style={styles.summaryTotalValue}>{formatCurrency(totalRequiredKobo)}</Text>
-              </View>
             </View>
+          ) : null}
 
-            <TouchableOpacity
-              activeOpacity={0.92}
-              style={[styles.createDropButton, isCreating && styles.createDropButtonDisabled]}
-              onPress={openConfirmAndCreate}
-              disabled={isCreating}
-            >
-              <Text style={styles.createDropButtonText}>
-                {isCreating ? 'Creating MoneyDrop...' : 'Create MoneyDrop'}
+          <View style={styles.mainDivider} />
+
+          <Text style={styles.summaryTitle}>Summary</Text>
+          <View style={styles.summaryCard}>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Amount per Person</Text>
+              <Text style={styles.summaryValue}>
+                {amountPerPersonKobo > 0 ? formatCurrency(amountPerPersonKobo) : '—'}
               </Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>Fees</Text>
+              <Text style={styles.summaryValue}>{formatPercent(displayFeePercent)}</Text>
+            </View>
+            <View style={styles.summaryDivider} />
+            <View style={styles.summaryRow}>
+              <Text style={styles.totalRequiredLabel}>Total Required</Text>
+              <Text style={styles.totalRequiredValue}>{formatCurrency(totalRequiredKobo)}</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.createMainButton, isCreating && styles.createMainButtonDisabled]}
+            activeOpacity={0.8}
+            onPress={openConfirmAndCreate}
+            disabled={isCreating}
+          >
+            <Text style={styles.createMainButtonText}>
+              {isCreating ? 'Creating MoneyDrop...' : 'Create MoneyDrop'}
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
 
       <PinInputModal
         visible={isModalVisible}
@@ -444,239 +499,291 @@ const CreateDropWizardScreen = () => {
         error={pinError}
         clearError={clearPinError}
       />
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
-  root: {
+  container: {
     flex: 1,
-    backgroundColor: BG_BOTTOM,
+    backgroundColor: '#000000',
   },
-  backgroundGradient: {
-    ...StyleSheet.absoluteFillObject,
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 0,
   },
-  safeArea: {
-    flex: 1,
+  topBar: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 10,
+    zIndex: 1,
+  },
+  backButton: {
+    padding: 4,
   },
   flex: {
     flex: 1,
+  },
+  scrollView: {
+    flex: 1,
+    zIndex: 1,
   },
   scrollContent: {
     paddingHorizontal: 20,
     paddingBottom: 40,
   },
-  topRow: {
-    marginBottom: 8,
-  },
-  backButton: {
-    width: 32,
-    height: 32,
-    justifyContent: 'center',
-  },
-  infoCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    borderStyle: 'dashed',
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    paddingHorizontal: 16,
+  bannerWrapper: {
+    position: 'relative',
     paddingVertical: 16,
+    paddingHorizontal: 24,
+    marginBottom: 24,
   },
-  infoHeader: {
+  bannerContent: {
+    gap: 12,
+  },
+  bannerHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 14,
+    gap: 12,
+    marginBottom: 4,
   },
-  infoTitle: {
-    color: '#F4F5F7',
-    fontSize: 24,
-    fontWeight: '700',
-    marginLeft: 8,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 12,
-  },
-  infoText: {
-    flex: 1,
-    color: '#888C93',
-    fontSize: 15,
-    lineHeight: 21,
-    marginLeft: 10,
-  },
-  separator: {
-    marginTop: 14,
-    marginBottom: 18,
-    height: 1,
-    backgroundColor: '#51545C',
-  },
-  fieldLabel: {
-    color: '#EDEEF0',
-    fontSize: 16,
-    marginBottom: 10,
-  },
-  fieldInput: {
-    height: 52,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
-    backgroundColor: CARD_BG,
-    color: '#F1F2F4',
-    fontSize: 16,
-    paddingHorizontal: 14,
-    marginBottom: 14,
-  },
-  helperText: {
-    color: '#6E7279',
-    fontSize: 14,
-    marginTop: -8,
-    marginBottom: 14,
-    textDecorationLine: 'underline',
-  },
-  helperHighlight: {
-    color: '#ECEDEF',
-    textDecorationLine: 'none',
-  },
-  lockHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  lockBlock: {
+  shieldIconContainer: {
+    width: 24,
+    height: 24,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    padding: 12,
-    marginBottom: 8,
-  },
-  lockOptionRow: {
-    height: 46,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
-    backgroundColor: CARD_BG,
-    paddingHorizontal: 12,
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    flexDirection: 'row',
-    marginBottom: 12,
-  },
-  lockOptionLabel: {
-    color: '#797D84',
-    fontSize: 16,
-  },
-  lockOptionValue: {
-    color: '#E5E7EB',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  passwordSaveButton: {
-    height: 52,
-    borderRadius: 12,
-    backgroundColor: BRAND_YELLOW,
+    backgroundColor: '#FFD300',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 2,
   },
-  passwordSaveButtonDisabled: {
-    opacity: 0.5,
+  bannerTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Montserrat_600SemiBold',
   },
-  passwordSaveButtonText: {
-    color: '#0A0C0D',
-    fontSize: 17,
-    fontWeight: '700',
+  bannerRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
   },
-  savedPasswordWrap: {
-    borderRadius: 10,
+  bannerText: {
+    color: '#6C6B6B',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
+    flex: 1,
+    lineHeight: 18,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#6C6B6B',
+    marginBottom: 24,
+  },
+  inputGroup: {
+    marginBottom: 20,
+  },
+  inputLabel: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
+    marginBottom: 8,
+  },
+  input: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    height: 56,
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
     borderWidth: 1,
-    borderColor: '#6E7178',
-    backgroundColor: CARD_BG,
-    padding: 12,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  amountInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 12,
+    height: 56,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  nairaIconBox: {
+    paddingLeft: 16,
+    paddingRight: 8,
+  },
+  amountInput: {
+    flex: 1,
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
+    height: '100%',
+  },
+  inputHint: {
+    color: '#6C6B6B',
+    fontSize: 14,
+    fontFamily: 'Montserrat_400Regular',
+    marginTop: 8,
+  },
+  inputHintValue: {
+    color: '#FFFFFF',
+  },
+  lockRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  lockLabel: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
+  },
+  switchSmall: {
+    transform: [{ scale: 0.8 }],
+    marginRight: -4,
+  },
+  lockOptionsContainer: {
+    marginBottom: 24,
+    gap: 12,
+  },
+  selectedLockBox: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    height: 56,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  selectedLockText: {
+    color: '#6B6B6B',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
+  },
+  pinSection: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+  },
+  enterPinLabel: {
+    color: '#6C6B6B',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  savedPasswordBox: {
+    backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    borderRadius: 12,
+    height: 56,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 12,
   },
   savedPasswordValue: {
-    color: '#F1F2F4',
+    color: '#FFFFFF',
     fontSize: 16,
-    marginBottom: 10,
+    fontFamily: 'Montserrat_600SemiBold',
   },
-  smallButton: {
-    height: 42,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#6E7178',
+  savePinButton: {
+    backgroundColor: '#FFD300',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 40,
+    width: '100%',
     alignItems: 'center',
-    justifyContent: 'center',
     marginTop: 8,
-    backgroundColor: 'rgba(0,0,0,0.24)',
   },
-  smallButtonText: {
-    color: '#D2D5DA',
+  savePinButtonDisabled: {
+    opacity: 0.5,
+  },
+  savePinButtonText: {
+    color: '#000000',
     fontSize: 16,
-    fontWeight: '600',
+    fontFamily: 'Montserrat_700Bold',
+  },
+  editPinButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: '#6C6B6B',
+  },
+  editPinButtonText: {
+    color: '#6C6B6B',
+    fontSize: 16,
+    fontFamily: 'Montserrat_700Bold',
+  },
+  mainDivider: {
+    height: 1,
+    backgroundColor: '#6C6B6B',
+    marginVertical: 12,
   },
   summaryTitle: {
-    color: BRAND_YELLOW,
-    fontSize: 30,
-    fontWeight: '700',
-    marginBottom: 10,
+    color: '#FFD300',
+    fontSize: 18,
+    fontFamily: 'Montserrat_700Bold',
+    marginBottom: 12,
   },
   summaryCard: {
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: CARD_BORDER,
-    backgroundColor: CARD_BG,
-    paddingHorizontal: 14,
-    paddingTop: 14,
-    paddingBottom: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 32,
   },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 12,
   },
   summaryLabel: {
-    color: '#7E8289',
-    fontSize: 15,
+    color: '#6C6B6B',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
   },
   summaryValue: {
-    color: '#ECEDEF',
-    fontSize: 15,
-    fontWeight: '500',
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontFamily: 'Montserrat_400Regular',
   },
   summaryDivider: {
     height: 1,
-    backgroundColor: '#5C5F67',
-    marginVertical: 4,
+    backgroundColor: '#6C6B6B',
+    marginBottom: 12,
   },
-  summaryTotalLabel: {
-    color: '#8D9198',
+  totalRequiredLabel: {
+    color: '#6C6B6B',
+    fontSize: 16,
+    fontFamily: 'Montserrat_700Bold',
+  },
+  totalRequiredValue: {
+    color: '#FFFFFF',
     fontSize: 18,
-    fontWeight: '700',
+    fontFamily: 'Montserrat_700Bold',
   },
-  summaryTotalValue: {
-    color: '#F5F6F8',
-    fontSize: 28,
-    fontWeight: '700',
-  },
-  createDropButton: {
-    marginTop: 16,
-    height: 56,
+  createMainButton: {
+    backgroundColor: '#FFD300',
     borderRadius: 12,
-    backgroundColor: BRAND_YELLOW,
+    paddingVertical: 16,
     alignItems: 'center',
-    justifyContent: 'center',
+    marginBottom: 20,
   },
-  createDropButtonDisabled: {
+  createMainButtonDisabled: {
     opacity: 0.75,
   },
-  createDropButtonText: {
-    color: '#0A0B0D',
+  createMainButtonText: {
+    color: '#000000',
     fontSize: 18,
-    fontWeight: '700',
+    fontFamily: 'Montserrat_700Bold',
   },
 });
 
