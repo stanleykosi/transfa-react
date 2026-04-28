@@ -3,12 +3,43 @@ import { Alert } from 'react-native';
 import { StackActions, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import { submitUsernameSetup } from '@/api/authApi';
 import { USERNAME_REGEX, normalizeUsername } from '@/utils/username';
 import AuthCreateUsername from '@/components/source-auth/auth-create-username';
 
 type Navigation = NativeStackNavigationProp<AppStackParamList, 'CreateUsername'>;
+
+const getHttpStatus = (error: unknown): number | undefined => {
+  if (typeof error !== 'object' || error === null || !('response' in error)) {
+    return undefined;
+  }
+  const response = error.response;
+  if (typeof response !== 'object' || response === null || !('status' in response)) {
+    return undefined;
+  }
+  return typeof response.status === 'number' ? response.status : undefined;
+};
+
+const getUsernameSetupErrorMessage = (error: unknown): string => {
+  if (typeof error !== 'object' || error === null || !('response' in error)) {
+    return 'Please try again in a moment.';
+  }
+  const response = error.response;
+  if (typeof response !== 'object' || response === null || !('data' in response)) {
+    return 'Please try again in a moment.';
+  }
+  const data = response.data;
+  if (typeof data === 'object' && data !== null) {
+    if ('detail' in data && typeof data.detail === 'string') {
+      return data.detail;
+    }
+    if ('error' in data && typeof data.error === 'string') {
+      return data.error;
+    }
+  }
+  return 'Please try again in a moment.';
+};
 
 const CreateUsernameScreen = () => {
   const navigation = useNavigation<Navigation>();
@@ -32,8 +63,8 @@ const CreateUsernameScreen = () => {
     try {
       await submitUsernameSetup({ username: normalized });
       navigation.navigate('CreatePin');
-    } catch (error: any) {
-      const status = error?.response?.status;
+    } catch (error: unknown) {
+      const status = getHttpStatus(error);
       if (status === 409) {
         Alert.alert('Username unavailable', 'Try another username.');
       } else if (status === 412) {
@@ -42,12 +73,7 @@ const CreateUsernameScreen = () => {
           'Please wait while we finish provisioning your account.'
         );
       } else {
-        Alert.alert(
-          'Unable to save username',
-          error?.response?.data?.detail ||
-            error?.response?.data?.error ||
-            'Please try again in a moment.'
-        );
+        Alert.alert('Unable to save username', getUsernameSetupErrorMessage(error));
       }
     } finally {
       setIsSubmitting(false);

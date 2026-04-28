@@ -12,7 +12,7 @@ import Avatar2 from '@/assets/images/avatar2.svg';
 import Avatar3 from '@/assets/images/avatar3.svg';
 import { useListPaymentRequests } from '@/api/transactionApi';
 import DashedBorder from '@/components/DashedBorder';
-import { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import type { PaymentRequest } from '@/types/api';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { normalizeUsername } from '@/utils/username';

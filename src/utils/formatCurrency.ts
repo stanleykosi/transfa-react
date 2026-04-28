@@ -14,7 +14,16 @@
  */
 export const formatCurrency = (amountInKobo: number): string => {
   const nairaAmount = amountInKobo / 100;
-  return `₦${nairaAmount.toLocaleString('en-NG', {
+  return formatNaira(nairaAmount);
+};
+
+/**
+ * Formats an amount already expressed in naira.
+ * @param amountInNaira - The amount in naira
+ * @returns Formatted currency string (e.g., "₦1,500.00")
+ */
+export const formatNaira = (amountInNaira: number): string => {
+  return `₦${amountInNaira.toLocaleString('en-NG', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;

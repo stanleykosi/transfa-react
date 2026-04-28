@@ -22,10 +22,10 @@ import {
   useTransactionFees,
   useUserProfile,
 } from '@/api/transactionApi';
-import type { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import type { AppNavigationProp } from '@/types/navigation';
 import { formatCurrency } from '@/utils/formatCurrency';
-import { BRAND_YELLOW, stripUsernamePrefix } from './helpers';
+import { BRAND_YELLOW, formatUsername } from './helpers';
 
 type SummaryRoute = RouteProp<AppStackParamList, 'RequestPaymentSummary'>;
 
@@ -59,8 +59,8 @@ const RequestPaymentSummaryScreen = () => {
     );
   }
 
-  const senderUsername = stripUsernamePrefix(me?.username || 'you');
-  const receiverUsername = stripUsernamePrefix(request.creator_username || 'recipient');
+  const senderUsername = formatUsername(me?.username || 'you');
+  const receiverUsername = formatUsername(request.creator_username || 'recipient');
 
   const fee = fees?.p2p_fee_kobo ?? 0;
   const total = request.amount + fee;

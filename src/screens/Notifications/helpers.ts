@@ -3,8 +3,7 @@ import { normalizeUsername } from '@/utils/username';
 
 export const BRAND_YELLOW = '#FFD300';
 
-// Legacy name kept for compatibility; this only trims surrounding whitespace.
-export const stripUsernamePrefix = (value?: string | null) => normalizeUsername(value || '');
+export const formatUsername = (value?: string | null) => normalizeUsername(value || '');
 
 export const formatShortDate = (iso?: string) => {
   if (!iso) {

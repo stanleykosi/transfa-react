@@ -14,7 +14,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@tanstack/react-query';
 
-import { ProfileStackParamList } from '@/navigation/ProfileStack';
+import type { ProfileStackParamList } from '@/types/navigation';
 import { fetchKycStatus } from '@/api/authApi';
 import theme from '@/constants/theme';
 

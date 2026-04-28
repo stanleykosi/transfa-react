@@ -1266,7 +1266,7 @@ func (s *Service) CreatePaymentRequest(ctx context.Context, creatorID uuid.UUID,
 			log.Printf("level=warn component=service flow=payment_request msg=\"creator lookup failed for notification\" creator_id=%s err=%v", creatorID, creatorErr)
 		} else {
 			recipientID := *decorated.RecipientUserID
-			body := fmt.Sprintf("%s sent you a payment request.", stripUsernamePrefix(creator.Username))
+			body := fmt.Sprintf("%s sent you a payment request.", formatUsername(creator.Username))
 			dedupeKey := fmt.Sprintf("request.incoming:%s:%s", decorated.ID, recipientID)
 			relatedEntityType := "payment_request"
 
@@ -1289,7 +1289,7 @@ func (s *Service) CreatePaymentRequest(ctx context.Context, creatorID uuid.UUID,
 					"description":       decorated.Description,
 					"image_url":         decorated.ImageURL,
 					"actor_user_id":     creator.ID.String(),
-					"actor_username":    stripUsernamePrefix(creator.Username),
+					"actor_username":    formatUsername(creator.Username),
 					"actor_full_name":   optionalTrimmedString(creator.FullName),
 					"display_status":    "pending",
 					"created_at":        decorated.CreatedAt.UTC().Format(time.RFC3339),
@@ -1560,7 +1560,7 @@ func (s *Service) publishRequestPaidNotification(ctx context.Context, request *d
 	if recipientLabel == nil || strings.TrimSpace(*recipientLabel) == "" {
 		payerUser, payerErr := s.repo.FindUserByID(ctx, payerID)
 		if payerErr == nil {
-			username := stripUsernamePrefix(payerUser.Username)
+			username := formatUsername(payerUser.Username)
 			recipientLabel = &username
 		}
 	}
@@ -1625,7 +1625,7 @@ func (s *Service) DeclineIncomingPaymentRequest(ctx context.Context, requestID u
 	if declinedBy == nil || strings.TrimSpace(*declinedBy) == "" {
 		payerUser, payerErr := s.repo.FindUserByID(ctx, recipientID)
 		if payerErr == nil {
-			username := stripUsernamePrefix(payerUser.Username)
+			username := formatUsername(payerUser.Username)
 			declinedBy = &username
 		}
 	}
@@ -1762,9 +1762,7 @@ func normalizeAndValidateUsernameInput(raw string) (string, error) {
 	return username, nil
 }
 
-// Legacy name kept because notification payloads already depend on this function.
-// It now only trims whitespace and does not remove underscore prefixes.
-func stripUsernamePrefix(username string) string {
+func formatUsername(username string) string {
 	return strings.TrimSpace(username)
 }
 

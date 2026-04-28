@@ -4,7 +4,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 
 import { useTransactionHistoryWithUser, useUserProfile } from '@/api/transactionApi';
 import UserProfileModal, { type UserProfileModalTransaction } from '@/components/UserProfileModal';
-import type { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import type { UserDiscoveryResult } from '@/types/api';
 import type { AppNavigationProp } from '@/types/navigation';
 import { normalizeUsername } from '@/utils/username';
@@ -12,8 +12,6 @@ import { normalizeUsername } from '@/utils/username';
 type UserProfileViewRoute = RouteProp<AppStackParamList, 'UserProfileView'>;
 
 type AvatarKey = 'avatar1' | 'avatar2' | 'avatar3';
-
-const stripUsernamePrefix = (value?: string | null) => normalizeUsername(value || '');
 
 const pickAvatarKey = (seed: string): AvatarKey => {
   let hash = 0;
@@ -41,7 +39,7 @@ const UserProfileViewScreen = () => {
   } = useTransactionHistoryWithUser(initialUser.username, 50, 0);
 
   const profileUser = bilateral?.user || initialUser;
-  const displayUsername = stripUsernamePrefix(profileUser.username) || 'user';
+  const displayUsername = normalizeUsername(profileUser.username) || 'user';
   const displayFullName = profileUser.full_name?.trim() || 'Transfa User';
   const profileLink =
     bilateral?.shareable_link || `https://trytransfa.com/${displayUsername.toLowerCase()}`;
@@ -54,7 +52,7 @@ const UserProfileViewScreen = () => {
 
   const transactions = useMemo<UserProfileModalTransaction[]>(() => {
     const history = bilateral?.transactions ?? [];
-    const currentUsername = stripUsernamePrefix(me?.username) || 'You';
+    const currentUsername = normalizeUsername(me?.username) || 'You';
 
     return history.map((item) => {
       const outgoing = me?.id ? item.sender_id === me.id : item.sender_id !== profileUser.id;

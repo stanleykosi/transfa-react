@@ -16,6 +16,20 @@
 import axios from 'axios';
 import { Clerk } from '@clerk/clerk-expo';
 
+type ClerkUserEmail = {
+  emailAddress?: string | null;
+};
+
+type ClerkUserWithEmail = {
+  primaryEmailAddress?: ClerkUserEmail | null;
+  emailAddresses?: ClerkUserEmail[];
+};
+
+type ClerkSessionWithUser = {
+  userId?: string | null;
+  user?: { id?: string | null } | null;
+};
+
 // Retrieve the API Gateway URL from environment variables.
 // Fallback to a local default for development.
 const API_GATEWAY_URL = process.env.EXPO_PUBLIC_API_GATEWAY_URL || 'http://localhost:8080';
@@ -42,18 +56,20 @@ apiClient.interceptors.request.use(
         const token = await session.getToken({ template: 'Transfa' });
         if (token) {
           // Add the JWT to the Authorization header.
-          config.headers.Authorization = `Bearer ${token}`;
+          config.headers.set('Authorization', `Bearer ${token}`);
         }
         // Also pass the Clerk user id for services that expect it.
-        const userId = (session as any).userId || (session as any).user?.id;
+        const sessionWithUser = session as typeof session & ClerkSessionWithUser;
+        const userId = sessionWithUser.userId || sessionWithUser.user?.id;
         if (userId) {
-          (config.headers as any)['X-Clerk-User-Id'] = String(userId);
+          config.headers.set('X-Clerk-User-Id', String(userId));
         }
+        const clerkUser = Clerk.user as ClerkUserWithEmail | null | undefined;
         const email =
-          (Clerk as any).user?.primaryEmailAddress?.emailAddress ||
-          (Clerk as any).user?.emailAddresses?.[0]?.emailAddress;
+          clerkUser?.primaryEmailAddress?.emailAddress ||
+          clerkUser?.emailAddresses?.[0]?.emailAddress;
         if (email) {
-          (config.headers as any)['X-User-Email'] = String(email);
+          config.headers.set('X-User-Email', String(email));
         }
       }
     } catch (error) {

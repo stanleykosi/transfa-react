@@ -1,4 +1,4 @@
-import type { AuthStackParamList } from './AuthStack';
+import type { AuthStackParamList } from '@/types/navigation';
 
 export type AuthInitialRoute = keyof AuthStackParamList;
 

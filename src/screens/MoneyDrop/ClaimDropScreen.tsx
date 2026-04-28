@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '@clerk/clerk-expo';
 import { SvgXml } from 'react-native-svg';
 
-import type { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import type { AppNavigationProp } from '@/types/navigation';
 import { useClaimMoneyDrop, useMoneyDropDetails } from '@/api/transactionApi';
 import { formatCurrency } from '@/utils/formatCurrency';

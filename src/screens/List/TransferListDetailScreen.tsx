@@ -3,7 +3,7 @@ import SearchIcon from '@/assets/icons/search.svg';
 import VerifiedBadge from '@/assets/icons/verified.svg';
 import { useGetTransferList, useToggleTransferListMember } from '@/api/transactionApi';
 import { useUserSearch } from '@/api/userDiscoveryApi';
-import type { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import type { AppNavigationProp } from '@/types/navigation';
 import { normalizeUsername, usernameKey } from '@/utils/username';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -149,19 +149,24 @@ const TransferListDetailScreen = () => {
       .slice(0, 3);
   }, [memberUsernameSet, normalizedQuery, searchData?.users]);
 
-  const toggleUserSelection = async (rawUsername: string) => {
+  const toggleUserSelection = (rawUsername: string) => {
     const normalized = usernameKey(rawUsername);
     setPendingUsername(normalized);
 
-    try {
-      await toggleMutation.mutateAsync({
+    toggleMutation.mutate(
+      {
         listId,
         payload: { username: normalizeUsername(rawUsername) },
-      });
-      await refetch();
-    } finally {
-      setPendingUsername(null);
-    }
+      },
+      {
+        onSuccess: () => {
+          refetch();
+        },
+        onSettled: () => {
+          setPendingUsername(null);
+        },
+      }
+    );
   };
 
   return (
@@ -217,7 +222,7 @@ const TransferListDetailScreen = () => {
                     style={styles.suggestionCard}
                     onPress={() => {
                       if (!isPending) {
-                        toggleUserSelection(user.rawUsername).catch(() => undefined);
+                        toggleUserSelection(user.rawUsername);
                       }
                     }}
                     activeOpacity={0.7}
@@ -286,7 +291,7 @@ const TransferListDetailScreen = () => {
                       style={styles.userCard}
                       onPress={() => {
                         if (!isPending) {
-                          toggleUserSelection(user.rawUsername).catch(() => undefined);
+                          toggleUserSelection(user.rawUsername);
                         }
                       }}
                       activeOpacity={0.7}

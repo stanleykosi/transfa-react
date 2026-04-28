@@ -2,19 +2,12 @@ import React from 'react';
 import { StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { NavigatorScreenParams } from '@react-navigation/native';
+import type { AppTabsParamList } from '@/types/navigation';
 
 import HomeScreen from '@/screens/Home/HomeScreen';
-import ProfileStack, { ProfileStackParamList } from './ProfileStack';
+import ProfileStack from './ProfileStack';
 import MoneyDropTabScreen from '@/screens/MoneyDrop/MoneyDropTabScreen';
 import SupportScreen from '@/screens/Support/SupportScreen';
-
-export type AppTabsParamList = {
-  Home: undefined;
-  Settings: NavigatorScreenParams<ProfileStackParamList>;
-  MoneyDrop: undefined;
-  Support: undefined;
-};
 
 const Tab = createBottomTabNavigator<AppTabsParamList>();
 

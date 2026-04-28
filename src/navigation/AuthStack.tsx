@@ -14,25 +14,13 @@
 
 import React, { useMemo } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import type { AuthStackParamList } from '@/types/navigation';
 import SignInScreen from '@/screens/Auth/SignInScreen';
 import SignUpScreen from '@/screens/Auth/SignUpScreen';
 import VerifyCodeScreen from '@/screens/Auth/VerifyCodeScreen';
 import ForgotPasswordScreen from '@/screens/Auth/ForgotPasswordScreen';
 import OnboardingWelcomeScreen from '@/screens/Auth/OnboardingWelcomeScreen';
 import { consumeNextAuthInitialRoute } from './authStackEntry';
-
-// Define the parameter list for the AuthStack routes for type safety.
-export type AuthStackParamList = {
-  OnboardingWelcome: undefined;
-  SignIn: undefined;
-  SignUp: undefined;
-  VerifyCode: {
-    emailAddressId?: string;
-  };
-  ForgotPassword: {
-    identifier?: string;
-  };
-};
 
 const Stack = createNativeStackNavigator<AuthStackParamList>();
 

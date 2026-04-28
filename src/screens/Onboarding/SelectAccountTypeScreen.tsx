@@ -6,7 +6,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { fetchAccountTypeOptions } from '@/api/authApi';
 import { useAuth } from '@/hooks/useAuth';
 import { AccountTypeOption } from '@/types/api';
-import { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import { setNextAuthInitialRoute } from '@/navigation/authStackEntry';
 import AuthAccountType from '@/components/source-auth/auth-account-type';
 

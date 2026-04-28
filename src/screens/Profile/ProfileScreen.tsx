@@ -1,9 +1,10 @@
 import AnimatedPageWrapper from '@/components/AnimatedPageWrapper';
 import BottomNavbar from '@/components/bottom-navbar';
+import type { NavItem } from '@/components/bottom-navbar';
 import { fetchKycStatus } from '@/api/authApi';
 import { useAuth } from '@/hooks/useAuth';
-import type { AppStackParamList } from '@/navigation/AppStack';
-import type { ProfileStackParamList } from '@/navigation/ProfileStack';
+import type { AppStackParamList } from '@/types/navigation';
+import type { ProfileStackParamList } from '@/types/navigation';
 import { useSecurityStore } from '@/store/useSecurityStore';
 import { useNavigation, CompositeNavigationProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -40,8 +41,6 @@ type SettingsNav = CompositeNavigationProp<
   NativeStackNavigationProp<ProfileStackParamList, 'ProfileHome'>,
   NativeStackNavigationProp<AppStackParamList>
 >;
-
-type NavTab = 'home' | 'settings' | 'gifts' | 'support';
 
 type SettingsItem = {
   id: string;
@@ -203,7 +202,7 @@ const ProfileScreen = () => {
     },
   ];
 
-  const handleTabPress = (tab: NavTab) => {
+  const handleTabPress = (tab: NavItem) => {
     if (tab === 'home') {
       navigation.navigate('AppTabs', { screen: 'Home' });
       return;

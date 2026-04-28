@@ -6,7 +6,7 @@ import DownloadIcon from '@/assets/icons/download.svg';
 import MoneyDropIcon from '@/assets/icons/money-drop.svg';
 import ShareIcon from '@/assets/icons/share.svg';
 import { QRShareCard } from '@/components/QRShareCard';
-import type { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import type { AppNavigationProp } from '@/types/navigation';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';

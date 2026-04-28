@@ -1,7 +1,7 @@
 import React from 'react';
 import { useRoute, type RouteProp } from '@react-navigation/native';
 
-import type { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import SendUnifiedScreen from './SendUnifiedScreen';
 
 type PayUserRoute = RouteProp<AppStackParamList, 'PayUser'>;

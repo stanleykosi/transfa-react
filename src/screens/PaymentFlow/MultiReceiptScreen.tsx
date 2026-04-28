@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 
 import type { AppNavigationProp } from '@/types/navigation';
-import type { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { normalizeUsername } from '@/utils/username';
 

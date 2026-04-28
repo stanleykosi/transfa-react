@@ -1,17 +1,3 @@
-/**
- * @description
- * This is the root component of the Transfa application. It sets up all the
- * essential providers that wrap the entire app.
- *
- * @dependencies
- * - react: Core React library.
- * - @clerk/clerk-expo: Provides the ClerkProvider for handling authentication state.
- * - @tanstack/react-query: Provides QueryClient and QueryClientProvider for server state management.
- * - @react-navigation/native: Provides the NavigationContainer to manage the app's navigation stack.
- * - expo-secure-store: Used by Clerk for secure token storage.
- * - RootNavigator: The main navigator component that decides which screen stack to show.
- */
-
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
@@ -39,7 +25,7 @@ import SplashScreen from '@/components/splash-screen';
 
 const queryClient = new QueryClient();
 const CLERK_PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
-const PUBLISHABLE_KEY = CLERK_PUBLISHABLE_KEY || 'pk_test_placeholder_key_for_development';
+const PUBLISHABLE_KEY = CLERK_PUBLISHABLE_KEY ?? '';
 const moneyDropUUIDPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -85,7 +71,7 @@ const parseMoneyDropIdFromURL = (incomingUrl: string): string | null => {
 
 if (!CLERK_PUBLISHABLE_KEY) {
   console.warn(
-    '⚠️  Missing Clerk Publishable Key. Please set EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY in your .env file for full functionality.'
+    'Missing Clerk publishable key. Set EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY in your environment.'
   );
 }
 

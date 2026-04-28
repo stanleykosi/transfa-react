@@ -1,4 +1,3 @@
-import { describe, expect, it } from '@jest/globals';
 import { normalizeUsername, usernameKey, usernamesEqual } from './username';
 
 describe('username utilities', () => {

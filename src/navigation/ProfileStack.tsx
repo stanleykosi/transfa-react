@@ -17,6 +17,7 @@
  */
 import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import type { ProfileStackParamList } from '@/types/navigation';
 import ProfileScreen from '@/screens/Profile/ProfileScreen';
 import BeneficiariesScreen from '@/screens/Settings/BeneficiariesScreen';
 import AddBeneficiaryScreen from '@/screens/Settings/AddBeneficiaryScreen';
@@ -30,23 +31,6 @@ import PinCurrentScreen from '@/screens/Settings/PinCurrentScreen';
 import PinNewScreen from '@/screens/Settings/PinNewScreen';
 import PinVerifyScreen from '@/screens/Settings/PinVerifyScreen';
 import PinChangeSuccessScreen from '@/screens/Settings/PinChangeSuccessScreen';
-
-// Type definition for the routes and their parameters within this stack.
-export type ProfileStackParamList = {
-  ProfileHome: undefined;
-  KycLevel: undefined;
-  KycTier3Upgrade: undefined;
-  Beneficiaries: undefined;
-  LinkAccountPin: undefined;
-  AddBeneficiary: undefined;
-  ReceivingPreferences: undefined;
-  PinSettings: undefined;
-  PinOtp: undefined;
-  PinCurrent: undefined;
-  PinNew: undefined;
-  PinVerify: undefined;
-  PinChangeSuccess: undefined;
-};
 
 const Stack = createNativeStackNavigator<ProfileStackParamList>();
 

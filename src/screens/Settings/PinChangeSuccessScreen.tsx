@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { ProfileStackParamList } from '@/navigation/ProfileStack';
+import type { ProfileStackParamList } from '@/types/navigation';
 import theme from '@/constants/theme';
 
 type NavigationProp = NativeStackNavigationProp<ProfileStackParamList, 'PinChangeSuccess'>;

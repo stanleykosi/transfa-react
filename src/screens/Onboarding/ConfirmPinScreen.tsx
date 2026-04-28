@@ -3,13 +3,36 @@ import { Alert } from 'react-native';
 import { RouteProp, StackActions, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import { submitTransactionPinSetup } from '@/api/authApi';
 import { useSecurityStore } from '@/store/useSecurityStore';
 import AuthConfirmPin from '@/components/source-auth/auth-confirm-pin';
 
 type RouteType = RouteProp<AppStackParamList, 'ConfirmPin'>;
 type Navigation = NativeStackNavigationProp<AppStackParamList, 'ConfirmPin'>;
+
+const getPinSetupErrorMessage = (error: unknown): string => {
+  if (typeof error !== 'object' || error === null || !('response' in error)) {
+    return 'Please try again in a moment.';
+  }
+
+  const response = error.response;
+  if (typeof response !== 'object' || response === null || !('data' in response)) {
+    return 'Please try again in a moment.';
+  }
+
+  const data = response.data;
+  if (typeof data === 'object' && data !== null) {
+    if ('detail' in data && typeof data.detail === 'string') {
+      return data.detail;
+    }
+    if ('error' in data && typeof data.error === 'string') {
+      return data.error;
+    }
+  }
+
+  return 'Please try again in a moment.';
+};
 
 const ConfirmPinScreen = () => {
   const navigation = useNavigation<Navigation>();
@@ -38,13 +61,8 @@ const ConfirmPinScreen = () => {
         console.warn('Failed to persist local PIN cache after backend setup', localError);
       }
       navigation.dispatch(StackActions.replace('AppTabs'));
-    } catch (error: any) {
-      Alert.alert(
-        'Unable to save PIN',
-        error?.response?.data?.detail ||
-          error?.response?.data?.error ||
-          'Please try again in a moment.'
-      );
+    } catch (error: unknown) {
+      Alert.alert('Unable to save PIN', getPinSetupErrorMessage(error));
     } finally {
       setIsSubmitting(false);
     }

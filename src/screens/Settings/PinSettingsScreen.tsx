@@ -9,8 +9,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery } from '@tanstack/react-query';
 
 import { fetchSecurityStatus } from '@/api/authApi';
-import { AppStackParamList } from '@/navigation/AppStack';
-import { ProfileStackParamList } from '@/navigation/ProfileStack';
+import type { AppStackParamList, ProfileStackParamList } from '@/types/navigation';
 import { useSensitiveFlowStore } from '@/store/useSensitiveFlowStore';
 import theme from '@/constants/theme';
 

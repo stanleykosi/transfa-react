@@ -1,6 +1,7 @@
 import AnimatedPageWrapper from '@/components/AnimatedPageWrapper';
 import BottomNavbar from '@/components/bottom-navbar';
-import type { AppStackParamList } from '@/navigation/AppStack';
+import type { NavItem } from '@/components/bottom-navbar';
+import type { AppStackParamList } from '@/types/navigation';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
@@ -29,7 +30,6 @@ const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill=
 </svg>`;
 
 type AppNavigationProp = NativeStackNavigationProp<AppStackParamList>;
-type NavTab = 'home' | 'settings' | 'gifts' | 'support';
 
 interface FAQItem {
   id: string;
@@ -80,7 +80,7 @@ const supportOptions = [
 const SupportScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
 
-  const handleTabPress = (tab: NavTab) => {
+  const handleTabPress = (tab: NavItem) => {
     if (tab === 'home') {
       navigation.navigate('AppTabs', { screen: 'Home' });
       return;

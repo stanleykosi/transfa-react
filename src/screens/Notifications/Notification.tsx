@@ -33,7 +33,8 @@ import {
 } from '@/api/transactionApi';
 import type { InAppNotification } from '@/types/api';
 import type { AppNavigationProp } from '@/types/navigation';
-import { formatShortDate, resolveRequestNotificationMeta, stripUsernamePrefix } from './helpers';
+import { formatCurrency } from '@/utils/formatCurrency';
+import { formatShortDate, formatUsername, resolveRequestNotificationMeta } from './helpers';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -65,10 +66,7 @@ const formatAmountFromKobo = (amountKobo?: number) => {
     return undefined;
   }
 
-  return `₦${(amountKobo / 100).toLocaleString('en-NG', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
+  return formatCurrency(amountKobo);
 };
 
 const NotificationCenterScreen = () => {
@@ -131,7 +129,7 @@ const NotificationCenterScreen = () => {
       const amount = readNumber(data.amount) ?? 0;
       const fee = readNumber(data.fee) ?? 0;
       const description = readString(data.description);
-      const senderUsername = stripUsernamePrefix(readString(data.sender_username) || '');
+      const senderUsername = formatUsername(readString(data.sender_username) || '');
       const transferType = readString(data.transfer_type) || 'p2p';
       const reason = readString(data.reason);
 
@@ -271,7 +269,7 @@ const NotificationCenterScreen = () => {
                 const isRequestLike = item.type.startsWith('request.');
                 const status = meta.status;
                 const isDeclined = status === 'declined';
-                const username = stripUsernamePrefix(
+                const username = formatUsername(
                   meta.actorUsername ||
                     readString(data.sender_username) ||
                     item.title ||

@@ -32,7 +32,6 @@ import {
   TransactionStatusResponse,
   TransactionHistoryItem,
   BilateralTransactionHistoryResponse,
-  Beneficiary,
   ReceivingPreference,
   UpdateReceivingPreferencePayload,
   AccountBalance,
@@ -65,6 +64,8 @@ import {
   UpdateTransferListPayload,
   ToggleTransferListMemberPayload,
   ToggleTransferListMemberResponse,
+  TransactionFeeResponse,
+  UserProfile,
 } from '@/types/api';
 import { normalizeUsername } from '@/utils/username';
 
@@ -301,14 +302,10 @@ export const useUpdateReceivingPreference = (
  */
 export const useAccountBalance = () => {
   const fetchAccountBalance = async (): Promise<AccountBalance> => {
-    try {
-      const { data } = await apiClient.get<AccountBalance>('/transactions/account/balance', {
-        baseURL: TRANSACTION_SERVICE_URL,
-      });
-      return data;
-    } catch (error) {
-      throw error;
-    }
+    const { data } = await apiClient.get<AccountBalance>('/transactions/account/balance', {
+      baseURL: TRANSACTION_SERVICE_URL,
+    });
+    return data;
   };
 
   return useQuery<AccountBalance, Error>({
@@ -330,14 +327,10 @@ export const useAccountBalance = () => {
  */
 export const useTransactionHistory = () => {
   const fetchTransactionHistory = async (): Promise<TransactionHistoryItem[]> => {
-    try {
-      const { data } = await apiClient.get<TransactionHistoryItem[]>('/transactions/transactions', {
-        baseURL: TRANSACTION_SERVICE_URL,
-      });
-      return data;
-    } catch (error) {
-      throw error;
-    }
+    const { data } = await apiClient.get<TransactionHistoryItem[]>('/transactions/transactions', {
+      baseURL: TRANSACTION_SERVICE_URL,
+    });
+    return data;
   };
 
   return useQuery<TransactionHistoryItem[], Error>({
@@ -374,13 +367,6 @@ export const useTransactionHistoryWithUser = (username?: string, limit = 20, off
     refetchOnWindowFocus: true,
   });
 };
-
-export interface TransactionFeeResponse {
-  p2p_fee_kobo: number;
-  self_fee_kobo: number;
-  money_drop_fee_kobo: number;
-  money_drop_fee_percent?: number;
-}
 
 export const TRANSACTION_FEES_QUERY_KEY = 'transaction-fees';
 
@@ -940,24 +926,9 @@ export const useToggleTransferListMember = (
  * Fetches from auth-service via API Gateway.
  * @returns A TanStack Query object containing the user's profile with UUID.
  */
-export interface UserProfile {
-  id: string; // UUID from backend database
-  clerk_user_id: string; // Clerk ID for reference
-  username?: string | null; // Username may be missing until post-onboarding setup
-  email?: string | null;
-  phone_number?: string | null;
-  full_name?: string | null;
-  user_type: 'personal' | 'merchant';
-  allow_sending: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
 export const useUserProfile = () => {
   const fetchUserProfile = async (): Promise<UserProfile> => {
-    // Use API Gateway URL (not TRANSACTION_SERVICE_URL) to route to auth-service
     const { data } = await apiClient.get<UserProfile>('/me/profile');
-    console.log('User profile fetched:', data);
     return data;
   };
 

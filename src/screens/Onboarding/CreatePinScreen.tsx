@@ -2,7 +2,7 @@ import React from 'react';
 import { StackActions, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import AuthCreatePin from '@/components/source-auth/auth-create-pin';
 
 type Navigation = NativeStackNavigationProp<AppStackParamList, 'CreatePin'>;

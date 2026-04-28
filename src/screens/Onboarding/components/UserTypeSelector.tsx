@@ -19,8 +19,7 @@ import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '@/constants/theme';
-
-type UserType = 'personal' | 'merchant';
+import type { UserType } from '@/types/api';
 
 interface UserTypeSelectorProps {
   selectedType: UserType;

@@ -72,10 +72,9 @@ export const useSecureAction = () => {
 
   const triggerSecureAction = useCallback(
     async (action: (pin: string) => void) => {
-      const storedPin = await getPin();
-
       // Development mode: skip biometric/PIN prompt and use stored pin when available.
       if (isDevModeEnabled()) {
+        const storedPin = await getPin();
         console.warn(
           '⚠️  DEVELOPMENT MODE: Skipping PIN/biometric prompt (EXPO_PUBLIC_SKIP_PIN_CHECK=true)'
         );
@@ -86,6 +85,7 @@ export const useSecureAction = () => {
       setActionToExecute(() => action);
 
       try {
+        const storedPin = await getPin();
         // Check if user has enabled biometrics in app settings
         if (biometricsEnabled) {
           const { available, biometryType } = await rnBiometrics.isSensorAvailable();

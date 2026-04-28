@@ -16,7 +16,8 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useUser } from '@clerk/clerk-expo';
 
 import { useSignIn } from '@/hooks/useSignIn';
-import { ProfileStackParamList } from '@/navigation/ProfileStack';
+import type { ProfileStackParamList } from '@/types/navigation';
+import type { EmailCodeFactor } from '@/types/auth';
 import { useSensitiveFlowStore } from '@/store/useSensitiveFlowStore';
 import theme from '@/constants/theme';
 
@@ -26,6 +27,34 @@ const BRAND_YELLOW = '#FFD400';
 const BG_BOTTOM = '#060708';
 const OTP_LENGTH = 6;
 const { fontSizes, fontWeights, spacing } = theme;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const extractErrorMessage = (error: unknown, fallback: string): string => {
+  const errors = isRecord(error) ? error.errors : undefined;
+  const firstError = Array.isArray(errors) ? errors[0] : undefined;
+  const clerkMessage = isRecord(firstError) ? firstError.message : undefined;
+  const errorMessage = isRecord(error) ? error.message : undefined;
+  const message = clerkMessage || errorMessage;
+  return typeof message === 'string' && message.trim() !== '' ? message : fallback;
+};
+
+const getFirstEmailFactor = (value: unknown): EmailCodeFactor | null => {
+  const supportedFactors = isRecord(value) ? value.supportedFirstFactors : undefined;
+  if (!Array.isArray(supportedFactors)) {
+    return null;
+  }
+
+  return (
+    supportedFactors.find(
+      (factor): factor is EmailCodeFactor =>
+        isRecord(factor) &&
+        factor.strategy === 'email_code' &&
+        typeof factor.emailAddressId === 'string'
+    ) ?? null
+  );
+};
 
 const PinOtpScreen = () => {
   const { signIn, setActive, isLoaded } = useSignIn();
@@ -40,9 +69,8 @@ const PinOtpScreen = () => {
   const [isSending, setIsSending] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
 
-  const primaryEmail = ((user as any)?.primaryEmailAddress?.emailAddress ||
-    (user as any)?.emailAddresses?.[0]?.emailAddress ||
-    '') as string;
+  const primaryEmail =
+    user?.primaryEmailAddress?.emailAddress || user?.emailAddresses?.[0]?.emailAddress || '';
 
   const sendCode = useCallback(async () => {
     if (!isLoaded || !signIn) {
@@ -55,18 +83,12 @@ const PinOtpScreen = () => {
 
     setIsSending(true);
     try {
-      const signInAttempt: any = await signIn.create({
+      const signInAttempt = await signIn.create({
         strategy: 'email_code',
         identifier: primaryEmail.trim(),
-      } as any);
+      } as Parameters<typeof signIn.create>[0]);
 
-      const supportedFactors = Array.isArray(signInAttempt?.supportedFirstFactors)
-        ? signInAttempt.supportedFirstFactors
-        : [];
-      const emailFactor = supportedFactors.find(
-        (factor: any) =>
-          factor?.strategy === 'email_code' && typeof factor?.emailAddressId === 'string'
-      );
+      const emailFactor = getFirstEmailFactor(signInAttempt);
 
       if (!emailFactor?.emailAddressId) {
         throw new Error('Unable to prepare email verification for this account.');
@@ -75,13 +97,13 @@ const PinOtpScreen = () => {
       await signIn.prepareFirstFactor({
         strategy: 'email_code',
         emailAddressId: emailFactor.emailAddressId,
-      } as any);
+      } as Parameters<typeof signIn.prepareFirstFactor>[0]);
 
       setEmailAddressId(emailFactor.emailAddressId);
-    } catch (error: any) {
+    } catch (error: unknown) {
       Alert.alert(
         'OTP request failed',
-        error?.errors?.[0]?.message || error?.message || 'Unable to send verification code.'
+        extractErrorMessage(error, 'Unable to send verification code.')
       );
     } finally {
       setIsSending(false);
@@ -119,10 +141,10 @@ const PinOtpScreen = () => {
 
     setIsVerifying(true);
     try {
-      const result: any = await signIn.attemptFirstFactor({
+      const result = await signIn.attemptFirstFactor({
         strategy: 'email_code',
         code,
-      } as any);
+      } as Parameters<typeof signIn.attemptFirstFactor>[0]);
 
       if (result?.status !== 'complete' || !result?.createdSessionId) {
         throw new Error('Verification incomplete. Please try again.');
@@ -131,11 +153,8 @@ const PinOtpScreen = () => {
       await setActive({ session: result.createdSessionId });
       clearPinChangeFlow();
       navigation.replace('PinCurrent');
-    } catch (error: any) {
-      Alert.alert(
-        'Verification failed',
-        error?.errors?.[0]?.message || error?.message || 'Invalid verification code.'
-      );
+    } catch (error: unknown) {
+      Alert.alert('Verification failed', extractErrorMessage(error, 'Invalid verification code.'));
     } finally {
       setIsVerifying(false);
     }
@@ -155,11 +174,11 @@ const PinOtpScreen = () => {
       await signIn.prepareFirstFactor({
         strategy: 'email_code',
         emailAddressId,
-      } as any);
-    } catch (error: any) {
+      } as Parameters<typeof signIn.prepareFirstFactor>[0]);
+    } catch (error: unknown) {
       Alert.alert(
         'Resend failed',
-        error?.errors?.[0]?.message || error?.message || 'Unable to resend verification code.'
+        extractErrorMessage(error, 'Unable to resend verification code.')
       );
     } finally {
       setIsSending(false);

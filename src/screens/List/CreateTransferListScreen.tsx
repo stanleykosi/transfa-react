@@ -175,7 +175,7 @@ const CreateTransferListScreen = () => {
     });
   };
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (selectedCount === 0) {
       Alert.alert('No users selected', 'Choose at least one user before saving this list.');
       return;
@@ -187,7 +187,7 @@ const CreateTransferListScreen = () => {
       return;
     }
 
-    await createMutation.mutateAsync({
+    createMutation.mutate({
       name: trimmedName,
       member_usernames: selectedUsersList
         .map((entry) => normalizeUsername(entry.username))
@@ -353,9 +353,7 @@ const CreateTransferListScreen = () => {
               styles.saveButton,
               (createMutation.isPending || selectedCount === 0) && styles.saveButtonDisabled,
             ]}
-            onPress={() => {
-              handleSave().catch(() => undefined);
-            }}
+            onPress={handleSave}
             activeOpacity={0.8}
             disabled={createMutation.isPending || selectedCount === 0}
           >

@@ -1,9 +1,9 @@
 import React from 'react';
 import { Image, ImageResolvedAssetSource } from 'react-native';
-import { SvgUri } from 'react-native-svg';
+import { SvgProps, SvgUri } from 'react-native-svg';
 
 type SvgAssetProps = {
-  source: any;
+  source: number | React.ComponentType<SvgProps>;
   width: number;
   height: number;
 };

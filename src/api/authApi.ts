@@ -148,7 +148,7 @@ export const useOnboardingMutation = (
   const { user } = useUser();
 
   const onboardingMutation = async (payload: OnboardingPayload): Promise<OnboardingResponse> => {
-    const token = await getToken().catch(() => undefined);
+    const token = await getToken();
 
     const { data } = await apiClient.post<OnboardingResponse>(
       '/onboarding',

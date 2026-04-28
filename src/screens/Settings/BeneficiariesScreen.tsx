@@ -15,7 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { useDeleteBeneficiary, useListBeneficiaries } from '@/api/accountApi';
-import { ProfileStackParamList } from '@/navigation/ProfileStack';
+import type { ProfileStackParamList } from '@/types/navigation';
 import type { Beneficiary } from '@/types/api';
 import theme from '@/constants/theme';
 

@@ -42,8 +42,6 @@ const emojiFromSeed = (seed: string) => {
   return LIST_EMOJIS[Math.abs(hash) % LIST_EMOJIS.length] || '📋';
 };
 
-const stripUsernamePrefix = (username: string) => normalizeUsername(username);
-
 const TransferListsScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
   const { data, isLoading, refetch, isRefetching } = useListTransferLists({ limit: 50, offset: 0 });
@@ -91,7 +89,7 @@ const TransferListsScreen = () => {
             lists.map((list) => {
               const subtitle = list.member_usernames
                 .slice(0, 3)
-                .map((username) => stripUsernamePrefix(username))
+                .map((username) => normalizeUsername(username))
                 .join(', ');
 
               return (

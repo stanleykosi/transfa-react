@@ -6,6 +6,19 @@ import { TransactionStatusResponse } from '@/types/api';
 import { supabase } from '@/api/supabaseClient';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
+type SupabaseTransactionRecord = {
+  id: string;
+  status?: string | null;
+  amount?: number | string | null;
+  fee?: number | string | null;
+  failure_reason?: string | null;
+  anchor_reason?: string | null;
+  transfer_type?: string | null;
+};
+
+const isSupabaseTransactionRecord = (value: unknown): value is SupabaseTransactionRecord =>
+  typeof value === 'object' && value !== null && 'id' in value && typeof value.id === 'string';
+
 const normalizeStatus = (status?: string | null): TransactionStatusResponse['status'] => {
   if (!status) {
     return 'pending';
@@ -25,7 +38,9 @@ const normalizeStatus = (status?: string | null): TransactionStatusResponse['sta
   return normalized as TransactionStatusResponse['status'];
 };
 
-const mapSupabaseRecordToStatus = (record: any): TransactionStatusResponse => ({
+const mapSupabaseRecordToStatus = (
+  record: SupabaseTransactionRecord
+): TransactionStatusResponse => ({
   id: record.id,
   status: normalizeStatus(record.status),
   amount: Number(record.amount ?? 0),
@@ -117,7 +132,7 @@ export const useTransactionStatusSubscription = (transactionId?: string) => {
             filter: `id=eq.${transactionId}`,
           },
           (payload) => {
-            if (!payload.new) {
+            if (!isSupabaseTransactionRecord(payload.new)) {
               return;
             }
 

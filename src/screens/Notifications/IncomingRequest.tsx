@@ -27,7 +27,7 @@ import { SvgXml } from 'react-native-svg';
 import { useListIncomingPaymentRequests } from '@/api/transactionApi';
 import type { AppNavigationProp } from '@/types/navigation';
 import { formatCurrency } from '@/utils/formatCurrency';
-import { formatShortDate, stripUsernamePrefix } from './helpers';
+import { formatShortDate, formatUsername } from './helpers';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -71,7 +71,7 @@ const IncomingRequestsScreen = () => {
 
   const filteredRequests = query
     ? requests.filter((request) => {
-        const username = stripUsernamePrefix(request.creator_username || '').toLowerCase();
+        const username = formatUsername(request.creator_username || '').toLowerCase();
         const fullName = (request.creator_full_name || '').toLowerCase();
         return username.includes(query.toLowerCase()) || fullName.includes(query.toLowerCase());
       })
@@ -147,7 +147,7 @@ const IncomingRequestsScreen = () => {
             </View>
           ) : (
             filteredRequests.map((request) => {
-              const username = stripUsernamePrefix(request.creator_username || 'Transfa User');
+              const username = formatUsername(request.creator_username || 'Transfa User');
               const AvatarComponent = pickAvatarComponent(username || request.id);
               const status = request.display_status;
               const isDeclined = status === 'declined';

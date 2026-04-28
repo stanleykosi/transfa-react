@@ -23,10 +23,15 @@ import {
   useTransactionHistory,
   useUserProfile,
 } from '@/api/transactionApi';
-import { AppNavigationProp } from '@/types/navigation';
+import type { AppNavigationProp } from '@/types/navigation';
 import type { TransactionHistoryItem, UserDiscoveryResult } from '@/types/api';
+import { formatNaira, koboToNaira } from '@/utils/formatCurrency';
 import { moderateScale, scale, verticalScale } from '@/utils/responsive';
-import BottomSheet, { BottomSheetBackdrop, BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import BottomSheet, {
+  BottomSheetBackdrop,
+  BottomSheetBackdropProps,
+  BottomSheetScrollView,
+} from '@gorhom/bottom-sheet';
 import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import React, { memo, useCallback, useMemo, useRef, useState } from 'react';
@@ -484,13 +489,6 @@ const pickAvatarKey = (seed: string) => {
   return avatarRotation[hash % avatarRotation.length];
 };
 
-const koboToNaira = (value?: number) => {
-  if (typeof value !== 'number' || Number.isNaN(value)) {
-    return 0;
-  }
-  return value / 100;
-};
-
 const MemoTransactionItem = memo(
   ({
     transaction,
@@ -608,7 +606,7 @@ export default function HomeScreen() {
   }, [userProfile?.full_name, userProfile?.username]);
 
   const balance = useMemo(
-    () => koboToNaira(accountBalance?.available_balance),
+    () => koboToNaira(accountBalance?.available_balance ?? 0),
     [accountBalance?.available_balance]
   );
 
@@ -669,19 +667,7 @@ export default function HomeScreen() {
       });
   }, [transactionHistoryData, userProfile?.id]);
 
-  const formatBalance = (amount: number) => {
-    return `₦${amount.toLocaleString('en-NG', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })}`;
-  };
-
-  const formatAmount = useCallback((amount: number) => {
-    return `₦${amount.toLocaleString('en-NG', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })}`;
-  }, []);
+  const formatAmount = useCallback((amount: number) => formatNaira(amount), []);
 
   const handleSheetChange = useCallback((index: number) => {
     setIsSheetExpanded(index === 1);
@@ -714,7 +700,7 @@ export default function HomeScreen() {
   );
 
   const renderBackdrop = useCallback(
-    (props: any) => (
+    (props: BottomSheetBackdropProps) => (
       <BottomSheetBackdrop
         {...props}
         appearsOnIndex={1}
@@ -844,7 +830,7 @@ export default function HomeScreen() {
             <Text style={styles.balanceLabel}>AVAILABLE BALANCE</Text>
             <View style={styles.balanceRow}>
               <Text style={styles.balanceAmount}>
-                {balanceVisible ? formatBalance(balance) : '••••••••'}
+                {balanceVisible ? formatAmount(balance) : '••••••••'}
               </Text>
               <Pressable
                 onPress={handleToggleBalance}

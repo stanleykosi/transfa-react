@@ -3,7 +3,7 @@ import { StackActions, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { fetchOnboardingStatus } from '@/api/authApi';
-import { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import AuthProcessing from '@/components/source-auth/auth-processing';
 
 type Navigation = NativeStackNavigationProp<AppStackParamList, 'CreateAccount'>;

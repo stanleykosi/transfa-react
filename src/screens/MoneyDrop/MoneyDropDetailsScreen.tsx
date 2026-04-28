@@ -12,7 +12,7 @@ import {
   useRevealMoneyDropPassword,
 } from '@/api/transactionApi';
 import PinInputModal from '@/components/PinInputModal';
-import type { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import type { AppNavigationProp } from '@/types/navigation';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
@@ -51,6 +51,9 @@ const backgroundSvg = `<svg width="375" height="812" viewBox="0 0 375 812" fill=
 </svg>`;
 
 type MoneyDropDetailsRouteProp = RouteProp<AppStackParamList, 'MoneyDropDetails'>;
+type QRCodeRef = {
+  toDataURL: (callback: (data: string) => void) => void;
+};
 type DetailRowProps = {
   label: string;
   value: string;
@@ -126,7 +129,7 @@ const MoneyDropDetailsScreen = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [copyDone, setCopyDone] = useState(false);
 
-  const qrRef = useRef<any>(null);
+  const qrRef = useRef<QRCodeRef | null>(null);
 
   const {
     isModalVisible,

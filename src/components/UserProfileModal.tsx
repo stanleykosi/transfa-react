@@ -7,12 +7,22 @@ import Avatar from '@/assets/images/avatar.svg';
 import Avatar1 from '@/assets/images/avatar1.svg';
 import Avatar2 from '@/assets/images/avatar2.svg';
 import Avatar3 from '@/assets/images/avatar3.svg';
+import { formatNaira } from '@/utils/formatCurrency';
 import { moderateScale, scale, verticalScale } from '@/utils/responsive';
-import BottomSheet, { BottomSheetFlatList } from '@gorhom/bottom-sheet';
+import BottomSheet, { BottomSheetBackdropProps, BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { ActivityIndicator, Dimensions, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Dimensions,
+  Pressable,
+  StyleProp,
+  StyleSheet,
+  Text,
+  View,
+  ViewStyle,
+} from 'react-native';
 import Animated, {
   Extrapolation,
   interpolate,
@@ -57,13 +67,6 @@ const avatarMap: Record<AvatarKey, React.ComponentType<{ width?: number; height?
   avatar3: Avatar3,
 };
 
-const formatAmount = (amount: number) => {
-  return `₦${amount.toLocaleString('en-NG', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-};
-
 const TransactionItem = React.memo(
   ({
     transaction,
@@ -98,7 +101,7 @@ const TransactionItem = React.memo(
           ]}
         >
           {transaction.type === 'sent' ? '-' : '+'}
-          {formatAmount(transaction.amount)}
+          {formatNaira(transaction.amount)}
         </Text>
       </View>
     );
@@ -111,7 +114,7 @@ const UserProfileBackdrop = ({
   onPress,
 }: {
   animatedIndex: { value: number };
-  style: any;
+  style?: StyleProp<ViewStyle>;
   onPress: () => void;
 }) => {
   const containerAnimatedStyle = useAnimatedStyle(() => ({
@@ -206,7 +209,7 @@ export default function UserProfileModal({
   }, [onShare]);
 
   const renderBackdrop = useCallback(
-    (props: any) => <UserProfileBackdrop {...props} onPress={handleClose} />,
+    (props: BottomSheetBackdropProps) => <UserProfileBackdrop {...props} onPress={handleClose} />,
     [handleClose]
   );
 

@@ -1,4 +1,4 @@
-import type { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 
 export const TRANSFER_BRAND_YELLOW = '#FFD300';
 export const TRANSFER_BG_BOTTOM = '#050607';

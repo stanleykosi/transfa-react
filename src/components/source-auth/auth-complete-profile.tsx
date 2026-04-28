@@ -329,17 +329,10 @@ export default function AuthCompleteProfile({
                   errors.phoneNumber ? styles.inputWrapperError : null,
                 ]}
               >
-                <Pressable
-                  style={styles.countryCodeContainer}
-                  onPress={() => {
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                    console.log('Country selector requested');
-                  }}
-                >
+                <View style={styles.countryCodeContainer}>
                   <SvgXml xml={nigerianFlagSvg} width={scale(24)} height={scale(18)} />
                   <Text style={styles.countryCodeText}>{countryCode}</Text>
-                  <Text style={styles.chevron}>▼</Text>
-                </Pressable>
+                </View>
 
                 <TextInput
                   ref={phoneRef}
@@ -476,13 +469,7 @@ const styles = StyleSheet.create({
     fontSize: moderateScale(16),
     color: '#FFFFFF',
     marginLeft: scale(8),
-    marginRight: scale(4),
     fontFamily: 'Montserrat_400Regular',
-  },
-  chevron: {
-    fontSize: moderateScale(10),
-    color: '#FFFFFF',
-    opacity: 0.6,
   },
   phoneInput: {
     flex: 1,

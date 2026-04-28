@@ -3,7 +3,7 @@ import CalendarIcon from '@/assets/icons/calendar.svg';
 import SearchIcon from '@/assets/icons/search.svg';
 import SettingsIcon from '@/assets/icons/settings.svg';
 import { useMoneyDropClaimers } from '@/api/transactionApi';
-import type { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import React, { useMemo, useState } from 'react';

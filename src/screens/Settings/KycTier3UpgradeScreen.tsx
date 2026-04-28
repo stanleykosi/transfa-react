@@ -17,7 +17,7 @@ import { launchImageLibrary } from 'react-native-image-picker';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { submitTier3Upgrade } from '@/api/authApi';
-import { ProfileStackParamList } from '@/navigation/ProfileStack';
+import type { ProfileStackParamList } from '@/types/navigation';
 import type { Tier3UpgradePayload } from '@/types/api';
 import theme from '@/constants/theme';
 
@@ -42,6 +42,31 @@ const formatIDType = (value: Tier3UpgradePayload['id_type']) =>
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
 
+const getMutationErrorMessage = (error: unknown): string => {
+  if (typeof error !== 'object' || error === null) {
+    return 'Unable to submit tier 3 request.';
+  }
+
+  if ('response' in error) {
+    const response = error.response;
+    if (typeof response === 'object' && response !== null && 'data' in response) {
+      const data = response.data;
+      if (typeof data === 'object' && data !== null && 'detail' in data) {
+        const detail = data.detail;
+        if (typeof detail === 'string' && detail.trim() !== '') {
+          return detail;
+        }
+      }
+    }
+  }
+
+  if ('message' in error && typeof error.message === 'string' && error.message.trim() !== '') {
+    return error.message;
+  }
+
+  return 'Unable to submit tier 3 request.';
+};
+
 const KycTier3UpgradeScreen = () => {
   const navigation = useNavigation<NavigationProp>();
   const queryClient = useQueryClient();
@@ -61,10 +86,8 @@ const KycTier3UpgradeScreen = () => {
       );
       navigation.goBack();
     },
-    onError: (error: any) => {
-      const detail =
-        error?.response?.data?.detail || error?.message || 'Unable to submit tier 3 request.';
-      Alert.alert('Submission failed', detail);
+    onError: (error: unknown) => {
+      Alert.alert('Submission failed', getMutationErrorMessage(error));
     },
   });
 

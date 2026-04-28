@@ -23,10 +23,17 @@ import { theme } from '@/constants/theme';
 import apiClient from '@/api/apiClient';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
 const extractBvnFailureMessage = (error: unknown): string | null => {
-  const responseData = (error as any)?.response?.data;
-  const message =
-    responseData?.message || responseData?.detail || (error as any)?.message || 'BVN failed.';
+  const response = isRecord(error) ? error.response : undefined;
+  const responseData = isRecord(response) ? response.data : undefined;
+  const responseMessage = isRecord(responseData)
+    ? responseData.message || responseData.detail
+    : undefined;
+  const errorMessage = isRecord(error) ? error.message : undefined;
+  const message = responseMessage || errorMessage || 'BVN failed.';
   const normalizedMessage = String(message).toLowerCase();
 
   if (
@@ -107,7 +114,7 @@ const CreateAccountScreen = () => {
     let mounted = true;
     (async () => {
       try {
-        const token = await getToken().catch(() => undefined);
+        const token = await getToken();
         const { data } = await apiClient.get<{ status: string }>('/onboarding/status', {
           headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
         });
@@ -115,11 +122,7 @@ const CreateAccountScreen = () => {
           return;
         }
 
-        console.log('🔍 Status check response:', data?.status);
-        console.log('🔍 Full response data:', data);
-
         if (data?.status === 'completed' || data?.status === 'tier2_completed') {
-          // Already fully enabled -> go to main app
           navigation.navigate('AppTabs' as never);
           return;
         } else if (data?.status === 'tier2_processing') {
@@ -165,8 +168,6 @@ const CreateAccountScreen = () => {
           );
           setStatus('error');
         } else {
-          // Still pending - show loading state and poll for updates
-          console.log('⚠️ Unknown status, defaulting to pending:', data?.status);
           setStatus('tier1_pending');
         }
       } catch {
@@ -181,8 +182,6 @@ const CreateAccountScreen = () => {
       mounted = false;
     };
   }, [getToken, headers, navigation]);
-
-  // No more polling - users come here when tier1 is already created
 
   const handleSignOut = () => {
     Alert.alert(
@@ -222,17 +221,13 @@ const CreateAccountScreen = () => {
     setSubmitError(null);
     setSubmitting(true);
     try {
-      const token = await getToken().catch(() => undefined);
-      console.log('🚀 Submitting Tier 2 details...');
+      const token = await getToken();
 
-      // Submit Tier 2 details to backend
       await apiClient.post(
         '/onboarding/tier2',
         { dob, gender: normalizedGender, bvn: cleanedBvn },
         { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers } }
       );
-
-      console.log('✅ Tier 2 submitted successfully, checking status...');
 
       // Poll briefly for completion, then navigate to let HomeScreen handle the polling
       const maxMs = 5000; // up to 5s
@@ -242,17 +237,13 @@ const CreateAccountScreen = () => {
         const { data } = await apiClient.get<{ status: string }>('/onboarding/status', {
           headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
         });
-        console.log('🔍 Status check response:', data?.status);
         if (data?.status === 'completed') {
-          console.log('🎉 Account completed, navigating to app...');
           navigation.navigate('AppTabs' as never);
           return;
         }
         await new Promise((res) => setTimeout(res, stepMs));
       }
 
-      console.log('⏰ Timeout reached, navigating to HomeScreen for polling...');
-      // Navigate to HomeScreen which will handle account polling
       navigation.navigate('AppTabs' as never);
     } catch (e) {
       console.error('Error submitting Tier 1:', e);

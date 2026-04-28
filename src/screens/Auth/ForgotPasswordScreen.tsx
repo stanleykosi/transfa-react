@@ -18,8 +18,9 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { useSignIn } from '@/hooks/useSignIn';
 import { fetchAuthSession } from '@/api/authApi';
-import { AuthStackParamList } from '@/navigation/AuthStack';
+import type { AuthStackParamList } from '@/types/navigation';
 import OtpCodeField from '@/components/auth/OtpCodeField';
+import type { EmailCodeFactor } from '@/types/auth';
 
 const OTP_LENGTH = 6;
 const MIN_PASSWORD_LENGTH = 8;
@@ -27,10 +28,8 @@ const MIN_PASSWORD_LENGTH = 8;
 type ForgotPasswordRoute = RouteProp<AuthStackParamList, 'ForgotPassword'>;
 type AuthNavigation = NativeStackNavigationProp<AuthStackParamList, 'ForgotPassword'>;
 
-type EmailCodeFactor = {
-  strategy?: string;
-  emailAddressId?: string;
-};
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
 
 const TransfaMark = () => {
   return (
@@ -42,20 +41,25 @@ const TransfaMark = () => {
 };
 
 const extractErrorMessage = (err: unknown, fallback: string): string => {
-  const message = (err as any)?.errors?.[0]?.message;
+  const errors = isRecord(err) ? err.errors : undefined;
+  const firstError = Array.isArray(errors) ? errors[0] : undefined;
+  const message = isRecord(firstError) ? firstError.message : undefined;
   if (typeof message === 'string' && message.trim().length > 0) {
     return message;
   }
   return fallback;
 };
 
-const getEmailSecondFactor = (value: any): EmailCodeFactor | null => {
-  const secondFactors = value?.supportedSecondFactors;
+const getEmailSecondFactor = (value: unknown): EmailCodeFactor | null => {
+  const secondFactors = isRecord(value) ? value.supportedSecondFactors : undefined;
   if (!Array.isArray(secondFactors)) {
     return null;
   }
   const emailFactor = secondFactors.find(
-    (factor: any) => factor?.strategy === 'email_code' && typeof factor?.emailAddressId === 'string'
+    (factor): factor is EmailCodeFactor =>
+      isRecord(factor) &&
+      factor.strategy === 'email_code' &&
+      typeof factor.emailAddressId === 'string'
   );
   return emailFactor || null;
 };
@@ -111,7 +115,7 @@ const ForgotPasswordScreen = () => {
       await signIn.create({
         strategy: 'reset_password_email_code',
         identifier: trimmedIdentifier,
-      } as any);
+      } as Parameters<typeof signIn.create>[0]);
 
       setStep('verify');
       if (!isResend) {
@@ -148,11 +152,11 @@ const ForgotPasswordScreen = () => {
 
     setIsResetting(true);
     try {
-      const result: any = await signIn.attemptFirstFactor({
+      const result = await signIn.attemptFirstFactor({
         strategy: 'reset_password_email_code',
         code,
         password: newPassword,
-      });
+      } as Parameters<typeof signIn.attemptFirstFactor>[0]);
 
       if (result.status === 'complete' && result.createdSessionId) {
         await setActive({ session: result.createdSessionId });

@@ -7,15 +7,20 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SignUp as ClerkSignUp } from '@/components/ClerkComponents';
 import AuthCreateAccount from '@/components/source-auth/auth-create-account';
 import AuthVerifyCode from '@/components/source-auth/auth-verify-code';
-import { AuthStackParamList } from '@/navigation/AuthStack';
+import type { AuthStackParamList } from '@/types/navigation';
 import { fetchAuthSession } from '@/api/authApi';
 
 const MIN_PASSWORD_LENGTH = 8;
 
 type AuthNavigation = NativeStackNavigationProp<AuthStackParamList, 'SignUp'>;
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
 const getErrorMessage = (err: unknown, fallback: string): string => {
-  const message = (err as any)?.errors?.[0]?.message;
+  const errors = isRecord(err) ? err.errors : undefined;
+  const firstError = Array.isArray(errors) ? errors[0] : undefined;
+  const message = isRecord(firstError) ? firstError.message : undefined;
   if (typeof message === 'string' && message.trim().length > 0) {
     return message;
   }

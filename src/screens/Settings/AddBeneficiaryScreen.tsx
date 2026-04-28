@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { ProfileStackParamList } from '@/navigation/ProfileStack';
+import type { ProfileStackParamList } from '@/types/navigation';
 import { useAddBeneficiary, useListBanks, useVerifyBeneficiaryAccount } from '@/api/accountApi';
 import BankDropdown from '@/components/BankDropdown';
 import type { Bank } from '@/types/api';
@@ -27,14 +27,24 @@ const BRAND_YELLOW = '#FFD400';
 const BG_BOTTOM = '#060708';
 const { fontSizes, fontWeights, spacing } = theme;
 
-const extractApiErrorMessage = (error: any, fallback: string): string => {
-  const responseData = error?.response?.data;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const getApiStatusCode = (error: unknown): number | undefined => {
+  const response = isRecord(error) ? error.response : undefined;
+  const status = isRecord(response) ? response.status : undefined;
+  return typeof status === 'number' ? status : undefined;
+};
+
+const extractApiErrorMessage = (error: unknown, fallback: string): string => {
+  const response = isRecord(error) ? error.response : undefined;
+  const responseData = isRecord(response) ? response.data : undefined;
 
   if (typeof responseData === 'string' && responseData.trim() !== '') {
     return responseData.trim();
   }
 
-  if (responseData && typeof responseData === 'object') {
+  if (isRecord(responseData)) {
     if (typeof responseData.detail === 'string' && responseData.detail.trim() !== '') {
       return responseData.detail.trim();
     }
@@ -46,8 +56,9 @@ const extractApiErrorMessage = (error: any, fallback: string): string => {
     }
   }
 
-  if (typeof error?.message === 'string' && error.message.trim() !== '') {
-    return error.message.trim();
+  const message = isRecord(error) ? error.message : undefined;
+  if (typeof message === 'string' && message.trim() !== '') {
+    return message.trim();
   }
 
   return fallback;
@@ -83,7 +94,7 @@ const AddBeneficiaryScreen = () => {
       setResolvedName(response.account_name);
       setVerifiedAccountKey(responseKey);
     },
-    onError: (error: any, variables) => {
+    onError: (error: unknown, variables) => {
       const responseKey = `${variables.bank_code}:${variables.account_number}`;
       if (latestVerificationRequestKeyRef.current !== responseKey) {
         return;
@@ -104,8 +115,8 @@ const AddBeneficiaryScreen = () => {
       Alert.alert('Linked', 'Account linked successfully.');
       navigation.navigate('Beneficiaries');
     },
-    onError: (error: any) => {
-      const statusCode = error?.response?.status;
+    onError: (error: unknown) => {
+      const statusCode = getApiStatusCode(error);
       const detail = extractApiErrorMessage(error, 'Failed to link account.');
 
       if (statusCode === 412) {

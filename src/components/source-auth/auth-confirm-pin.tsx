@@ -8,6 +8,8 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  NativeSyntheticEvent,
+  TextInputKeyPressEventData,
   View,
 } from 'react-native';
 import Animated, { FadeIn, FadeInUp } from 'react-native-reanimated';
@@ -77,7 +79,7 @@ export default function AuthConfirmPin({
   );
 
   const handleKeyPress = useCallback(
-    ({ nativeEvent }: any, index: number) => {
+    ({ nativeEvent }: NativeSyntheticEvent<TextInputKeyPressEventData>, index: number) => {
       if (nativeEvent.key === 'Backspace') {
         if (!pin[index] && index > 0) {
           const nextPin = [...pin];

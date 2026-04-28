@@ -16,7 +16,7 @@ interface NativeSheetProps {
   title: string;
   children: React.ReactNode;
   contentContainerStyle?: ViewStyle;
-  maxHeight?: any;
+  maxHeight?: ViewStyle['maxHeight'];
 }
 
 export default function NativeSheet({

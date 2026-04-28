@@ -15,7 +15,7 @@ import Avatar1 from '@/assets/images/avatar1.svg';
 import Avatar2 from '@/assets/images/avatar2.svg';
 import Avatar3 from '@/assets/images/avatar3.svg';
 import { useDeletePaymentRequest, useGetPaymentRequest } from '@/api/transactionApi';
-import { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { normalizeUsername } from '@/utils/username';
 import * as Clipboard from 'expo-clipboard';
@@ -59,10 +59,13 @@ type RouteProps = RouteProp<AppStackParamList, 'PaymentRequestSuccess'>;
 type NavigationProp = NativeStackNavigationProp<AppStackParamList>;
 type RequestStatus = 'pending' | 'paid' | 'declined';
 type AvatarComponent = React.ComponentType<{ width?: number; height?: number }>;
+type QRCodeRef = {
+  toDataURL: (callback: (data: string) => void) => void;
+};
 
 const avatarPool: AvatarComponent[] = [Avatar1, Avatar2, Avatar3];
 
-const stripUsernamePrefix = (value?: string | null) => normalizeUsername(value || 'unknown');
+const formatUsername = (value?: string | null) => normalizeUsername(value || 'unknown');
 
 const normalizeRequestStatus = (status?: string): RequestStatus => {
   const normalized = (status || '').toLowerCase();
@@ -115,7 +118,7 @@ const PaymentRequestSuccessScreen = () => {
   const route = useRoute<RouteProps>();
   const { requestId } = route.params;
 
-  const qrCodeRef = React.useRef<any>(null);
+  const qrCodeRef = React.useRef<QRCodeRef | null>(null);
   const [isDownloading, setIsDownloading] = React.useState(false);
 
   const {
@@ -203,8 +206,10 @@ const PaymentRequestSuccessScreen = () => {
       }
 
       Alert.alert('Downloaded', 'Request QR image has been saved to your gallery.');
-    } catch (caughtError: any) {
-      Alert.alert('Download failed', caughtError?.message || 'Could not download QR image.');
+    } catch (caughtError: unknown) {
+      const message =
+        caughtError instanceof Error ? caughtError.message : 'Could not download QR image.';
+      Alert.alert('Download failed', message);
     } finally {
       setIsDownloading(false);
     }
@@ -291,7 +296,9 @@ const PaymentRequestSuccessScreen = () => {
             <View style={styles.qrCard}>
               <View style={styles.qrCodeContainer}>
                 <QRCode
-                  ref={qrCodeRef}
+                  getRef={(ref) => {
+                    qrCodeRef.current = ref;
+                  }}
                   value={qrValue}
                   size={200}
                   color="#000000"
@@ -395,7 +402,7 @@ const PaymentRequestSuccessScreen = () => {
     );
   }
 
-  const recipientUsername = stripUsernamePrefix(request.recipient_username);
+  const recipientUsername = formatUsername(request.recipient_username);
   const recipientName = request.recipient_full_name || 'Transfa User';
   const AvatarComponent = pickAvatarComponent(recipientUsername || request.id);
 

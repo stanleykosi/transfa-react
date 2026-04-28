@@ -650,11 +650,10 @@ const ReceiveUnifiedScreen = ({
             return;
           }
         }
-      } catch (error: any) {
-        Alert.alert(
-          'Image processing failed',
-          error?.message || 'Could not process selected image for upload.'
-        );
+      } catch (error: unknown) {
+        const message =
+          error instanceof Error ? error.message : 'Could not process selected image for upload.';
+        Alert.alert('Image processing failed', message);
         return;
       }
     }
@@ -671,8 +670,9 @@ const ReceiveUnifiedScreen = ({
 
       resetForm();
       navigation.replace('PaymentRequestSuccess', { requestId: created.id });
-    } catch (error: any) {
-      Alert.alert('Request failed', error?.message || 'Could not create payment request.');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Could not create payment request.';
+      Alert.alert('Request failed', message);
     }
   };
 

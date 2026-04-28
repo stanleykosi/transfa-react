@@ -40,7 +40,9 @@ export const supabase: SupabaseClient = createClient(supabaseUrl, supabaseAnonKe
           ? url
           : typeof URL !== 'undefined' && url instanceof URL
             ? url.toString()
-            : url.url;
+            : url instanceof Request
+              ? url.url
+              : String(url);
 
       // Supabase Storage rejects some external JWT algorithms.
       // Keep the default Supabase auth header on storage requests.

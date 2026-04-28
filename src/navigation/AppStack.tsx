@@ -19,12 +19,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { NavigatorScreenParams } from '@react-navigation/native';
 import { View } from 'react-native';
 import { useUser } from '@clerk/clerk-expo';
-import type { UserDiscoveryResult } from '@/types/api';
+import type { AppStackParamList } from '@/types/navigation';
 
-import AppTabs, { AppTabsParamList } from './AppTabs';
+import AppTabs from './AppTabs';
 import OnboardingFormScreen from '@/screens/Onboarding/OnboardingFormScreen';
 import SelectAccountTypeScreen from '@/screens/Onboarding/SelectAccountTypeScreen';
 import OnboardingProcessingScreen from '@/screens/Onboarding/OnboardingProcessingScreen';
@@ -61,121 +60,20 @@ import TransferListDetailScreen from '@/screens/List/TransferListDetailScreen';
 import PayTransferListScreen from '@/screens/List/PayTransferListScreen';
 import { fetchAuthSession } from '@/api/authApi';
 
-// Define the parameter list for the AppStack routes for type safety.
-// It includes the AppTabs (as a nested navigator) and the OnboardingForm.
-export type AppStackParamList = {
-  AppTabs: NavigatorScreenParams<AppTabsParamList>; // Nested navigator
-  SelectAccountType: undefined;
-  OnboardingForm: {
-    userType?: 'personal' | 'merchant';
-    startStep?: 1 | 2 | 3;
-    forceTier1Update?: boolean;
-  };
-  CreateAccount: undefined;
-  CreateUsername: undefined;
-  CreatePin: undefined;
-  ConfirmPin: { pin: string };
-  OnboardingResult: {
-    outcome: 'success' | 'failure' | 'manual_review';
-    status: string;
-    reason?: string;
-  };
-  UserSearch: undefined;
-  Scan: undefined;
-  PayUser:
-    | {
-        initialRecipient?: UserDiscoveryResult;
-      }
-    | undefined;
-  SelfTransfer: undefined;
-  TransferStatus: {
-    transactionId: string;
-    amount: number;
-    fee: number;
-    description?: string;
-    recipientUsername?: string;
-    transferType?: string;
-    initialStatus?: 'pending' | 'processing' | 'completed' | 'failed';
-    failureReason?: string;
-  };
-  MultiTransferReceipts: {
-    receipts: Array<{
-      transactionId: string;
-      amount: number;
-      fee: number;
-      description: string;
-      recipientUsername: string;
-      initialStatus?: 'completed' | 'failed';
-    }>;
-    failures?: Array<{
-      recipient_username: string;
-      amount: number;
-      description: string;
-      error: string;
-    }>;
-  };
-  PaymentRequestsList: undefined; // New screen for viewing payment request history
-  PaymentRequestHistory: undefined;
-  CreatePaymentRequest:
-    | {
-        initialRecipient?: UserDiscoveryResult;
-        forceMode?: 'general' | 'individual';
-      }
-    | undefined;
-  UserProfileView: {
-    user: UserDiscoveryResult;
-  };
-  PaymentRequestSuccess: { requestId: string };
-  NotificationCenter: undefined;
-  IncomingRequests: undefined;
-  IncomingRequestDetail: { requestId: string; notificationId?: string };
-  RequestPaymentSummary: { requestId: string };
-  RequestPaymentAuth: { requestId: string };
-  PaymentVerification:
-    | {
-        intent: 'transfer';
-        transfers: Array<{
-          recipientUserId?: string;
-          recipientUsername: string;
-          recipientFullName?: string | null;
-          amount: number;
-          narration: string;
-          avatarIndex?: number;
-          verified?: boolean;
-        }>;
-        fromList?: boolean;
-        listName?: string;
-        listEmoji?: string;
-      }
-    | {
-        intent: 'withdraw';
-        beneficiaryId: string;
-        accountName: string;
-        accountNumberMasked: string;
-        bankName: string;
-        amount: number;
-      }
-    | {
-        intent: 'request_payment';
-        requestId: string;
-      };
-  TransferLists: undefined;
-  TransferListCreate: undefined;
-  TransferListDetail: { listId: string };
-  PayTransferList: { listId: string };
-  // Money Drop Screens
-  CreateDropWizard: undefined;
-  MoneyDropSuccess: {
-    dropDetails: import('@/types/api').MoneyDropResponse;
-    lockPassword?: string;
-  };
-  ClaimDrop: { dropId: string };
-  MoneyDropDetails: { dropId: string };
-  MoneyDropClaimers: { dropId: string; title?: string };
-  MoneyDropClaimedHistory: undefined;
-};
-
 const Stack = createNativeStackNavigator<AppStackParamList>();
+
+const getHttpStatus = (error: unknown): number | undefined => {
+  if (typeof error !== 'object' || error === null || !('response' in error)) {
+    return undefined;
+  }
+
+  const response = error.response;
+  if (typeof response !== 'object' || response === null || !('status' in response)) {
+    return undefined;
+  }
+
+  return typeof response.status === 'number' ? response.status : undefined;
+};
 
 const AppStack = () => {
   const { user } = useUser();
@@ -221,9 +119,9 @@ const AppStack = () => {
             setInitialRoute('OnboardingForm');
             break;
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         // 404 indicates no onboarding user record yet for this Clerk identity.
-        const status = error?.response?.status;
+        const status = getHttpStatus(error);
         if (status === 404) {
           setInitialRoute('SelectAccountType');
         } else {

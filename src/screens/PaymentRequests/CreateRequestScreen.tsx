@@ -1,7 +1,7 @@
 import { RouteProp, useRoute } from '@react-navigation/native';
 import React from 'react';
 
-import type { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 
 import ReceiveUnifiedScreen from './ReceiveUnifiedScreen';
 

@@ -6,7 +6,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { RouteProp, StackActions, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
-import { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import AuthSuccess from '@/components/source-auth/auth-success';
 
 type ResultRoute = RouteProp<AppStackParamList, 'OnboardingResult'>;

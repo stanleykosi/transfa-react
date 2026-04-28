@@ -6,13 +6,49 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { useSignIn } from '@/hooks/useSignIn';
 import { fetchAuthSession } from '@/api/authApi';
-import { AuthStackParamList } from '@/navigation/AuthStack';
+import type { AuthStackParamList } from '@/types/navigation';
 import AuthLogin from '@/components/source-auth/auth-login';
+import type { EmailCodeFactor } from '@/types/auth';
 
 const REMEMBER_ME_KEY = 'auth.remember_me';
 const REMEMBERED_IDENTIFIER_KEY = 'auth.remembered_identifier';
 
 type AuthNavigation = NativeStackNavigationProp<AuthStackParamList, 'SignIn'>;
+
+type BrowserStorage = {
+  getItem: (key: string) => string | null;
+  setItem: (key: string, value: string) => void;
+  removeItem: (key: string) => void;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const extractErrorMessage = (err: unknown, fallback: string): string => {
+  const errors = isRecord(err) ? err.errors : undefined;
+  const firstError = Array.isArray(errors) ? errors[0] : undefined;
+  const message = isRecord(firstError) ? firstError.message : undefined;
+  return typeof message === 'string' && message.trim().length > 0 ? message : fallback;
+};
+
+const getEmailFactor = (value: unknown): EmailCodeFactor | null => {
+  const secondFactors = isRecord(value) ? value.supportedSecondFactors : undefined;
+  if (!Array.isArray(secondFactors)) {
+    return null;
+  }
+
+  return (
+    secondFactors.find(
+      (factor): factor is EmailCodeFactor =>
+        isRecord(factor) &&
+        factor.strategy === 'email_code' &&
+        typeof factor.emailAddressId === 'string'
+    ) ?? null
+  );
+};
+
+const getBrowserStorage = (): BrowserStorage | undefined =>
+  (globalThis as typeof globalThis & { localStorage?: BrowserStorage }).localStorage;
 
 const SignInScreen = () => {
   const { signIn, setActive, isLoaded } = useSignIn();
@@ -94,12 +130,7 @@ const SignInScreen = () => {
       }
 
       if (completeSignIn.status === 'needs_second_factor') {
-        const emailFactor = Array.isArray((completeSignIn as any)?.supportedSecondFactors)
-          ? (completeSignIn as any).supportedSecondFactors.find(
-              (factor: any) =>
-                factor?.strategy === 'email_code' && typeof factor?.emailAddressId === 'string'
-            )
-          : null;
+        const emailFactor = getEmailFactor(completeSignIn);
 
         if (!emailFactor?.emailAddressId) {
           Alert.alert(
@@ -123,10 +154,10 @@ const SignInScreen = () => {
       }
 
       Alert.alert('Sign in incomplete', 'Additional verification is required to continue.');
-    } catch (err: any) {
+    } catch (err: unknown) {
       Alert.alert(
         'Login failed',
-        err?.errors?.[0]?.message || 'Unable to sign in with these credentials.'
+        extractErrorMessage(err, 'Unable to sign in with these credentials.')
       );
     } finally {
       setRememberMe(selectedRememberMe);
@@ -153,7 +184,7 @@ const SignInScreen = () => {
 
 const storeValue = async (key: string, value: string) => {
   if (Platform.OS === 'web') {
-    const localStorageRef = (globalThis as any)?.localStorage;
+    const localStorageRef = getBrowserStorage();
     if (localStorageRef) {
       localStorageRef.setItem(key, value);
     }
@@ -164,7 +195,7 @@ const storeValue = async (key: string, value: string) => {
 
 const loadStoredValue = async (key: string): Promise<string | null> => {
   if (Platform.OS === 'web') {
-    const localStorageRef = (globalThis as any)?.localStorage;
+    const localStorageRef = getBrowserStorage();
     if (!localStorageRef) {
       return null;
     }
@@ -175,7 +206,7 @@ const loadStoredValue = async (key: string): Promise<string | null> => {
 
 const deleteValue = async (key: string) => {
   if (Platform.OS === 'web') {
-    const localStorageRef = (globalThis as any)?.localStorage;
+    const localStorageRef = getBrowserStorage();
     if (localStorageRef) {
       localStorageRef.removeItem(key);
     }

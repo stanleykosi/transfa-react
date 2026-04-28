@@ -5,7 +5,7 @@ import { RouteProp, StackActions, useNavigation, useRoute } from '@react-navigat
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useUser } from '@clerk/clerk-expo';
 
-import { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import {
   clearOnboardingProgress,
   fetchOnboardingStatus,
@@ -14,7 +14,7 @@ import {
   submitTier1ProfileUpdate,
   submitTier2Verification,
 } from '@/api/authApi';
-import { OnboardingPayload, OnboardingStatusResponse } from '@/types/api';
+import type { OnboardingPayload, OnboardingStatusResponse, UserType } from '@/types/api';
 import {
   isValidAnchorNigerianPhoneNumber,
   normalizeNigerianPhoneInput,
@@ -24,7 +24,6 @@ import AuthCompleteAddress from '@/components/source-auth/auth-complete-address'
 import AuthCompleteBvnDob from '@/components/source-auth/auth-complete-bvn-dob';
 import AuthCompleteProfile from '@/components/source-auth/auth-complete-profile';
 
-type UserType = 'personal' | 'merchant';
 type OnboardingRoute = RouteProp<AppStackParamList, 'OnboardingForm'>;
 type OnboardingNavigation = NativeStackNavigationProp<AppStackParamList, 'OnboardingForm'>;
 
@@ -85,8 +84,19 @@ const formatDobForUi = (value: string): string => {
   return `${hyphenMatch[3]}/${hyphenMatch[2]}/${hyphenMatch[1]}`;
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const responseDataFromError = (error: unknown): unknown => {
+  const response = isRecord(error) ? error.response : undefined;
+  return isRecord(response) ? response.data : undefined;
+};
+
 const errorMessage = (error: unknown, fallback: string): string => {
-  const message = (error as any)?.response?.data?.message || (error as any)?.message;
+  const responseData = responseDataFromError(error);
+  const responseMessage = isRecord(responseData) ? responseData.message : undefined;
+  const errorText = isRecord(error) ? error.message : undefined;
+  const message = responseMessage || errorText;
   if (typeof message === 'string' && message.trim().length > 0) {
     return message;
   }
@@ -94,7 +104,8 @@ const errorMessage = (error: unknown, fallback: string): string => {
 };
 
 const httpStatusCode = (error: unknown): number | undefined => {
-  const status = (error as any)?.response?.status;
+  const response = isRecord(error) ? error.response : undefined;
+  const status = isRecord(response) ? response.status : undefined;
   return typeof status === 'number' ? status : undefined;
 };
 
@@ -153,7 +164,7 @@ const extractBvnSubmissionError = (error: unknown): string | null => {
   const normalizedMessage = message.toLowerCase();
   let serializedResponse = '';
   try {
-    serializedResponse = JSON.stringify((error as any)?.response?.data || {}).toLowerCase();
+    serializedResponse = JSON.stringify(responseDataFromError(error) || {}).toLowerCase();
   } catch {
     serializedResponse = '';
   }
@@ -391,8 +402,8 @@ const OnboardingFormScreen = () => {
         } else if (statusResponse.resume_step) {
           setCurrentStep(statusResponse.resume_step);
         }
-      } catch (err: any) {
-        if (err?.response?.status !== 404) {
+      } catch (err: unknown) {
+        if (httpStatusCode(err) !== 404) {
           console.warn('Failed to load onboarding status, proceeding with fresh onboarding.', err);
         }
         if (forceTier1Update && startStepParam) {
@@ -465,7 +476,7 @@ const OnboardingFormScreen = () => {
     return normalizedDob;
   };
 
-  const waitForTier1Created = async (stayOnForm = false): Promise<boolean> => {
+  const waitForTier1Created = async (): Promise<boolean> => {
     const maxAttempts = 30;
     const delayMs = 1500;
 
@@ -482,7 +493,6 @@ const OnboardingFormScreen = () => {
       }
 
       if (statusResponse.status.startsWith('tier2_')) {
-        console.log('✅ Tier 2 status detected, assuming Tier 1 is ready:', statusResponse.status);
         return true;
       }
 
@@ -541,7 +551,10 @@ const OnboardingFormScreen = () => {
           return true;
         }
 
-        if (isPhoneAlreadyUsedConflict(conflictReason) || isEmailAlreadyUsedConflict(conflictReason)) {
+        if (
+          isPhoneAlreadyUsedConflict(conflictReason) ||
+          isEmailAlreadyUsedConflict(conflictReason)
+        ) {
           Alert.alert('Duplicate Information', conflictReason);
           setCurrentStep(1); // Profile step has phone and email
           return true;
@@ -645,12 +658,10 @@ const OnboardingFormScreen = () => {
     }
 
     setIsSubmitting(true);
-    console.log('🚀 Starting onboarding submission flow. forceTier1Update:', forceTier1Update);
     try {
       // Re-sync status just before submit to avoid duplicate tier requests.
       try {
         const latestStatus = await fetchOnboardingStatus();
-        console.log('🔍 Current onboarding status pre-submit:', latestStatus.status);
         if (latestStatus.status === 'completed') {
           navigation.dispatch(StackActions.replace('AppTabs'));
           return;
@@ -707,21 +718,18 @@ const OnboardingFormScreen = () => {
             country: tier1ProfilePayload.kycData.country || 'NG',
           },
         });
-        tier1Ready = await waitForTier1Created(true);
+        tier1Ready = await waitForTier1Created();
       }
 
       if (!tier1Ready) {
-        console.log('⚠️ Tier 1 not ready. Aborting submission.');
         return;
       }
 
-      console.log('🚀 Submitting Tier 2 (BVN) verification details...');
       await submitTier2Verification({
         dob: normalizedDob,
         bvn: cleanDigits(finalBvn),
         gender: finalGender.toLowerCase() as 'male' | 'female',
       });
-      console.log('✅ Tier 2 submission accepted.');
 
       await clearOnboardingProgress().catch(() => undefined);
       navigation.dispatch(StackActions.replace('CreateAccount'));

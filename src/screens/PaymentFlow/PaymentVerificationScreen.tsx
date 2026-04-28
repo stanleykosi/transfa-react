@@ -17,7 +17,7 @@ import {
   useTransactionFees,
   useUserProfile,
 } from '@/api/transactionApi';
-import type { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import { useSecurityStore } from '@/store/useSecurityStore';
 import type { AppNavigationProp } from '@/types/navigation';
 import type { BulkP2PTransferFailure, BulkP2PTransferResponse } from '@/types/api';
@@ -918,7 +918,7 @@ const PaymentVerificationScreen = () => {
                   style={styles.pinInputText}
                   value={digit}
                   onChangeText={(value) => {
-                    handlePinChange(value, index).catch(() => undefined);
+                    handlePinChange(value, index);
                   }}
                   onKeyPress={({ nativeEvent }) => handlePinKeyPress(nativeEvent.key, index)}
                   keyboardType="number-pad"
@@ -940,7 +940,7 @@ const PaymentVerificationScreen = () => {
               if (isSubmitting) {
                 return;
               }
-              handleBiometricVerify().catch(() => undefined);
+              handleBiometricVerify();
             }}
           >
             <Text style={styles.switchModeText}>

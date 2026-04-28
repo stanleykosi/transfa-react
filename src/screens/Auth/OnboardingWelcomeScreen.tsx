@@ -3,7 +3,7 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import OnboardingScreen from '@/components/onboarding-screen';
-import { AuthStackParamList } from '@/navigation/AuthStack';
+import type { AuthStackParamList } from '@/types/navigation';
 
 type AuthNavigation = NativeStackNavigationProp<AuthStackParamList, 'OnboardingWelcome'>;
 

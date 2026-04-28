@@ -89,16 +89,11 @@ export const useSecurityStore = create<SecurityState>((set, get) => ({
   },
 
   getPin: async () => {
-    try {
-      const activeUserId = get().activeUserId;
-      if (!activeUserId) {
-        return null;
-      }
-      return await getStoredPin(activeUserId);
-    } catch (error) {
-      console.error('Failed to retrieve PIN:', error);
+    const activeUserId = get().activeUserId;
+    if (!activeUserId) {
       return null;
     }
+    return getStoredPin(activeUserId);
   },
 
   setPin: async (pin: string) => {
@@ -109,13 +104,8 @@ export const useSecurityStore = create<SecurityState>((set, get) => ({
     }
 
     if (Platform.OS === 'web') {
-      try {
-        const status = await fetchSecurityStatus();
-        set({ isPinSet: status.transaction_pin_set });
-      } catch (error) {
-        console.error('Failed to refresh server PIN status:', error);
-        set({ isPinSet: false });
-      }
+      const status = await fetchSecurityStatus();
+      set({ isPinSet: status.transaction_pin_set });
       return;
     }
     const persisted = await setStoredPin(activeUserId, pin);
@@ -131,20 +121,15 @@ export const useSecurityStore = create<SecurityState>((set, get) => ({
   },
 
   verifyPin: async (pin: string) => {
-    try {
-      if (Platform.OS === 'web') {
-        return false;
-      }
-      const activeUserId = get().activeUserId;
-      if (!activeUserId) {
-        return false;
-      }
-      const storedPin = await getStoredPin(activeUserId);
-      return storedPin === pin;
-    } catch (error) {
-      console.error('Failed to verify PIN:', error);
+    if (Platform.OS === 'web') {
       return false;
     }
+    const activeUserId = get().activeUserId;
+    if (!activeUserId) {
+      return false;
+    }
+    const storedPin = await getStoredPin(activeUserId);
+    return storedPin === pin;
   },
 
   setBiometricsEnabled: (enabled: boolean) => {
@@ -152,4 +137,9 @@ export const useSecurityStore = create<SecurityState>((set, get) => ({
   },
 }));
 
-useSecurityStore.getState().checkPinStatus();
+useSecurityStore
+  .getState()
+  .checkPinStatus()
+  .catch((error) => {
+    console.error('Failed to check initial PIN status:', error);
+  });

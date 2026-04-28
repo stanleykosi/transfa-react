@@ -5,32 +5,36 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { useSignIn } from '@/hooks/useSignIn';
 import { fetchAuthSession } from '@/api/authApi';
-import { AuthStackParamList } from '@/navigation/AuthStack';
+import type { AuthStackParamList } from '@/types/navigation';
 import AuthVerifyCode from '@/components/source-auth/auth-verify-code';
+import type { EmailCodeFactor } from '@/types/auth';
 
 type VerifyCodeRoute = RouteProp<AuthStackParamList, 'VerifyCode'>;
 type AuthNavigation = NativeStackNavigationProp<AuthStackParamList, 'VerifyCode'>;
 
-type EmailCodeFactor = {
-  strategy?: string;
-  emailAddressId?: string;
-};
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
 
 const extractErrorMessage = (err: unknown, fallback: string): string => {
-  const message = (err as any)?.errors?.[0]?.message;
+  const errors = isRecord(err) ? err.errors : undefined;
+  const firstError = Array.isArray(errors) ? errors[0] : undefined;
+  const message = isRecord(firstError) ? firstError.message : undefined;
   if (typeof message === 'string' && message.trim().length > 0) {
     return message;
   }
   return fallback;
 };
 
-const getEmailFactor = (value: any): EmailCodeFactor | null => {
-  const secondFactors = value?.supportedSecondFactors;
+const getEmailFactor = (value: unknown): EmailCodeFactor | null => {
+  const secondFactors = isRecord(value) ? value.supportedSecondFactors : undefined;
   if (!Array.isArray(secondFactors)) {
     return null;
   }
   const emailFactor = secondFactors.find(
-    (factor: any) => factor?.strategy === 'email_code' && typeof factor?.emailAddressId === 'string'
+    (factor): factor is EmailCodeFactor =>
+      isRecord(factor) &&
+      factor.strategy === 'email_code' &&
+      typeof factor.emailAddressId === 'string'
   );
   return emailFactor || null;
 };

@@ -5,12 +5,30 @@
  * data-fetching layer.
  */
 
+export type UserType = 'personal' | 'merchant';
+
+export type OnboardingNextStep =
+  | 'app_tabs'
+  | 'onboarding_form'
+  | 'create_account'
+  | 'create_username'
+  | 'create_pin';
+
+export interface OnboardingState {
+  status: string;
+  reason?: string;
+  next_step: OnboardingNextStep;
+  resume_step?: 1 | 2 | 3;
+  user_type?: UserType;
+  draft?: Record<string, unknown>;
+}
+
 // Defines the shape of the data sent to the POST /onboarding endpoint.
 export interface OnboardingPayload {
-  userType: 'personal' | 'merchant';
+  userType: UserType;
   phoneNumber: string | undefined;
   kycData: {
-    userType: 'personal' | 'merchant';
+    userType: UserType;
     // Tier 1 profile (personal) - structured name/address fields
     firstName?: string;
     lastName?: string;
@@ -39,14 +57,7 @@ export interface OnboardingResponse {
   anchor_customer_id?: string;
 }
 
-export interface AuthSessionOnboarding {
-  status: string;
-  reason?: string;
-  next_step: 'app_tabs' | 'onboarding_form' | 'create_account' | 'create_username' | 'create_pin';
-  resume_step?: 1 | 2 | 3;
-  user_type?: 'personal' | 'merchant';
-  draft?: Record<string, unknown>;
-}
+export type AuthSessionOnboarding = OnboardingState;
 
 export interface AuthSessionResponse {
   authenticated: boolean;
@@ -58,7 +69,7 @@ export interface AuthSessionResponse {
     email?: string;
     phone_number?: string;
     full_name?: string;
-    user_type: 'personal' | 'merchant';
+    user_type: UserType;
     allow_sending: boolean;
     created_at: string;
     updated_at: string;
@@ -67,7 +78,7 @@ export interface AuthSessionResponse {
 }
 
 export interface AccountTypeOption {
-  type: 'personal' | 'merchant';
+  type: UserType;
   title: string;
   description: string;
 }
@@ -91,14 +102,7 @@ export interface PrimaryAccountDetails {
   bankName?: string;
 }
 
-export interface OnboardingStatusResponse {
-  status: string;
-  reason?: string;
-  next_step: 'app_tabs' | 'onboarding_form' | 'create_account' | 'create_username' | 'create_pin';
-  resume_step?: 1 | 2 | 3;
-  user_type?: 'personal' | 'merchant';
-  draft?: Record<string, unknown>;
-}
+export type OnboardingStatusResponse = OnboardingState;
 
 export interface SetUsernamePayload {
   username: string;
@@ -188,7 +192,7 @@ export interface Tier1ProfileUpdateResponse {
 }
 
 export interface OnboardingProgressPayload {
-  userType: 'personal' | 'merchant';
+  userType: UserType;
   currentStep: 1 | 2 | 3;
   payload?: Record<string, unknown>;
 }
@@ -374,7 +378,7 @@ export interface PlatformFeeStatus {
 export interface PlatformFeeInvoice {
   id: string;
   user_id: string;
-  user_type: 'personal' | 'merchant';
+  user_type: UserType;
   period_start: string;
   period_end: string;
   due_at: string;
@@ -685,4 +689,24 @@ export interface ClaimedMoneyDropHistoryItem {
 
 export interface ClaimedMoneyDropHistoryResponse {
   items: ClaimedMoneyDropHistoryItem[];
+}
+
+export interface TransactionFeeResponse {
+  p2p_fee_kobo: number;
+  self_fee_kobo: number;
+  money_drop_fee_kobo: number;
+  money_drop_fee_percent?: number;
+}
+
+export interface UserProfile {
+  id: string;
+  clerk_user_id: string;
+  username?: string | null;
+  email?: string | null;
+  phone_number?: string | null;
+  full_name?: string | null;
+  user_type: UserType;
+  allow_sending: boolean;
+  created_at: string;
+  updated_at: string;
 }

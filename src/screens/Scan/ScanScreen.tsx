@@ -26,6 +26,7 @@ import type { AppNavigationProp } from '@/types/navigation';
 import { formatCurrency } from '@/utils/formatCurrency';
 import { parseScannedPayload, type ParsedScanPayload } from '@/utils/scanPayload';
 import { normalizeUsername, usernameKey } from '@/utils/username';
+import type { CameraProps, CodeScanner } from 'react-native-vision-camera';
 
 const BRAND_YELLOW = '#FFD300';
 const CARD_BG = '#E8E8E8';
@@ -44,7 +45,7 @@ try {
   // Expo Go does not provide the native Vision Camera module.
 }
 
-const CameraView = (visionCameraModule?.Camera ?? null) as React.ComponentType<any> | null;
+const CameraView = (visionCameraModule?.Camera ?? null) as React.ComponentType<CameraProps> | null;
 const useCameraDeviceCompat =
   visionCameraModule?.useCameraDevice ?? ((_position: 'back' | 'front') => null);
 const useCameraPermissionCompat =
@@ -53,7 +54,9 @@ const useCameraPermissionCompat =
     hasPermission: false,
     requestPermission: async () => false,
   }));
-const useCodeScannerCompat = visionCameraModule?.useCodeScanner ?? ((_config: any) => null);
+const useCodeScannerCompat =
+  visionCameraModule?.useCodeScanner ??
+  ((_config: CodeScanner): CodeScanner | undefined => undefined);
 
 const formatCardDate = (isoDate?: string) => {
   if (!isoDate) {
@@ -194,7 +197,7 @@ const ScanScreen = () => {
       }
 
       if (payload.type === 'user_profile') {
-        resolveUserProfile(payload.username).catch(() => undefined);
+        resolveUserProfile(payload.username);
       }
     },
     [navigation, resolveUserProfile, setEphemeralNotice]

@@ -24,10 +24,10 @@ import {
   useGetIncomingPaymentRequest,
   useMarkNotificationRead,
 } from '@/api/transactionApi';
-import type { AppStackParamList } from '@/navigation/AppStack';
+import type { AppStackParamList } from '@/types/navigation';
 import type { AppNavigationProp } from '@/types/navigation';
 import { formatCurrency } from '@/utils/formatCurrency';
-import { BRAND_YELLOW, formatShortDate, stripUsernamePrefix } from './helpers';
+import { BRAND_YELLOW, formatShortDate, formatUsername } from './helpers';
 
 type DetailRoute = RouteProp<AppStackParamList, 'IncomingRequestDetail'>;
 
@@ -96,7 +96,7 @@ const IncomingRequestDetailScreen = () => {
     );
   }
 
-  const username = stripUsernamePrefix(request.creator_username || 'Transfa User');
+  const username = formatUsername(request.creator_username || 'Transfa User');
   const fullName = request.creator_full_name?.trim() || 'Transfa User';
   const date = formatShortDate(request.created_at);
   const title = request.title || 'Payment Request';

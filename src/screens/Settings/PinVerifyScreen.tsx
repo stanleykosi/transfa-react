@@ -4,11 +4,36 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMutation } from '@tanstack/react-query';
 
 import { completePinChange } from '@/api/authApi';
-import { ProfileStackParamList } from '@/navigation/ProfileStack';
+import type { ProfileStackParamList } from '@/types/navigation';
 import { useSensitiveFlowStore } from '@/store/useSensitiveFlowStore';
 import PinStepTemplate from './components/PinStepTemplate';
 
 type NavigationProp = NativeStackNavigationProp<ProfileStackParamList, 'PinVerify'>;
+
+const getMutationErrorMessage = (error: unknown): string => {
+  if (typeof error !== 'object' || error === null) {
+    return 'Unable to complete PIN change.';
+  }
+
+  if ('response' in error) {
+    const response = error.response;
+    if (typeof response === 'object' && response !== null && 'data' in response) {
+      const data = response.data;
+      if (typeof data === 'object' && data !== null && 'detail' in data) {
+        const detail = data.detail;
+        if (typeof detail === 'string' && detail.trim() !== '') {
+          return detail;
+        }
+      }
+    }
+  }
+
+  if ('message' in error && typeof error.message === 'string' && error.message.trim() !== '') {
+    return error.message;
+  }
+
+  return 'Unable to complete PIN change.';
+};
 
 const PinVerifyScreen = () => {
   const navigation = useNavigation<NavigationProp>();
@@ -30,10 +55,8 @@ const PinVerifyScreen = () => {
       clearPinChangeFlow();
       navigation.replace('PinChangeSuccess');
     },
-    onError: (error: any) => {
-      const detail =
-        error?.response?.data?.detail || error?.message || 'Unable to complete PIN change.';
-      setErrorMessage(detail);
+    onError: (error: unknown) => {
+      setErrorMessage(getMutationErrorMessage(error));
     },
   });
 
